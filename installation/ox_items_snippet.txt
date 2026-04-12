@@ -1,0 +1,60 @@
+-- Cole em ox_inventory/data/items.lua (ajuste peso/stack ao gosto).
+
+['chopshop_lift'] = {
+    label = 'Elevador de desmanche',
+    weight = 8000,
+    stack = false,
+    close = true,
+    consume = 0,
+    client = { export = 'vp_chopshop.useLiftItem' },
+},
+
+['chopshop_bench'] = {
+    label = 'Bancada de processamento',
+    weight = 6000,
+    stack = false,
+    close = true,
+    consume = 0,
+    client = { export = 'vp_chopshop.useBenchItem' },
+},
+
+['chopshop_jackstand'] = {
+    label = 'Macaco hidráulico',
+    weight = 3500,
+    stack = false,
+    close = true,
+    consume = 0,
+    client = { export = 'vp_chopshop.useJackstandItem' },
+},
+
+-- Opcional: abastecer elevador (nome em Config.Items.fuel)
+['petrol_barrel'] = {
+    label = 'Barril de combustível',
+    weight = 12000,
+    stack = true,
+    close = true,
+},
+
+-- Materiais de exemplo (crie os que faltarem conforme shared/config.lua)
+['aluminium'] = { label = 'Alumínio', weight = 60, stack = true, close = true },
+['metalscrap'] = { label = 'Sucata', weight = 40, stack = true, close = true },
+['steel'] = { label = 'Aço', weight = 80, stack = true, close = true },
+['rubber'] = { label = 'Borracha', weight = 30, stack = true, close = true },
+['copper'] = { label = 'Cobre', weight = 70, stack = true, close = true },
+['plastic'] = { label = 'Plástico', weight = 25, stack = true, close = true },
+['glass'] = { label = 'Vidro', weight = 20, stack = true, close = true },
+
+-- Sistema de heat / fence / progressão (v1.3.0+)
+['fence_referral'] = {
+    label = 'Indicação do Receptador',
+    weight = 10,
+    stack = false,
+    close = true,
+},
+
+['vin_kit'] = {
+    label = 'Kit de Adulteração de VIN',
+    weight = 300,
+    stack = true,
+    close = true,
+},

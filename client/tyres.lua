@@ -1,0 +1,4 @@
+-- [TOMBSTONE] client/tyres.lua
+-- Este arquivo foi esvaziado intencionalmente.
+-- A lógica client-side de pneus (carry flow, pickup truck, NPC vendedor, missões) foi migrada para client/fence.lua (tyre props, carry, truck loading).
+-- Mantido no fxmanifest para não quebrar cargas em ordem — será removido na próxima limpeza de manifesto.

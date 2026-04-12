@@ -1,0 +1,4 @@
+-- [TOMBSTONE] server/npc.lua
+-- Este arquivo foi esvaziado intencionalmente.
+-- A lógica do NPC foreman (spawn, cleanup, netId) foi migrada para server/fence.lua (fence NPC + trust economy).
+-- Mantido no fxmanifest para não quebrar cargas em ordem — será removido na próxima limpeza de manifesto.

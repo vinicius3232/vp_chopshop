@@ -1,0 +1,567 @@
+Config = {}
+
+--- UI language: en | pt | es | fr | tr (see shared/locale.lua)
+Config.Locale = 'pt'
+
+Config.Debug = false
+
+--- Distâncias
+Config.InteractDistance = 2.4
+Config.MaxPlaceDistance = 5.0
+Config.VehicleNearLiftRadius = 4.2
+--- Distância mínima entre elevadores (0 = desligado)
+Config.MinLiftSpacing = 8.0
+--- Distância mínima entre bancadas (0 = desligado)
+Config.MinBenchSpacing = 4.0
+
+--- Modelos (vanilla GTA V — troque pelo modelo do teu pack de elevador se tiveres)
+Config.LiftBaseModel = `nacelle`
+Config.BenchModel = `prop_tool_bench02`
+
+--- Itens ox_inventory (adicione em data/items.lua — ver installation/)
+Config.Items = {
+    placeLift = 'chopshop_lift',
+    placeBench = 'chopshop_bench',
+    placeWelder = 'chopshop_welder',
+    fuel = 'petrol_barrel',
+}
+
+--- Combustível do elevador (por peça desmontada)
+Config.UseFuel = true
+Config.FuelMax = 100
+Config.FuelPerPartMin = 1
+Config.FuelPerPartMax = 2
+Config.FuelRefillPerItem = 35
+
+--- Desmanche: exige chaves do veículo (qbx_vehiclekeys / qb-vehiclekeys)
+Config.RequireVehicleKeys = true
+
+--- Segundos de espera após uma peça desmontada com sucesso (0 = desligado). Inspirado em cooldown de job chop.
+Config.ChopCooldownSeconds = 0
+
+--- Minijogo opcional antes da barra de progresso (ox_lib skillCheck). `false` = desligado.
+--- `true` = dificuldades padrão. Tabela: { difficulties = { 'easy', 'medium' }, keys = { 'e', 'e' } } (keys por passo).
+Config.ChopSkillCheck = false
+
+--- Discord webhook opcional (deixe Webhook vazio para desligar)
+Config.Discord = {
+    Webhook = '',
+    Username = 'vp_chopshop',
+    AvatarUrl = '',
+    Color = 3447003,
+    LogChopPart = true,
+    LogBenchCraft = true,
+    LogPlaceLift = false,
+    LogPlaceBench = false,
+}
+
+--- Parceiro no mesmo elevador: só líder + parceiro designado podem desmontar nesse lift (quando há sessão).
+Config.Partner = {
+    Enable = true,
+    --- Raio (m) a partir do centro do elevador para convidar / aceitar par
+    InviteDistance = 12.0,
+}
+
+--- NPC fixo (info, convite ao elevador mais próximo, loja opcional em dinheiro)
+Config.NPC = {
+    Enable = false,
+    Model = 's_m_y_construct_02',
+    Coords = vector4(2339.8943, 3146.3787, 48.2045, 86.2756),
+    Scenario = 'WORLD_HUMAN_CLIPBOARD',
+    --- Raio para achar elevador ao usar opção no NPC
+    NearestLiftRadius = 28.0,
+    Blip = {
+        Enable = true,
+        Sprite = 227,
+        Color = 5,
+        Scale = 0.75,
+    },
+    --- Loja: precisa framework (ESX/QB/QBX) para dinheiro. `Enable = false` só mostra info / parceiro.
+    Shop = {
+        Enable = false,
+        LiftPrice = 5000,
+        BenchPrice = 3500,
+        --- Cooldown em segundos entre compras no NPC (por jogador, 0 = desligado)
+        CooldownSeconds = 10,
+    },
+    --- Missão no NPC: aceitar “trabalho quente” → na **próxima** desmontagem o servidor **resolve** o trabalho (precisa `Ambush.Enable`).
+    Mission = {
+        Enable = false,
+        --- Segundos entre pedidos de missão ao foreman (por jogador).
+        CooldownSeconds = 600,
+        --- Tempo máximo para iniciar a desmontagem após aceitar; se expirar, perde o trabalho pendente.
+        PendingExpireSeconds = 900,
+        --- Na primeira desmontagem após aceitar: probabilidade 0..1 de **ocorrer** emboscada (`1` = sempre tentar; `0.5` = metade das vezes nada).
+        AmbushChance = 0.65,
+    },
+}
+
+--- Emboscada ao **iniciar** desmanche (após skillcheck): missão no NPC e/ou aleatório. `Enable = false` desliga spawns.
+Config.Ambush = {
+    Enable = false,
+    --- Se `true`, aplica `Chance` + `CooldownSeconds` em cada desmanche (além de missões NPC).
+    --- Se `false`, só resolução de **Config.NPC.Mission** na próxima desmontagem (com `Mission.AmbushChance` pode não haver hostil).
+    RandomOnDismantle = false,
+    --- Probabilidade 0..1 por tentativa quando `RandomOnDismantle` está ativo (valor alto = mais emboscadas).
+    Chance = 0.07,
+    --- Pesos relativos do tipo de hostil: `pistol`, `dog`, `bat`. Omite ou tudo zero = equiprovável (1/3 cada).
+    KindWeights = { pistol = 40, dog = 25, bat = 35 },
+    --- Mínimo de segundos entre emboscadas por jogador.
+    CooldownSeconds = 360,
+    --- Apagar atacantes após (ms) se ainda existirem.
+    DespawnMs = 180000,
+    --- Distância atrás do jogador para spawn.
+    SpawnBehindM = 7.0,
+    --- Precisão 0-100 para atiradores.
+    ShooterAccuracy = 38,
+    HumanModels = { `g_m_y_mexgoon_03`, `g_m_y_famfor_01`, `g_m_y_ballasout_01` },
+    DogModels = { `a_c_chop`, `a_c_rottweiler` },
+    --- Chance (0.0-1.0) de dropar item fence_referral ao matar ped de emboscada.
+    ReferralDropChance = 0.15,
+}
+
+--- Recompensas por peça: [item] = { amount = n, chance = 0..1 }
+Config.CarPartRewards = {
+    -- Capô: chapa de alumínio + sucata de aço (~3.4 kg máx com novos pesos)
+    bonnet = {
+        aluminum   = { amount = 4, chance = 0.5 },
+        metalscrap = { amount = 4, chance = 1.0 },
+        steel      = { amount = 4, chance = 1.0 },
+    },
+    -- Porta-bagagens: estrutura similar ao capô, ligeiramente menor
+    boot = {
+        aluminum   = { amount = 3, chance = 0.5 },
+        metalscrap = { amount = 4, chance = 1.0 },
+        steel      = { amount = 4, chance = 1.0 },
+    },
+    -- Rodas: aro + borracha + sucata (~2.1 kg por roda)
+    wheel_lf = {
+        aluminum   = { amount = 3, chance = 1.0 },
+        rubber     = { amount = 4, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+    },
+    wheel_rf = {
+        aluminum   = { amount = 3, chance = 1.0 },
+        rubber     = { amount = 4, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+    },
+    wheel_lr = {
+        aluminum   = { amount = 3, chance = 1.0 },
+        rubber     = { amount = 4, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+    },
+    wheel_rr = {
+        aluminum   = { amount = 3, chance = 1.0 },
+        rubber     = { amount = 4, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+    },
+    -- Portas: cobre (fiação) + plástico (painel) + vidro + estrutura de aço (~3.2 kg por porta)
+    door_pside_r = {
+        copper     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+        steel      = { amount = 3, chance = 1.0 },
+        plastic    = { amount = 3, chance = 1.0 },
+        glass      = { amount = 1, chance = 0.8 },
+    },
+    door_pside_f = {
+        copper     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+        steel      = { amount = 3, chance = 1.0 },
+        plastic    = { amount = 3, chance = 1.0 },
+        glass      = { amount = 1, chance = 1.0 },
+    },
+    door_dside_r = {
+        copper     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+        steel      = { amount = 3, chance = 1.0 },
+        plastic    = { amount = 3, chance = 1.0 },
+        glass      = { amount = 1, chance = 1.0 },
+    },
+    door_dside_f = {
+        copper     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 3, chance = 1.0 },
+        steel      = { amount = 3, chance = 1.0 },
+        plastic    = { amount = 3, chance = 1.0 },
+        glass      = { amount = 1, chance = 1.0 },
+    },
+}
+
+--- Bench recipes (items only). Use labelKey matching shared/locale.lua, or legacy `label` string.
+---@type { labelKey?: string, label?: string, duration: integer, inputs: table<string, integer>, outputs: table<string, integer> }[]
+Config.BenchRecipes = {
+    {
+        labelKey = 'bench_compact_scrap',
+        duration = 8000,
+        inputs = { metalscrap = 25 },
+        outputs = { steel = 3 },
+    },
+    {
+        labelKey = 'bench_separate_copper',
+        duration = 10000,
+        inputs = { metalscrap = 15, plastic = 10 },
+        outputs = { copper = 8 },
+    },
+}
+
+Config.ChopProgressMs = 12000
+Config.RefuelProgressMs = 6000
+
+--- Props visuais carregados pelo jogador ao desmontar uma peça.
+--- model = nil desliga o prop visual (os materiais continuam a ser entregues na bancada).
+--- Verifique se os modelos existem no seu servidor antes de usar.
+Config.PartProps = {
+    panel = { model = 'prop_chunk_metal01a', offset = { 0.12, 0.05,  0.0  }, rotation = { 0,  0,  0  } },
+    wheel = { model = 'prop_cs_wheel_01',   offset = { 0.0,  0.1,  -0.12 }, rotation = { 90, 0,  0  } },
+}
+--- Mapeamento de partKey → categoria de prop ('panel' ou 'wheel').
+Config.PartPropCategory = {
+    bonnet       = 'panel', boot         = 'panel',
+    door_dside_f = 'panel', door_pside_f = 'panel',
+    door_dside_r = 'panel', door_pside_r = 'panel',
+    wheel_lf     = 'wheel', wheel_rf     = 'wheel',
+    wheel_lr     = 'wheel', wheel_rr     = 'wheel',
+}
+
+--- Descarte de veículo: após remover peças suficientes, o jogador pode descartar o carro por cash.
+Config.Discard = {
+    Enable = true,
+    MinPartsToDiscard = 4,      -- mínimo de peças removidas para poder descartar
+    DefaultPayout = 1500,       -- cash base ao descartar
+    --- Bónus se houver polícias suficientes online.
+    CopsBonus = {
+        Enable = false,
+        MinCops = 4,            -- mínimo de polícias online para ativar bónus
+        Multiplier = 1.5,       -- multiplicador aplicado ao payout
+        PoliceJobs = { 'police', 'sheriff', 'bcso' },
+    },
+    --- Payout específico por hash do modelo do veículo (substitui DefaultPayout).
+    --- Exemplo: [GetHashKey('adder')] = 5000
+    PayoutByModel = {},
+}
+
+--- Sons durante o desmanche (requer xsound iniciado).
+Config.ChopSounds = {
+    Enable = true,
+    grinder   = { file = 'chopshop_grinder.ogg',           volume = 0.4 },
+    pneumatic = { file = 'chopshop_pneumatic_hammer.ogg',   volume = 0.4 },
+}
+
+--- Animações por categoria de peça (configurável).
+--- flag 1 = ANIM_FLAG_REPEAT (full-body loop). flag 49 (UPPERBODY+REPEAT) conflita com
+--- animações full-body como fixing_a_player e deve ser evitado nesses casos.
+Config.ChopAnimations = {
+    --- Capô / porta-malas: corte com serra circular
+    grinder   = { dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1 },
+    --- Rodas / pneus: chave de impacto (full-body agachado)
+    pneumatic = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+    --- Portas (Fase 1 básica): corte com serra
+    door      = { dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1 },
+}
+
+--- Ferramenta de desmanche: item requerido + prop na mão durante a animação.
+--- O item não é consumido por uso; tem durabilidade (MaxUses usos antes de quebrar).
+Config.ChopTool = {
+    Item    = 'metal_saw',
+    MaxUses = 6,
+    HandProp = {
+        model    = 'prop_tool_consaw',
+        offset   = { 0.05, 0.02, 0.0 },
+        rotation = { 20, 0, -50 },
+    },
+}
+
+--- Máquina de solda: objeto colocável (item do inventário). Obrigatória perto da bancada para
+--- craftear/entregar peças. Raio de detecção: WelderBenchRadius metros.
+Config.WelderModel       = `lr_smodd_cm_weldmachine_001`
+Config.WelderBenchRadius = 8.0
+Config.MinWelderSpacing  = 4.0
+
+--- Animação do elevador (subir/descer). Enable = false desliga os targets de subida/descida.
+Config.LiftAnimation = {
+    Enable     = true,
+    HeightRange    = 1.92,   -- unidades acima do Z de spawn (~2 metros)
+    SlowZoneTop    = 0.22,   -- zona de desaceleração perto do topo
+    SlowZoneBottom = 0.12,   -- zona de desaceleração perto da base
+    SpeedUp        = 0.01,
+    SpeedUpSlow    = 0.006,
+    SpeedDown      = 0.015,
+    SpeedDownSlow  = 0.0055,
+}
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- SISTEMA DE PNEUS — venda direta ao NPC + missões de roubo
+-- ─────────────────────────────────────────────────────────────────────────────
+
+--- Venda de pneus a um NPC comprador (pneus removidos no elevador ou roubados em missão).
+--- O jogador guarda o pneu numa pickup truck → dirige até o NPC → recebe cash.
+Config.TyreSelling = {
+    Enable = true,
+
+    --- Modelos de pickup trucks aceites para guardar pneus na caçamba.
+    PickupTruckModels = {
+        'bison', 'bison3', 'bobcatxl', 'sandking', 'sandking2',
+        'rebel', 'rebel2', 'kamacho', 'youga2', 'crusader', 'rancherxl',
+    },
+
+    --- Máximo de pneus que cabem na caçamba.
+    MaxTyresInTruck = 4,
+
+    --- Preço por pneu ao vender.
+    PricePerTyre = 400,
+
+    --- NPC comprador. TROQUE as coordenadas para o seu servidor.
+    NpcModel  = 'g_m_m_mexboss_01',
+    NpcCoords = vector4(2343.53, 3143.0, 48.2, 169.1),  -- Sandy Shores (padrão)
+
+    --- Caixa de entrega (onde o jogador larga os pneus antes de fechar negócio).
+    CrateCoords = vector3(2345.7, 3141.2, 47.5),
+
+    Blip = {
+        Enable = true,
+        Sprite = 431,
+        Color  = 25,
+        Scale  = 0.75,
+        Label  = 'Comprador de Pneus',
+    },
+}
+
+--- Missões de roubo de pneus: um NPC dá o contrato, o jogador vai ao veículo alvo,
+--- rouba os 4 pneus com minigame de parafusos (lib.skillCheck) e entrega ao NPC vendedor.
+Config.TyreMission = {
+    Enable = true,
+
+    --- Cooldown entre contratos (segundos por jogador).
+    MissionCooldown = 300,
+
+    --- NPC que oferece os contratos. TROQUE as coordenadas para o seu servidor.
+    NpcModel  = 'g_m_m_mexboss_01',
+    NpcCoords = vector4(408.38, -1928.53, 24.88, 355.0),  -- LSIA area (padrão)
+
+    NpcBlip = {
+        Enable = true,
+        Sprite = 480,
+        Color  = 28,
+        Scale  = 0.75,
+        Label  = 'Missões de Pneus',
+    },
+
+    --- Modelos de veículos alvo spawnados.
+    VehicleModels = {
+        'sultanrs', 'cavalcade', 'issi8', 'buffalo5',
+        'dominator2', 'buffalo4', 'asea', 'rhinehart',
+    },
+
+    --- Localizações onde o veículo alvo aparece (aleatório). AJUSTE ao seu mapa.
+    TargetLocations = {
+        { x =  888.0,  y = -1768.0, z = 29.0, h = 267.3 },
+        { x = 1202.9,  y = -1383.0, z = 34.6, h = 359.0 },
+        { x =  -55.3,  y = -1097.5, z = 26.4, h = 119.0 },
+        { x =  355.2,  y = -1544.6, z = 29.3, h = 170.0 },
+    },
+
+    --- Cash bônus por completar missão (4 pneus roubados + vendidos).
+    BonusReward = 800,
+
+    --- Minigame por pneu: cada round = 1 parafuso solto (lib.skillCheck).
+    MinigameRounds = 3,
+    MinigameDifficulties = { 'easy', 'medium', 'medium' },
+}
+
+--- Macaco hidráulico portátil: levanta qualquer carro para roubar pneus sem precisar do elevador nacelle.
+--- Fluxo: usa item → coloca 4 macacos → carro sobe → targets de pneus aparecem → rouba → baixa carro.
+--- O item chopshop_jackstand precisa ser registado em ox_inventory (ver installation/ox_items_snippet.txt).
+--- Sistema de desmanche avançado por fases (requer veículo levantado no macaco).
+--- Fase 2: Portas / Capô / Porta-malas  → requer serra metálica → 1× car_parts por peça
+--- Fase 3: Motor                         → capô removido + chave de fenda → 5× car_parts
+--- Fase 4: Carcaça                       → motor removido + soldadora perto → recicláveis
+Config.AdvancedChop = {
+    Enable = true,
+
+    --- Item necessário para desmontar portas/capô/porta-malas (Fase 2).
+    SawItem = 'metal_saw',
+
+    --- Item necessário para desmontar o motor (Fase 3).
+    ScrewdriverItem = 'screwdriver',
+
+    --- Raio máximo (m) para detetar soldadora perto do veículo (Fase 4).
+    WelderRadius = 8.0,
+
+    --- Duração das barras de progresso (ms).
+    DoorProgressMs    = 6000,
+    EngineProgressMs  = 8000,
+    CarcassProgressMs = 10000,
+
+    --- Recompensa por cada peça de porta/capô/porta-malas (Fase 2).
+    DoorReward = { item = 'car_parts', amount = 1 },
+
+    --- Recompensa por desmontar o motor (Fase 3).
+    EngineReward = { item = 'car_parts', amount = 5 },
+
+    --- Recompensas ao cortar a carcaça (Fase 4). chance: 0.0–1.0
+    CarcassRewards = {
+        { item = 'metalscrap', amount = 8, chance = 1.0 },
+        { item = 'glass',      amount = 2, chance = 0.7 },
+        { item = 'plastic',    amount = 5, chance = 0.8 },
+        { item = 'rubber',     amount = 3, chance = 0.6 },
+    },
+
+    --- Animação e prop da mão para desmanche de portas/capô/porta-malas (Fase 2).
+    SawAnim = {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_consaw',
+            offset   = { 0.05, 0.02, 0.0 },
+            rotation = { 20, 0, -50 },
+        },
+    },
+
+    --- Animação e prop da mão para remoção do motor (Fase 3).
+    EngineAnim = {
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_screwflt01',
+            offset   = { 0.10, 0.03, 0.0 },
+            rotation = { 10, 0, -30 },
+        },
+    },
+
+    --- Animação e prop da mão para corte da carcaça (Fase 4).
+    --- flag 1 = ANIM_FLAG_REPEAT — mantém o loop enquanto a barra roda.
+    CarcassAnim = {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+        prop = {
+            model    = 'v_ind_cs_powersaw',
+            offset   = { 0.10, 0.05, 0.0 },
+            rotation = { 15, 0, -55 },
+        },
+    },
+}
+
+Config.Jackstand = {
+    Enable = true,
+
+    --- Item do inventário que acciona o macaco.
+    Item = 'chopshop_jackstand',
+
+    --- Item dado ao inventário ao roubar um pneu com o macaco.
+    TyreItem = 'chopshop_tyre',
+
+    --- Prop GTA V do macaco (nativo, sem stream extra necessário).
+    PropModel = `imp_prop_axel_stand_01a`,
+
+    --- Altura (unidades GTA) que o carro sobe ao ser levantado.
+    LiftHeight = 0.18,
+
+    --- Duração da barra "A colocar macacos..." (ms).
+    LiftProgressMs = 8000,
+
+    --- Duração da barra "A retirar macacos..." (ms).
+    LowerProgressMs = 5000,
+
+    --- Raio máximo do carro para acionar o macaco (metros).
+    MaxCarDistance = 5.0,
+
+    --- Minigame de remoção de pneu (requer boii_minigames).
+    --- Type: 'skill_circle' | 'button_mash'
+    --- Rounds: número de parafusos por pneu
+    --- Se boii_minigames não estiver a correr, usa lib.skillCheck como fallback.
+    Minigame = {
+        --- 'skill_circle' | 'button_mash'
+        Type       = 'skill_circle',
+        --- Número de parafusos por pneu (rounds do minigame)
+        Rounds     = 4,
+        --- Tempo máximo (ms) aguardando resposta do minigame antes de resolver como falha
+        Timeout    = 30000,
+        --- Chance extra de falhar mesmo passando no minigame (0.0 = desligado, 0.15 = 15%)
+        FailureChance = 0.0,
+        --- Item obrigatório no inventário para usar o jackstand (nil/'' = sem requisito)
+        RequiredTool = nil,
+        -- skill_circle: tamanho da área alvo (maior = mais fácil)
+        AreaSize   = 5,
+        -- skill_circle: velocidade de rotação (menor = mais fácil)
+        Speed      = 0.025,
+        -- button_mash: dificuldade (1=fácil … 20=difícil)
+        Difficulty = 12,
+        -- fallback lib.skillCheck (quando boii_minigames não estiver ativo)
+        SkillCheckDifficulties = { 'easy', 'medium', 'medium', 'hard' },
+        SkillCheckKeys         = { 'e', 'e', 'e', 'e' },
+    },
+}
+
+--- ─────────────────────────────────────────────────────────────────────────────
+--- SISTEMA DE FENCE — NPC rotativo, trust, ordens, venda de itens
+--- ─────────────────────────────────────────────────────────────────────────────
+
+Config.Fence = {
+    --- Minutos entre cada rotação de local do NPC.
+    RotationMinutes     = 45,
+    --- Tempo (ms) antes de props de pneu no chão despawnarem.
+    TyrePropDespawnMs   = 600000,
+    --- Cooldown (min) entre entregas de carro inteiro por jogador (Tier 4).
+    WholeCarCooldownMin = 20,
+    --- Cash base ao entregar carro inteiro.
+    WholeCarBasePayout  = 8000,
+    --- Dias sem aparecer antes de perder 1 nível de trust.
+    TrustDecayDays      = 7,
+    --- XP de trust ganho por entrega concluída.
+    XpPerDelivery       = 20,
+    --- XP de trust bônus por ordem cumprida no prazo.
+    XpOrderBonus        = 80,
+
+    --- Preço base por item (multiplicado por trust_mult, tier_fence_mult, heat_penalty).
+    BasePrices = {
+        metalscrap    = 80,
+        copper        = 150,
+        rubber        = 120,
+        aluminum      = 130,
+        steel         = 100,
+        plastic       = 70,
+        glass         = 90,
+        car_parts     = 400,
+        chopshop_tyre = 400,
+    },
+
+    --- TrustXpPerLevel[N] = XP acumulado para ATINGIR o nível N.
+    --- Guard: nível 0 não tem threshold (acesso via fence_referral item).
+    TrustXpPerLevel = { [1]=100, [2]=300, [3]=600, [4]=1000 },
+
+    --- Templates de ordens de encomenda (geradas aleatoriamente para trust ≥ 3).
+    --- items = tabela {item=quantidade}, mult = multiplicador de preço, hours = prazo em horas reais.
+    OrderTemplates = {
+        { items = { metalscrap=20, copper=8,  rubber=5  }, mult=1.4,  hours=6 },
+        { items = { car_parts=5,   steel=15             }, mult=1.5,  hours=8 },
+        { items = { aluminum=20,   glass=3              }, mult=1.35, hours=4 },
+        { items = { copper=12,     plastic=15, rubber=8 }, mult=1.45, hours=5 },
+    },
+
+    --- Locais de rotação do NPC fence.
+    Locations = {
+        { coords=vector4(2339.8,   3146.3,  48.2,  86.2),  scenario='WORLD_HUMAN_CLIPBOARD',    label='Sandy Shores' },
+        { coords=vector4(-1072.3, -2673.8,  13.8, 330.0),  scenario='WORLD_HUMAN_STAND_MOBILE', label='LSIA'         },
+        { coords=vector4(844.0,   -1016.8,  27.5, 180.0),  scenario='WORLD_HUMAN_CLIPBOARD',    label='La Mesa'      },
+        { coords=vector4(-280.0,   6231.5,  31.5, 270.0),  scenario='WORLD_HUMAN_STAND_MOBILE', label='Paleto Bay'   },
+    },
+}
+
+--- ─────────────────────────────────────────────────────────────────────────────
+--- SISTEMA DE PROGRESSÃO — Tiers lineares com desbloqueios
+--- ─────────────────────────────────────────────────────────────────────────────
+
+Config.Progression = {
+    --- Chance (0.0-1.0) de falha ao fazer VIN scratch em veículo com heat > 75.
+    VinFailChanceHot = 0.40,
+    --- XP total acumulado necessário por tier (índice = tier).
+    TierXp       = { [1]=0, [2]=500, [3]=2000, [4]=5000 },
+    --- Multiplicador de velocidade de progresso por tier.
+    SpeedMult    = { [1]=1.0, [2]=1.10, [3]=1.20, [4]=1.30 },
+    --- Multiplicador de materiais recebidos por tier.
+    MaterialMult = { [1]=1.0, [2]=1.05, [3]=1.10, [4]=1.15 },
+    --- Multiplicador de preço no fence por tier (aplicado junto com trust_mult).
+    FencePriceMult = { [1]=1.0, [2]=1.0, [3]=1.0, [4]=1.10 },
+}

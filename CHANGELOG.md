@@ -1,0 +1,98 @@
+# Changelog — vp_chopshop
+
+---
+
+## [1.3.6] — 2026-04-11 — SQL Consolidation & Schema Optimization
+
+### Changed
+- **[Structure] sql/** — `vp_chopshop_rp.sql` removido; todas as 6 tabelas agora em `sql/vp_chopshop.sql`; `vp_chopshop_lifts` (depreciada) removida; `vp_chopshop_welders` (que existia apenas no runtime de `db.lua`) adicionada ao arquivo de install
+- **[Structure] server/db.lua** — DDL inline de todas as tabelas sincronizado com o arquivo SQL consolidado:
+  - `int(11)` → `INT UNSIGNED NOT NULL` nos PKs auto-increment
+  - `longtext` → `TEXT` em campos `position` e `order_data` (max 65 KB — mais que suficiente)
+  - `int(11) heading` → `SMALLINT UNSIGNED NOT NULL DEFAULT 0` (0-359 cabe em 2 bytes)
+  - `TINYINT` → `TINYINT UNSIGNED` em `trust_level` e `tier` (valores 0-4 e 1-4)
+  - `INT` → `MEDIUMINT UNSIGNED` em `trust_xp`, `xp`, `total_chops` (0-~50 000 realistas, 3 bytes)
+  - `INDEX idx_identifier (for_identifier)` → `INDEX idx_orders_active (for_identifier, fulfilled_at, created_at)` — índice composto cobre os dois padrões de acesso: listar pedidos ativos e marcar como cumprido
+
+---
+
+## [1.3.5] — 2026-04-11 — Code Review Fixes
+
+### Fixed (Critical)
+- **[Logic] server/fence.lua** — `sellItems`: `realTotal` acumulado apenas dos itens efetivamente removidos; paga `realTotal` em vez de `totalValue` do dry-run, eliminando overpay quando algum `RemoveItem` falha entre as duas fases
+- **[Security/Logic] server/fence.lua** — `fulfillOrder`: `UPDATE ... WHERE fulfilled_at IS NULL` atômico executado **antes** do `BridgeAddCash`; `affectedRows=0` aciona rollback de itens; elimina double-pay via race condition de chamadas simultâneas
+- **[Security] server/fence.lua** — `sellTyres`: `chopTyreCount` lido do state bag (escrito pelo cliente) limitado ao máximo configurado (`MaxTyresInTruck`); previne cliente modificado recebendo payout de 9999 pneus
+
+### Fixed (High)
+- **[Security] server/fence.lua** — `sellTyres`: `source_type` validado como `'truck'` ou `'inventory'` antes de processar; rejeita valores inválidos com `err='invalid_type'`
+- **[Logic] server/fence.lua** — `getOrder`: `MySQL.insert.await` envolvido em `pcall`; `OrderGenBusy[key]` agora limpo mesmo em erro de DB (mutex não fica permanentemente travado)
+- **[Logic] server/advanced_chop.lua** — `InvAdd` verificado em todas as 3 fases (2/3/4); inventário cheio agora notifica o jogador via `ox_lib:notify` em vez de silenciosamente perder o item
+- **[Logic] client/main.lua** — `VPChopJackstandStealTyre`: reset antecipado de `JackstandBusy = false` removido da linha pós-progressBar; mutex agora mantido durante todas as operações assíncronas (`VPChopSpawnTyreProp`, `VPTyreSpawnWheelPropInHand`)
+- **[Logic] server/fence.lua** — `rotateFence`: despawn síncrono direto (sem evento separado) antes de spawnar; elimina race condition onde spawn completava antes do despawn, criando NPCs orphan acumulativos
+
+### Fixed (Medium)
+- **[Logic] client/fence.lua** — `VPChopLoadTyreInTruck`: substituído `joaat(m)` por iteração para usar `getTruckHashes()` (cache pré-calculado); consistente com `canInteract` e o loop de carry
+- **[Logic] server/fence.lua** — `deliverCar`: cooldown agora comparado inteiramente via `TIMESTAMPDIFF` no MySQL; elimina dependência do relógio do FiveM vs MySQL (`os.time()` vs `UNIX_TIMESTAMP`)
+- **[Logic] server/fence.lua** — `deliverCar`: mutex `DeliveryBusy[key]` adicionado; previne dois callbacks simultâneos passarem pelo cooldown check antes de qualquer um escrever no DB
+- **[Logic] client/placement.lua** — controle 73 (X) no ghost placement agora verificado somente se `not VPChopCarryingPart`; elimina conflito quando ambas as loops estão ativas
+- **[Performance] client/fence.lua** — `Wait(10)` → `Wait(100)` nos dois loops de polling de model load (`VPChopSpawnTyreProp` e `VPChopPickUpTyre`); alinhado com o padrão em `main.lua`
+
+### Fixed (Low)
+- **[Structure] server/fence.lua + heat.lua + progression.lua + advanced_chop.lua** — `source` localizado como `local src = source` em todos os handlers `playerDropped`; padrão consistente com o restante do codebase; `DeliveryBusy` também limpo no disconnect
+- **[Structure] client/fence.lua** — labels de ox_target do NPC fence migrados de strings PT-BR hardcoded para `L('fence_target_*')`; novos keys adicionados a `shared/locale.lua` em `en` e `pt`
+- **[Logic] server/fence.lua** — `saveTrust` chamado via `pcall` em `addTrustXp`; falha de DB ao salvar XP não aborta o payout já realizado ao jogador
+- **[Structure] client/main.lua** — `local AdvChopState = {}` movido para o topo do arquivo (antes do handler `onResourceStop`); corrige forward-reference implícita que acessava `_G.AdvChopState` em vez da local
+
+---
+
+## [1.3.4] — 2026-04-11 — Audit Medium/Low Fixes
+
+### Fixed (Medium)
+- **[Logic] server/fence.lua** — `sellItems`: refatorado com dry-run via `GetItemCount` antes de remover qualquer item; `totalValue > 0` verificado antes de qualquer mutação de inventário; rollback implícito (nenhum item removido se nada for vendável)
+- **[Logic] server/fence.lua** — `getOrder`: mutex `OrderGenBusy` por chave de jogador adicionado; previne criação de dois pedidos simultâneos via duplo-click
+
+### Fixed (Low)
+- **[Structure] client/jackstand.lua** — Arquivo stub sem propósito deletado; comentário de aviso estava embutido no próprio arquivo (não carregado pelo fxmanifest)
+- **[Structure] bridge/server_framework.lua** — `BridgeRemoveCash`/`BridgeAddCash`: parâmetro `reason` adicionado às assinaturas; call sites que passam `'fence_sale'`, `'fence_car'`, `'npc_buy_bench'` etc. agora propagam o label corretamente ao framework
+
+---
+
+## [1.3.3] — 2026-04-11 — Audit Auto-Fix
+
+### Fixed (High)
+- **[Security/Logic] server/main.lua** — `vp_chopshop:getWorld` callback adicionado parâmetro `source` + guard `GetPlayerName`; loop de espera bloqueante não mais executável sem jogador válido (vetor DoS eliminado)
+- **[Logic] server/advanced_chop.lua** — `chopEngine` (Fase 3) agora consome a chave de fenda via `InvRemove` após obter o mutex, eliminando uso gratuito ilimitado com uma única chave
+- **[Logic/Structure] server/fence.lua** — `fence:buyBench`: item agora referenciado via `Config.Items.placeBench` (não mais hardcoded `'chopshop_bench'`); guard `price < 1` adicionado para prevenir bancada gratuita com `BenchPrice = 0`
+
+### Fixed (Critical — sessão anterior)
+- **[Security] server/main.lua** — `maybeAmbush` e `npcAcceptMission` callbacks: guards `GetPlayerName` adicionados
+- **[Logic] server/main.lua** — `benchCraft`: mutex `BenchCraftBusy` adicionado para prevenir TOCTOU double-craft
+- **[Logic] server/fence.lua** — `sellTyres`: retorno de `RemoveItem` agora verificado (sem payout em falha de remoção)
+- **[Logic] server/fence.lua** — `deliverCar`: cooldown persistido no DB (com `pcall`) antes de deletar veículo e pagar; elimina spam via falha de DB
+- **[Security] server/heat.lua** — `vinScratch`: cooldown de 3s por jogador adicionado; previne XP farming via spam de callback
+- **[Performance] client/main.lua** — Handlers `syncWorld`, `addBench`, `addWelder` envolvidos em `CreateThread`; previne crash "attempt to yield from outside a coroutine"
+- **[Performance] client/main.lua** — Loops de lift/lower reduzidos de `Wait(5)` → `Wait(16)` (200 Hz → 60 Hz); incrementos Z reescalados para manter duração de animação
+- **[Performance] client/fence.lua** — Loop de carry de pneu reduzido de `Wait(0)` → `Wait(50)` (60+ Hz → 20 Hz)
+- **[Performance] client/fence.lua** — Hashes de modelo de truck (`joaat`) cacheados via `getTruckHashes()` — eliminado recálculo por frame em `canInteract` e no loop de carry
+- **[Performance] client/placement.lua** — Loop de ghost placement reduzido de `Wait(0)` → `Wait(16)` (equivalente a 60 fps)
+
+---
+
+## [1.3.2] — 2026-04-11 — Heavy RP Gameplay
+
+### Added
+- **Heat system** (`server/heat.lua`) — pontuação de risco por veículo (0-100), VIN scratching, multiplicador de emboscada baseado em heat
+- **Fence NPC** (`server/fence.lua`, `client/fence.lua`) — contato criminal rotativo (45 min), economia de trust (0-4 níveis), 8 callbacks, entrega de pneus/ordens/carro inteiro
+- **Progression** (`server/progression.lua`, `client/progression.lua`) — sistema XP de 4 tiers persistido em `vp_chop_progression`
+- **Tyre prop system** — pneus roubados via jackstand aparecem no chão como props carregáveis/entregáveis via caminhonete
+- **Referral drop** — NPCs de emboscada têm 15% de chance de dropar `fence_referral` ao morrer
+- **Novos itens** — `fence_referral` e `vin_kit` registrados em `ox_inventory`
+
+### Changed
+- `server/ambush.lua` — `VPChopHeatGetMultiplier` integrado; thread de drop de referral adicionada
+- `client/main.lua` — spawn de prop de pneu após roubo via jackstand; `VPChopJackstandStealTyre` envolvido em `CreateThread` com mutex correto
+- `fxmanifest.lua` — novos arquivos adicionados; `server/heat.lua` posicionado antes de `server/ambush.lua` (load order fix)
+
+### Removed (Tombstoned)
+- `server/npc.lua`, `client/npc.lua` — lógica migrada para `server/fence.lua` / `client/fence.lua`
+- `server/tyres.lua`, `client/tyres.lua` — lógica migrada para `server/main.lua` / `client/fence.lua`
