@@ -50,10 +50,11 @@ function VPChopHeatCalc(plate)
     heat = heat + math.min(partCount * 5, 20)
 
     -- Componente 3: VIN scratch reduz em 60
+    -- [OPT] EXISTS para ao primeiro match (COUNT(*) continua contando até o fim)
     local scratched = MySQL.scalar.await(
-        'SELECT COUNT(*) FROM vp_chop_vin_scratched WHERE plate = ?', {plate}
+        'SELECT EXISTS(SELECT 1 FROM vp_chop_vin_scratched WHERE plate = ?)', {plate}
     )
-    if scratched and scratched > 0 then
+    if scratched == 1 then
         heat = math.max(0, heat - 60)
     end
 

@@ -25,7 +25,7 @@ function VPChopDbInit()
                     `id`        INT UNSIGNED      NOT NULL AUTO_INCREMENT,
                     `position`  TEXT              NOT NULL,
                     `heading`   SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-                    `placed_by` VARCHAR(50)       DEFAULT NULL,
+                    `placed_by` VARCHAR(60)       DEFAULT NULL,
                     PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
@@ -34,7 +34,7 @@ function VPChopDbInit()
                     `id`        INT UNSIGNED      NOT NULL AUTO_INCREMENT,
                     `position`  TEXT              NOT NULL,
                     `heading`   SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-                    `placed_by` VARCHAR(50)       DEFAULT NULL,
+                    `placed_by` VARCHAR(60)       DEFAULT NULL,
                     PRIMARY KEY (`id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
@@ -42,13 +42,13 @@ function VPChopDbInit()
             MySQL.query.await([[
                 CREATE TABLE IF NOT EXISTS vp_chop_vin_scratched (
                     plate        VARCHAR(12) PRIMARY KEY,
-                    scratched_by VARCHAR(50),
+                    scratched_by VARCHAR(60),
                     scratched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
             MySQL.query.await([[
                 CREATE TABLE IF NOT EXISTS `vp_chop_fence_trust` (
-                    `identifier`  VARCHAR(50)        NOT NULL,
+                    `identifier`  VARCHAR(60)        NOT NULL,
                     `trust_level` TINYINT UNSIGNED   NOT NULL DEFAULT 0,
                     `trust_xp`    MEDIUMINT UNSIGNED NOT NULL DEFAULT 0,
                     `last_seen`   TIMESTAMP          NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -58,7 +58,7 @@ function VPChopDbInit()
             MySQL.query.await([[
                 CREATE TABLE IF NOT EXISTS `vp_chop_fence_orders` (
                     `id`             INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    `for_identifier` VARCHAR(50)  NOT NULL,
+                    `for_identifier` VARCHAR(60)  NOT NULL,
                     `order_data`     TEXT         NOT NULL,
                     `created_at`     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     `fulfilled_at`   TIMESTAMP    NULL     DEFAULT NULL,
@@ -68,7 +68,7 @@ function VPChopDbInit()
             ]])
             MySQL.query.await([[
                 CREATE TABLE IF NOT EXISTS `vp_chop_progression` (
-                    `identifier`        VARCHAR(50)        NOT NULL,
+                    `identifier`        VARCHAR(60)        NOT NULL,
                     `tier`              TINYINT UNSIGNED   NOT NULL DEFAULT 1,
                     `xp`                MEDIUMINT UNSIGNED NOT NULL DEFAULT 0,
                     `total_chops`       MEDIUMINT UNSIGNED NOT NULL DEFAULT 0,

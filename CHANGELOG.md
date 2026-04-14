@@ -2,6 +2,18 @@
 
 ---
 
+## [1.6.0] — 2026-04-14 — SQL Optimization
+
+### Fixed / Optimized
+- **[Performance] server/heat.lua** — `SELECT COUNT(*)` → `SELECT EXISTS(SELECT 1 ...)` na verificação de VIN scratch. `EXISTS` para ao primeiro match; `COUNT(*)` contava todas as rows (irrelevante em PK lookup, mas é prática correta que o otimizador pode tratar diferente em certos engines).
+- **[Performance] server/fence.lua** — Adicionada thread de limpeza periódica (6 h) de ordens cumpridas com mais de 7 dias em `vp_chop_fence_orders`. Sem isso a tabela crescia indefinidamente, degradando o índice `idx_orders_active` ao longo do tempo.
+- **[Schema] server/db.lua + sql/vp_chopshop.sql** — `placed_by` e `identifier` em todas as 6 tabelas ampliados de `VARCHAR(50)` para `VARCHAR(60)`. Formato `license2:` tem até 49 chars; margem era de apenas 1 char. Formato futuro poderia truncar silenciosamente.
+
+### Added
+- **sql/migrate_v1.6.0.sql** — Script de migração para servidores existentes (ALTER TABLE + DELETE de ordens antigas).
+
+---
+
 ## [1.5.0] — 2026-04-14 — Feature: Vehicle Alarm System
 
 ### Added

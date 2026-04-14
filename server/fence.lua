@@ -160,6 +160,22 @@ CreateThread(function()
     end
 end)
 
+-- [OPT] Limpeza periódica de ordens cumpridas antigas para evitar crescimento ilimitado da tabela.
+-- Roda a cada 6h; remove ordens fulfilled há mais de 7 dias.
+CreateThread(function()
+    while not VPChopDBReady do Wait(500) end
+    local cleanupMs = 6 * 60 * 60 * 1000
+    while true do
+        Wait(cleanupMs)
+        pcall(function()
+            MySQL.query.await(
+                'DELETE FROM vp_chop_fence_orders WHERE fulfilled_at IS NOT NULL AND fulfilled_at < DATE_SUB(NOW(), INTERVAL 7 DAY)',
+                {}
+            )
+        end)
+    end
+end)
+
 -- ─── Spawn/despawn do NPC ──────────────────────────────────────────────────────
 
 AddEventHandler('vp_chopshop:server:spawnFenceNpc', function(loc)
