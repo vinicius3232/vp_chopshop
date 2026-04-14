@@ -202,6 +202,37 @@ CreateThread(function()
     if loc then TriggerEvent('vp_chopshop:server:spawnFenceNpc', loc) end
 end)
 
+-- ─── Roubo de pneu via macaco (jackstand) ────────────────────────────────────
+-- [C2 FIX] Handler ausente: client/main.lua dispara este evento após cada pneu
+-- roubado com macaco, mas server/tyres.lua (tombstone) nunca o registou aqui.
+
+local JackstandStealCooldown = {} ---@type table<number, number>  src → expiry
+local JACKSTAND_STEAL_CD_MS  = 5000
+
+RegisterNetEvent('vp_chopshop:tyres:jackstandTyreStolen', function()
+    local src = source
+    if not GetPlayerName(src) then return end
+
+    -- Rate-limit: evita spam do evento
+    local now = GetGameTimer()
+    if JackstandStealCooldown[src] and now < JackstandStealCooldown[src] then return end
+    JackstandStealCooldown[src] = now + JACKSTAND_STEAL_CD_MS
+
+    local tyreItem = Config.Jackstand and Config.Jackstand.TyreItem
+    if not tyreItem then return end
+
+    if not exports.ox_inventory:AddItem(src, tyreItem, 1) then
+        TriggerClientEvent('ox_lib:notify', src, {
+            type = 'error',
+            description = 'Inventário cheio — pneu perdido.',
+        })
+    end
+end)
+
+AddEventHandler('playerDropped', function()
+    JackstandStealCooldown[source] = nil
+end)
+
 -- ─── Rastreio server-side de pneus em truck ──────────────────────────────────
 -- [H1 FIX] Evento disparado pelo cliente ao carregar um pneu no truck.
 -- O server valida proximidade e incrementa o contador; o cliente não controla o total.

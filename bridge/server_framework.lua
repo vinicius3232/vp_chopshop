@@ -42,7 +42,7 @@ function ServerChopPlayerKey(src)
         end
     elseif Framework == 'esx' then
         local ESX = exports['es_extended']:getSharedObject()
-        local x = ESX.GetPlayerFromId(src)
+        local x = ESX.Player(src)  -- [H3 FIX] GetPlayerFromId deprecado → ESX.Player()
         if x and x.identifier then
             return 'esx:' .. tostring(x.identifier)
         end
@@ -55,17 +55,16 @@ end
 ---@return integer
 function BridgeGetCash(src)
     if Framework == 'qbx' then
-        local p = exports.qbx_core:GetPlayer(src)
-        if p and p.Functions and p.Functions.GetMoney then
-            return math.floor(tonumber(p.Functions.GetMoney('cash')) or 0)
-        end
+        -- [H2 FIX] Player.Functions.GetMoney shim deprecado → exports.qbx_core:GetMoney
+        local n = exports.qbx_core:GetMoney(src, 'cash')
+        return math.floor(tonumber(n) or 0)
     elseif Framework == 'qb' then
         local QBCore = exports['qb-core']:GetCoreObject()
         local p = QBCore.Functions.GetPlayer(src)
         if p then return math.floor(p.Functions.GetMoney('cash') or 0) end
     elseif Framework == 'esx' then
         local ESX = exports['es_extended']:getSharedObject()
-        local x = ESX.GetPlayerFromId(src)
+        local x = ESX.Player(src)  -- [H3 FIX] GetPlayerFromId deprecado → ESX.Player()
         if x then return math.floor(x.getAccount('money').money or 0) end
     end
     return 0
@@ -80,15 +79,15 @@ function BridgeRemoveCash(src, amount, reason)
     if amount < 1 then return true end
     local label = reason or 'vp_chopshop'
     if Framework == 'qbx' then
-        local p = exports.qbx_core:GetPlayer(src)
-        if p and p.Functions.RemoveMoney('cash', amount, label) then return true end
+        -- [H2 FIX] Player.Functions.RemoveMoney shim deprecado → exports.qbx_core:RemoveMoney
+        return exports.qbx_core:RemoveMoney(src, 'cash', amount, label) == true
     elseif Framework == 'qb' then
         local QBCore = exports['qb-core']:GetCoreObject()
         local p = QBCore.Functions.GetPlayer(src)
         if p and p.Functions.RemoveMoney('cash', amount, label) then return true end
     elseif Framework == 'esx' then
         local ESX = exports['es_extended']:getSharedObject()
-        local x = ESX.GetPlayerFromId(src)
+        local x = ESX.Player(src)  -- [H3 FIX] GetPlayerFromId deprecado → ESX.Player()
         if x and x.getAccount('money').money >= amount then
             x.removeAccountMoney('money', amount, label)
             return true
@@ -135,15 +134,15 @@ function BridgeAddCash(src, amount, reason)
     if amount < 1 then return true end
     local label = reason or 'vp_chopshop'
     if Framework == 'qbx' then
-        local p = exports.qbx_core:GetPlayer(src)
-        if p and p.Functions.AddMoney('cash', amount, label) then return true end
+        -- [H2 FIX] Player.Functions.AddMoney shim deprecado → exports.qbx_core:AddMoney
+        return exports.qbx_core:AddMoney(src, 'cash', amount, label) == true
     elseif Framework == 'qb' then
         local QBCore = exports['qb-core']:GetCoreObject()
         local p = QBCore.Functions.GetPlayer(src)
         if p and p.Functions.AddMoney('cash', amount, label) then return true end
     elseif Framework == 'esx' then
         local ESX = exports['es_extended']:getSharedObject()
-        local x = ESX.GetPlayerFromId(src)
+        local x = ESX.Player(src)  -- [H3 FIX] GetPlayerFromId deprecado → ESX.Player()
         if x then
             x.addAccountMoney('money', amount, label)
             return true

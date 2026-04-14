@@ -2,6 +2,31 @@
 
 ---
 
+## [1.4.0] — 2026-04-14 — Audit Auto-Fix (Missing Handlers & Bridge API)
+
+### Fixed (Critical)
+- **[Logic] server/fence.lua** — Handler `vp_chopshop:tyres:jackstandTyreStolen` inexistente: server/tyres.lua (tombstone) indicava "migrado para server/main.lua", mas o handler nunca foi criado. Após cada pneu roubado com macaco, o jogador nunca recebia `Config.Jackstand.TyreItem` ('chopshop_tyre'). Adicionado handler com rate-limit (5 s), validação de source, e AddItem correto.
+- **[Logic] client/fence.lua** — `TyreMissionStart()` chamada em `onSelect` do fence target "Contrato de pneus" mas função não existia em lugar nenhum do codebase (não foi migrada de client/npc.lua). Causava erro Lua silencioso (call nil). Adicionado stub com guard de `Config.TyreMission.Enable`; implementação completa de missão marcada como TODO.
+
+### Fixed (High)
+- **[Logic] client/fence.lua:556** — `VPChopLoadTyreInTruck` usava variável `truckNetId` (nil, não definida no scope) em vez de `NetworkGetNetworkIdFromEntity(truck)`. Server recebia nil, guard `if not netId then return end` descartava silenciosamente. Resultado: pneus carregados via prop no chão → ox_target nunca registavam no `ServerTyreCounts` → venda tipo 'truck' retornava 0. `VPChopLoadTyreInTruckFromCarry` (linha 591) já estava correto; corrigido o path do prop.
+- **[Logic] bridge/server_framework.lua** — `BridgeGetCash`, `BridgeRemoveCash` e `BridgeAddCash` (QBX) usavam `Player.Functions.GetMoney/RemoveMoney/AddMoney` (shim deprecado). Substituído por `exports.qbx_core:GetMoney/RemoveMoney/AddMoney` com assinatura canônica.
+- **[Logic] bridge/server_framework.lua** — `BridgeGetIdentifier`, `BridgeGetCash` e `BridgeRemoveCash` (ESX) usavam `ESX.GetPlayerFromId(src)` (deprecado). Substituído por `ESX.Player(src)` (modern API) em 3 locais.
+- **[Performance] server/advanced_chop.lua:137** — `TriggerClientEvent('vp_chopshop:adv:breakDoor', -1, ...)` fazia broadcast para todos os clientes conectados. Substituído por loop de proximidade (raio 150 u), mesmo padrão do fix L3 de v1.3.9 para breakPart.
+
+### Fixed (Medium)
+- **[Logic] server/cooldown.lua** — `AddEventHandler('playerDropped')` usava `source` diretamente sem snapshot `local src = source`. Corrigido.
+- **[Structure] server/main.lua** — Comando `choplifts` renomeado para `chopbenches` (lifts removidos; nome enganoso para admins).
+- **[Structure] server/validate.lua** — `ValidateVehicleNearLift()` era código morto (lift removido, função nunca chamada). Removida.
+
+### Fixed (Low)
+- **[Structure] fxmanifest.lua** — `lua54 'yes'` removido; Lua 5.4 é o padrão desde junho/2025. Versão atualizada para 1.4.0.
+- **[Structure] shared/config.lua** — Removidas ~10 chaves órfãs do sistema de elevador: `Config.LiftBaseModel`, `Config.Items.placeLift`, `Config.UseFuel`, `Config.FuelMax`, `Config.FuelPerPartMin/Max`, `Config.FuelRefillPerItem`, `Config.LiftAnimation`, `Config.MinLiftSpacing`, `Config.Partner`. `Config.VehicleNearLiftRadius` mantida (ainda usada em `ValidatePlayerNearCoords`).
+- **[Structure] fxmanifest.lua** — `client/tyres.lua` e `client/npc.lua` removidos do manifest (tombstones vazios; carregamento desnecessário a cada restart).
+- **[Structure] client/progression.lua + shared/locale.lua** — `heatWarning` usava strings PT-BR hardcoded em vez de `L()`. Chaves `heat_warn_morno/quente/queimando` adicionadas em todos os 5 locales (en/pt/es/fr/tr); cliente agora usa `L('heat_warn_' .. level)`.
+
+---
+
 ## [1.3.9] — 2026-04-13 — Audit Auto-Fix (Tool Durability & Performance)
 
 ### Fixed (High)

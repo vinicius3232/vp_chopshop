@@ -133,8 +133,21 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
 
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, partKey, 2)
 
-    -- Sincronizar porta quebrada para todos os clientes (inclui partKey para state tracking)
-    TriggerClientEvent('vp_chopshop:adv:breakDoor', -1, netId, partKey, partDef.index)
+    -- [H4 FIX] Filtrar breakDoor por proximidade (era broadcast -1 para todos os clientes).
+    -- Mesmo padrão corrigido no breakPart (L3 fix). Só clientes perto da entidade recebem.
+    local ent = NetworkGetEntityFromNetworkId(netId)
+    local bpos = (ent and ent ~= 0 and DoesEntityExist(ent)) and GetEntityCoords(ent) or nil
+    for _, pid in ipairs(GetPlayers()) do
+        local pidN = tonumber(pid)
+        if pidN then
+            local send = true
+            if bpos then
+                local pped = GetPlayerPed(pidN)
+                send = pped and pped ~= 0 and #(GetEntityCoords(pped) - bpos) < 150.0
+            end
+            if send then TriggerClientEvent('vp_chopshop:adv:breakDoor', pidN, netId, partKey, partDef.index) end
+        end
+    end
 
     return { ok = true }
 end)

@@ -236,6 +236,18 @@ function tryNpcMission()
     end
 end
 
+-- [C1 FIX] TyreMissionStart não foi migrada de client/npc.lua.
+-- Stub adicionado para evitar erro Lua (call nil). Implementação completa pendente
+-- (requer callback servidor + spawn de veículo alvo + tracking de missão).
+function TyreMissionStart()
+    if not Config.TyreMission or not Config.TyreMission.Enable then
+        VPChopNotify(L('notify_mission_disabled'), 'error'); return
+    end
+    VPChopNotify(L('notify_generic_error'), 'error')
+    -- TODO: implementar callback vp_chopshop:fence:tyreMissionAccept e
+    --       fluxo completo de missão (spawn veículo, blip, tracking, bônus).
+end
+
 -- [FIX M-2] Usa vp_chopshop:fence:buyBench em vez de vp_chopshop:npcBuy.
 -- O callback legado npcBuy valida contra Config.NPC.Coords (coords fixas) —
 -- incompatível com o fence rotativo. O novo callback valida contra a localização atual do fence.
@@ -553,7 +565,8 @@ function VPChopLoadTyreInTruck(propHandle)
     VPChopRemoveTyreProp(propHandle)
     -- [H1 FIX] Notificar servidor para incrementar o contador server-side.
     -- O state bag (false = sem broadcast para outros clientes) é mantido apenas para UI local.
-    TriggerServerEvent('vp_chopshop:tyre:truckLoad', truckNetId)
+    -- [BUG FIX] Usava 'truckNetId' (nil neste scope) — corrigido para converter o handle local.
+    TriggerServerEvent('vp_chopshop:tyre:truckLoad', NetworkGetNetworkIdFromEntity(truck))
     Entity(truck).state:set('chopTyreCount', cur + 1, false)
     lib.notify({ description=L('fence_tyre_loaded_fmt', cur + 1, max), type='success', duration=2500 })
 end

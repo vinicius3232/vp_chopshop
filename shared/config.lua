@@ -8,30 +8,24 @@ Config.Debug = false
 --- Distâncias
 Config.InteractDistance = 2.4
 Config.MaxPlaceDistance = 5.0
-Config.VehicleNearLiftRadius = 4.2
---- Distância mínima entre elevadores (0 = desligado)
-Config.MinLiftSpacing = 8.0
+Config.VehicleNearLiftRadius = 4.2  -- raio de proximidade jogador↔veículo/macaco (ValidatePlayerNearCoords)
 --- Distância mínima entre bancadas (0 = desligado)
 Config.MinBenchSpacing = 4.0
 
---- Modelos (vanilla GTA V — troque pelo modelo do teu pack de elevador se tiveres)
-Config.LiftBaseModel = `nacelle`
+--- Modelos de objetos colocáveis
+-- [L2 FIX] Config.LiftBaseModel removido — elevador (nacelle) foi removido do sistema.
 Config.BenchModel = `prop_tool_bench02`
 
 --- Itens ox_inventory (adicione em data/items.lua — ver installation/)
 Config.Items = {
-    placeLift = 'chopshop_lift',
+    -- [L2 FIX] placeLift removido — elevador removido do sistema.
     placeBench = 'chopshop_bench',
     placeWelder = 'chopshop_welder',
-    fuel = 'petrol_barrel',
+    -- [L2 FIX] fuel removido — combustível era exclusivo do elevador; sistema removido.
 }
 
---- Combustível do elevador (por peça desmontada)
-Config.UseFuel = true
-Config.FuelMax = 100
-Config.FuelPerPartMin = 1
-Config.FuelPerPartMax = 2
-Config.FuelRefillPerItem = 35
+-- [L2 FIX] Removidas: Config.UseFuel, Config.FuelMax, Config.FuelPerPartMin/Max, Config.FuelRefillPerItem
+-- — todas eram exclusivas do sistema de combustível do elevador, que foi removido.
 
 --- Desmanche: exige chaves do veículo (qbx_vehiclekeys / qb-vehiclekeys)
 Config.RequireVehicleKeys = true
@@ -55,12 +49,7 @@ Config.Discord = {
     LogPlaceBench = false,
 }
 
---- Parceiro no mesmo elevador: só líder + parceiro designado podem desmontar nesse lift (quando há sessão).
-Config.Partner = {
-    Enable = true,
-    --- Raio (m) a partir do centro do elevador para convidar / aceitar par
-    InviteDistance = 12.0,
-}
+-- [L2 FIX] Config.Partner removido — sistema de parceiro era lift-scoped; removido com o elevador.
 
 --- NPC fixo (info, convite ao elevador mais próximo, loja opcional em dinheiro)
 Config.NPC = {
@@ -309,17 +298,7 @@ Config.WelderModel       = `lr_smodd_cm_weldmachine_001`
 Config.WelderBenchRadius = 8.0
 Config.MinWelderSpacing  = 4.0
 
---- Animação do elevador (subir/descer). Enable = false desliga os targets de subida/descida.
-Config.LiftAnimation = {
-    Enable     = true,
-    HeightRange    = 1.92,   -- unidades acima do Z de spawn (~2 metros)
-    SlowZoneTop    = 0.22,   -- zona de desaceleração perto do topo
-    SlowZoneBottom = 0.12,   -- zona de desaceleração perto da base
-    SpeedUp        = 0.01,
-    SpeedUpSlow    = 0.006,
-    SpeedDown      = 0.015,
-    SpeedDownSlow  = 0.0055,
-}
+-- [L2 FIX] Config.LiftAnimation removido — exclusivo do sistema de elevador removido.
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- SISTEMA DE PNEUS — venda direta ao NPC + missões de roubo

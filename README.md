@@ -2,12 +2,19 @@
 
 ## Security & Compatibility
 
-### Audit — 2026-04-13
+### Audit — 2026-04-14 (v1.4.0)
 - Audited by fivem-audit skill (Claude Code)
-- 0 critical, 1 high issue resolved (v1.3.8)
+- 2 critical, 4 high, 3 medium, 4 low issues resolved
+- Critical: missing server handler for `jackstandTyreStolen`; `TyreMissionStart` nil-call crash
+- High: `truckNetId` nil in tyre truck-load path; deprecated QBX/ESX bridge APIs; `breakDoor` global broadcast
 - Framework: QBX/QBCore/ESX compatible (bridge layer)
-- lua54: yes — all cross-file functions verified as globals
+- Lua 5.4 default (lua54 directive removed — deprecated June 2025)
 - All SQL queries use parameterized `?` placeholders
+
+### Audit — 2026-04-13 (v1.3.9)
+- Audited by fivem-audit skill (Claude Code)
+- 0 critical, 1 high issue resolved (tool durability, XP persistence, broadcast filter)
+- Framework: QBX/QBCore/ESX compatible (bridge layer)
 
 ---
 

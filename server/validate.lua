@@ -30,14 +30,7 @@ function ValidatePlayerPlacementRange(src, coords)
     return #(pcoords - coords) <= Config.MaxPlaceDistance
 end
 
----@param liftCoords vector3
----@param vehicleEntity integer
----@return boolean
-function ValidateVehicleNearLift(liftCoords, vehicleEntity)
-    if not vehicleEntity or vehicleEntity == 0 or not DoesEntityExist(vehicleEntity) then return false end
-    local vc = GetEntityCoords(vehicleEntity)
-    return #(vc - liftCoords) <= Config.VehicleNearLiftRadius
-end
+-- [M3 FIX] ValidateVehicleNearLift removida — lift system removido; função nunca chamada.
 
 ---@param src number
 ---@param vehicleEntity integer

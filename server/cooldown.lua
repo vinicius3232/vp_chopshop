@@ -24,6 +24,7 @@ function VPChopChopCooldownMark(src)
 end
 
 AddEventHandler('playerDropped', function()
-    local key = ServerChopPlayerKey(source)
+    local src = source  -- [M1 FIX] snapshot antes de qualquer yield
+    local key = ServerChopPlayerKey(src)
     Until[key] = nil
 end)

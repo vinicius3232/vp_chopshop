@@ -28,14 +28,11 @@ RegisterNetEvent('vp_chopshop:client:tierUp', function(newTier, label, unlocks)
     })
 end)
 
+-- [L4 FIX] Strings hardcoded PT-BR substituídas por L() para suportar todos os locales.
 RegisterNetEvent('vp_chopshop:client:heatWarning', function(level)
-    local msgs = {
-        morno     = { text = 'Este carro está morno. Cuidado.', type = 'inform' },
-        quente    = { text = 'Este carro está quente. Fence paga menos.', type = 'warning' },
-        queimando = { text = 'Carro queimando! Fence não vai tocar nisso.', type = 'error' },
-    }
-    local m = msgs[level]
-    if m then
-        lib.notify({ description = m.text, type = m.type, duration = 5000 })
+    local types = { morno = 'inform', quente = 'warning', queimando = 'error' }
+    local t = types[level]
+    if t then
+        lib.notify({ description = L('heat_warn_' .. level), type = t, duration = 5000 })
     end
 end)

@@ -214,6 +214,10 @@ local Locales = {
         fence_truck_full                = 'Truck is full!',
         -- Bolt minigame
         bolt_minigame_bolt_fmt          = 'Bolt %d/%d',
+        -- Heat warnings (L4 fix)
+        heat_warn_morno                 = 'This car is warm. Watch out.',
+        heat_warn_quente                = 'This car is hot. Fence pays less.',
+        heat_warn_queimando             = 'Car is burning hot! Fence won\'t touch it.',
     },
     pt = {
         notify_title = 'Desmanche',
@@ -427,6 +431,10 @@ local Locales = {
         fence_truck_full                = 'Truck cheio!',
         -- Bolt minigame
         bolt_minigame_bolt_fmt          = 'Parafuso %d/%d',
+        -- Avisos de heat (L4 fix)
+        heat_warn_morno                 = 'Este carro está morno. Cuidado.',
+        heat_warn_quente                = 'Este carro está quente. O fence paga menos.',
+        heat_warn_queimando             = 'Carro queimando! O fence não vai tocar nisso.',
     },
     es = {
         notify_title = 'Desguace',
@@ -552,6 +560,9 @@ local Locales = {
         notify_no_welder           = 'No hay máquina de soldar cerca del banco.',
         err_no_welder              = 'Se requiere máquina de soldar cerca del banco.',
         notify_model_unavailable   = 'Modelo no disponible. Revisa los archivos de stream.',
+        heat_warn_morno            = 'Este coche está templado. Ten cuidado.',
+        heat_warn_quente           = 'Este coche está caliente. El fence paga menos.',
+        heat_warn_queimando        = '¡Coche ardiendo! El fence no lo tocará.',
     },
     fr = {
         notify_title = 'Casse auto',
@@ -677,6 +688,9 @@ local Locales = {
         notify_no_welder           = 'Aucune soudeuse près de l\'établi.',
         err_no_welder              = 'Soudeuse requise près de l\'établi.',
         notify_model_unavailable   = 'Modèle indisponible. Vérifiez les fichiers stream.',
+        heat_warn_morno            = 'Cette voiture est tiède. Prudence.',
+        heat_warn_quente           = 'Cette voiture est chaude. Le receleur paie moins.',
+        heat_warn_queimando        = 'Voiture brûlante ! Le receleur refusera.',
     },
     tr = {
         notify_title = 'Çıkma parça',
@@ -802,6 +816,9 @@ local Locales = {
         notify_no_welder           = 'Tezgah yakınında kaynak makinesi yok.',
         err_no_welder              = 'Tezgah yakınında kaynak makinesi gerekli.',
         notify_model_unavailable   = 'Model mevcut değil. Stream dosyalarını kontrol edin.',
+        heat_warn_morno            = 'Bu araç ılık. Dikkatli ol.',
+        heat_warn_quente           = 'Bu araç sıcak. Rehin az ödüyor.',
+        heat_warn_queimando        = 'Araç alev alev! Rehin dokunmayacak.',
     },
 }
 

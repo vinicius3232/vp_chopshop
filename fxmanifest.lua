@@ -1,11 +1,11 @@
 fx_version 'cerulean'
 game 'gta5'
-lua54 'yes'
+-- [L1 FIX] lua54 'yes' removido — Lua 5.4 é o padrão desde junho/2025; a diretiva foi depreciada.
 
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.3.9'
+version '1.4.0'
 
 dependencies {
     'ox_lib',
@@ -26,8 +26,7 @@ client_scripts {
     'bridge/client_notify.lua',
     'client/placement.lua',
     'client/lifts.lua',
-    'client/tyres.lua',
-    'client/npc.lua',
+    -- [L3 FIX] client/tyres.lua e client/npc.lua removidos — tombstones vazios; carga desnecessária eliminada.
     'client/bench.lua',
     'client/welder.lua',
     'client/fence.lua',

@@ -504,7 +504,7 @@ lib.callback.register('vp_chopshop:pickupWelder', function(source, welderId)
     return { ok = true }
 end)
 
-RegisterCommand('choplifts', function(src, _)
+RegisterCommand('chopbenches', function(src, _)  -- [M2 FIX] Renomeado de 'choplifts' (lifts removidos)
     if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then return end
     local lines = { '[vp_chopshop] Benches (' .. #ServerBenches .. '):' }
     for _, bench in ipairs(ServerBenches) do
