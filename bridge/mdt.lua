@@ -3,6 +3,15 @@
 -- Para integrar: implementar as 3 funções abaixo com a lógica do seu MDT.
 -- Sem implementação: sistema funciona de forma autossuficiente (sem dados externos).
 
+-- shared/events.lua corre no env proxy do ox_lib e não propaga para server_scripts.
+-- Definimos VPChopEvt aqui (primeiro server_script) para garantir visibilidade global.
+VPChopEvt = VPChopEvt or {
+    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
+    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
+    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
+    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
+}
+
 VPChopMDT = {}
 
 --- Retorna true se o veículo com esta placa está marcado como roubado no MDT.

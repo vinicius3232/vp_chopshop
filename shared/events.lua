@@ -2,7 +2,9 @@
 -- Barramento de eventos interno. Nenhum módulo chama outro diretamente:
 -- publicar com TriggerEvent(VPChopEvt.XXX, ...) / escutar com AddEventHandler.
 
-VPChopEvt = {
+-- _G explícito: ox_lib/init.lua manipula _ENV nos shared scripts — sem _G, a tabela
+-- ficaria no environment do ox_lib e seria invisível para os server_scripts.
+_G.VPChopEvt = {
     --- Emitido por server/chop.lua e server/advanced_chop.lua após cada peça.
     --- params: src (number), netId (integer), partKey (string), phase (integer 1-4)
     PART_CHOPPED   = 'vp_chopshop:evt:partChopped',

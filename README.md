@@ -1,5 +1,16 @@
 # vp_chopshop
 
+## Security & Compatibility
+
+### Audit — 2026-04-13
+- Audited by fivem-audit skill (Claude Code)
+- 0 critical, 1 high issue resolved (v1.3.8)
+- Framework: QBX/QBCore/ESX compatible (bridge layer)
+- lua54: yes — all cross-file functions verified as globals
+- All SQL queries use parameterized `?` placeholders
+
+---
+
 Sistema de **desmanche** (chop shop) para FiveM: o jogador usa um **macaco hidráulico** (`chopshop_jackstand`) para levantar qualquer veículo e desmontar peças em 4 fases progressivas, com recompensas em materiais, venda de pneus a NPC e emboscadas opcionais. Pensado para stacks com **ox_lib**, **ox_target**, **ox_inventory** e **oxmysql**.
 
 ---
@@ -124,7 +135,9 @@ Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar ve
 | `Config.ChopCooldownSeconds` | Espera após cada peça desmontada (`0` = desligado) |
 | `Config.ChopSkillCheck` | Skillcheck opcional antes da barra de progresso |
 | `Config.ChopProgressMs` | Duração da barra de desmanche (ms) |
-| `Config.ChopTool` | Ferramenta obrigatória (`metal_saw`), durabilidade (`MaxUses`) |
+| `Config.Tools` | Configura ferramentas individuais, sua velocidade, durabilidade e propensão a avisar a polícia (`dispatchChance`) |
+| `Config.AlarmOnChop` | Tocar alarme do veículo automaticamente ao iniciar desmonte sem as chaves |
+| `Config.Dispatch` | Integração automática para notificar DP via `ps-dispatch`, `cd-dispatch`, ou `qs-dispatch` |
 | `Config.CarPartRewards` | Materiais por peça na Fase 1 |
 | `Config.PartProps` | Props visuais carregados ao remover peça |
 
@@ -161,21 +174,22 @@ Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar ve
 | `CopsBonus` | Multiplica payout quando há polícias online |
 | `PayoutByModel` | Payout específico por modelo de veículo |
 
-### NPC (`Config.NPC`)
+### NPC (`Config.NPC`) e Fence (`Config.Fence`)
 
 NPC fixo opcional. Targets disponíveis: **Como funciona**, **loja** (apenas bancada e soldadora), **Trabalho quente** (missão com emboscada).
 
 | Chave | Descrição |
 |-------|-----------|
-| `Enable` | Liga/desliga o NPC |
-| `Model` | Modelo do ped |
-| `Coords` | `vector4` posição + heading |
-| `Scenario` | Animação idle (ex.: `WORLD_HUMAN_CLIPBOARD`) |
-| `Shop.Enable` | Liga loja de itens por dinheiro |
-| `Shop.BenchPrice` | Preço da bancada |
-| `Mission.Enable` | Liga missões de emboscada via NPC |
-| `Mission.CooldownSeconds` | Cooldown entre pedidos de missão |
-| `Mission.AmbushChance` | Probabilidade 0..1 de emboscada ocorrer |
+| `NPC.Enable` | Liga/desliga o NPC |
+| `NPC.Model` | Modelo do ped |
+| `NPC.Coords` | `vector4` posição + heading |
+| `NPC.Scenario` | Animação idle (ex.: `WORLD_HUMAN_CLIPBOARD`) |
+| `NPC.Shop.Enable` | Liga loja de itens por dinheiro |
+| `NPC.Shop.BenchPrice` | Preço da bancada |
+| `NPC.Mission.Enable` | Liga missões de emboscada via NPC |
+| `NPC.Mission.CooldownSeconds` | Cooldown entre pedidos de missão |
+| `NPC.Mission.AmbushChance` | Probabilidade 0..1 de emboscada ocorrer |
+| `Fence.NightBonus` | Adiciona um bônus de pagamento se a venda for efetuada num horário noturno de jogo |
 
 ### Emboscadas (`Config.Ambush`)
 
@@ -287,6 +301,14 @@ O script **não depende de framework** para a lógica principal — inventário 
 - Auditado por fivem-audit skill (Claude Code)
 - 3 críticos, 5 altos resolvidos (v1.3.3 → v1.3.5)
 - Consolidação e otimização de schema SQL (v1.3.6)
+
+### UX Overhaul — 2026-04-12 (v1.3.7)
+- Remoção de pneus migrada para ox_target por roda (bones `wheel_*`); fim do polling de proximidade
+- Pneu carregado: G key abre menu "Colocar no chão / Colocar no truck" (`RegisterKeyMapping`)
+- Prop de pneu colocado no chão recebe ox_target para guardar no truck diretamente
+- Fix: bones inexistentes (2 portas) não criam mais targets na origem do veículo
+- Fix: bone do motor corrigido de `engine` → `bonnet`
+- lua54: `VPChopFindNearestTruck` exposta como global em `client/fence.lua`
 - Framework: QBox / QBCore / ESX compatível
 - lua54: yes — todas as funções cross-file verificadas como globais
 - ox_inventory, ox_target, oxmysql, ox_lib — versões atuais suportadas

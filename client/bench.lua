@@ -27,7 +27,7 @@ local function deliverPartToBench(benchId)
         useWhileDead = false,
         canCancel    = true,
         disable      = { move = true, car = true, combat = true },
-        anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 49 },
+        anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
     })
     if not ok then return end
     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:deliverPart', false, benchId)
@@ -50,7 +50,7 @@ local function craftOnBench(benchId, recipeIndex, recipe)
         useWhileDead = false,
         canCancel = true,
         disable = { move = true, car = true, combat = true },
-        anim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 49 },
+        anim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
     })
     if not ok then return end
     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchCraft', false, benchId, recipeIndex)

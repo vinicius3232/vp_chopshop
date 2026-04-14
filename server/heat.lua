@@ -3,6 +3,14 @@
 -- Expõe: VPChopHeatCalc(plate), VPChopHeatGetMultiplier(plate), VPChopHeatGetLabel(plate)
 -- Callback: 'vp_chopshop:vinScratch' — recebe netId, resolve placa server-side.
 
+-- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
+local VPChopEvt = VPChopEvt or {
+    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
+    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
+    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
+    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
+}
+
 --- Cache do nível anterior para emitir HEAT_CHANGED só em transições reais.
 local LastHeatLevel = {} ---@type table<string, string>
 
@@ -12,7 +20,6 @@ local PartCountByPlate = {} ---@type table<string, integer>
 local VinScratchCooldown = {} ---@type table<number, number>  src → expiry GetGameTimer
 
 -- Escuta PART_CHOPPED e incrementa contador por placa.
--- Nota: heat.lua é carregado DEPOIS de events.lua, então VPChopEvt já está disponível.
 AddEventHandler(VPChopEvt.PART_CHOPPED, function(src, netId, partKey, phase)
     -- Resolver placa a partir do netId para manter rastreio server-side
     local veh = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)

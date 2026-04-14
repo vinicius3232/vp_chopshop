@@ -19,6 +19,31 @@ local function getTruckHashes()
     return TruckModelHashes
 end
 
+-- [M1 FIX] Cache compartilhado de proximidade de truck para canInteract.
+-- Todos os props de pneu fazem o mesmo check — cache evita N GetGamePool por frame.
+local _truckNearCache = false
+local _truckNearTimer = 0
+local TRUCK_NEAR_INTERVAL = 500  -- ms entre scans
+
+local function isTruckNearby()
+    local now = GetGameTimer()
+    if now - _truckNearTimer < TRUCK_NEAR_INTERVAL then return _truckNearCache end
+    _truckNearTimer = now
+    _truckNearCache = false
+    local ppos   = GetEntityCoords(PlayerPedId())
+    local hashes = getTruckHashes()
+    for _, veh in ipairs(GetGamePool('CVehicle')) do
+        if DoesEntityExist(veh) and #(ppos - GetEntityCoords(veh)) < 5.0 then
+            local model = GetEntityModel(veh)
+            for _, h in ipairs(hashes) do
+                if model == h then _truckNearCache = true; break end
+            end
+        end
+        if _truckNearCache then break end
+    end
+    return _truckNearCache
+end
+
 -- ─── Blip ─────────────────────────────────────────────────────────────────────
 
 local function removeFenceBlip()
@@ -171,18 +196,18 @@ end)
 
 RegisterNetEvent('vp_chopshop:client:fenceRotated', function(label, coords)
     if label and coords then
-        lib.notify({ description='Contato mudou para: ' .. label, type='inform', duration=6000 })
+        lib.notify({ description=L('fence_rotated_to_fmt', label), type='inform', duration=6000 })
         setFenceBlip(coords, true)
     else
-        lib.notify({ description='O contato mudou de local.', type='inform', duration=5000 })
+        lib.notify({ description=L('fence_rotated_unknown'), type='inform', duration=5000 })
     end
 end)
 
 RegisterNetEvent('vp_chopshop:client:trustUp', function(newLevel)
-    local labels = { [1]='Conhecido', [2]='Confiável', [3]='Parceiro', [4]='Sócio' }
+    local levelLabel = L('fence_trust_level_' .. tostring(newLevel))
     lib.notify({
-        title='Fence — ' .. (labels[newLevel] or 'Nível ' .. newLevel),
-        description='Você ganhou a confiança do contato.',
+        title=L('fence_trust_up_title_fmt', levelLabel),
+        description=L('fence_trust_up_desc'),
         type='success', duration=7000,
     })
 end)
@@ -244,7 +269,7 @@ function openSellMenu()
         end
     end
     if #sellable == 0 then
-        lib.notify({ description='Nada para vender.', type='error' }); return
+        lib.notify({ description=L('fence_nothing_to_sell'), type='error' }); return
     end
     -- Montar context menu com todos os itens vendáveis
     local opts = {}
@@ -409,19 +434,7 @@ function VPChopSpawnTyreProp(position)
             label    = 'Carregar no truck',
             icon     = 'fa-solid fa-truck',
             distance = 2.0,
-            canInteract = function()
-                local ppos = GetEntityCoords(PlayerPedId())
-                local hashes = getTruckHashes()
-                for _, veh in ipairs(GetGamePool('CVehicle')) do
-                    if DoesEntityExist(veh) and #(ppos - GetEntityCoords(veh)) < 5.0 then
-                        local model = GetEntityModel(veh)
-                        for _, h in ipairs(hashes) do
-                            if model == h then return true end
-                        end
-                    end
-                end
-                return false
-            end,
+            canInteract = isTruckNearby,  -- [M1 FIX] cache 500ms; evita GetGamePool por frame
             onSelect = function() VPChopLoadTyreInTruck(prop) end,
         },
     })
@@ -450,7 +463,7 @@ end
 ---@param propHandle integer
 function VPChopPickUpTyre(propHandle)
     if CarryingTyre then
-        lib.notify({ description='Já está carregando um pneu.', type='error' }); return
+        lib.notify({ description=L('fence_already_carrying_tyre'), type='error' }); return
     end
     VPChopRemoveTyreProp(propHandle)
 
@@ -470,7 +483,7 @@ function VPChopPickUpTyre(propHandle)
         true, true, false, true, 1, true)
 
     CarryingTyre = { prop=prop }
-    lib.notify({ description='Carregando pneu. [E] = carregar no truck · [X] = largar', type='inform', duration=4000 })
+    lib.notify({ description=L('fence_tyre_carrying_hint'), type='inform', duration=4000 })
 
     -- Thread para E/X enquanto carrega
     CreateThread(function()
@@ -531,15 +544,35 @@ function VPChopLoadTyreInTruck(propHandle)
         end
         if truck then break end
     end
-    if not truck then lib.notify({ description='Sem pickup perto.', type='error' }); return end
+    if not truck then lib.notify({ description=L('fence_no_pickup_nearby'), type='error' }); return end
 
     local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
     local cur = math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0)
-    if cur >= max then lib.notify({ description='Truck cheio!', type='error' }); return end
+    if cur >= max then lib.notify({ description=L('fence_truck_full'), type='error' }); return end
 
     VPChopRemoveTyreProp(propHandle)
-    Entity(truck).state:set('chopTyreCount', cur + 1, true)
-    lib.notify({ description='Pneu carregado ('.. (cur+1) ..'/'..max..').', type='success', duration=2500 })
+    -- [H1 FIX] Notificar servidor para incrementar o contador server-side.
+    -- O state bag (false = sem broadcast para outros clientes) é mantido apenas para UI local.
+    TriggerServerEvent('vp_chopshop:tyre:truckLoad', truckNetId)
+    Entity(truck).state:set('chopTyreCount', cur + 1, false)
+    lib.notify({ description=L('fence_tyre_loaded_fmt', cur + 1, max), type='success', duration=2500 })
+end
+
+--- Retorna o handle do truck mais próximo dentro do raio indicado, ou nil se não houver.
+---@param radius number  raio máximo em metros (padrão 5.0)
+---@return integer|nil
+function VPChopFindNearestTruck(radius)
+    local hashes = getTruckHashes()
+    local ppos   = GetEntityCoords(PlayerPedId())
+    for _, veh in ipairs(GetGamePool('CVehicle')) do
+        if DoesEntityExist(veh) and #(ppos - GetEntityCoords(veh)) <= (radius or 5.0) then
+            local vm = GetEntityModel(veh)
+            for _, h in ipairs(hashes) do
+                if vm == h then return veh end
+            end
+        end
+    end
+    return nil
 end
 
 --- Carrega pneu no truck a partir do carry.
@@ -548,14 +581,16 @@ function VPChopLoadTyreInTruckFromCarry(truck)
     if not CarryingTyre then return end
     local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
     local cur = math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0)
-    if cur >= max then lib.notify({ description='Truck cheio!', type='error' }); return end
+    if cur >= max then lib.notify({ description=L('fence_truck_full'), type='error' }); return end
 
     local prop = CarryingTyre.prop
     CarryingTyre = nil
     if DoesEntityExist(prop) then DeleteObject(prop) end
 
-    Entity(truck).state:set('chopTyreCount', cur + 1, true)
-    lib.notify({ description='Pneu carregado ('.. (cur+1) ..'/'..max..').', type='success', duration=2500 })
+    -- [H1 FIX] Mesmo padrão: servidor contabiliza, state bag é apenas UI local (false).
+    TriggerServerEvent('vp_chopshop:tyre:truckLoad', NetworkGetNetworkIdFromEntity(truck))
+    Entity(truck).state:set('chopTyreCount', cur + 1, false)
+    lib.notify({ description=L('fence_tyre_loaded_fmt', cur + 1, max), type='success', duration=2500 })
 end
 
 -- ─── Cleanup ──────────────────────────────────────────────────────────────────

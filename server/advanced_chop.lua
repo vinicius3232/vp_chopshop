@@ -1,6 +1,13 @@
 -- ============================================================
 -- server/advanced_chop.lua
 -- Sistema de desmanche avançado por fases (requer jackstand levantado).
+-- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
+local VPChopEvt = VPChopEvt or {
+    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
+    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
+    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
+    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
+}
 --
 -- Fase 2 — Portas / Capô / Porta-malas  → requer serra    → 1× car_parts por peça
 -- Fase 3 — Motor                         → requer chave    → 5× car_parts (capô removido primeiro)
@@ -75,27 +82,9 @@ local function getVehCoords(netId)
     return GetEntityCoords(veh)
 end
 
---- Durabilidade da serra: usa o mesmo esquema de metadata que server/main.lua
---- (uses_remaining, decrescente). Retorna false se o jogador não tem a serra.
+--- Durabilidade da ferramenta
 local function consumeSaw(src)
-    local sawItem = (Config.AdvancedChop and Config.AdvancedChop.SawItem) or 'metal_saw'
-    local maxUses = (Config.ChopTool and Config.ChopTool.MaxUses) or 6
-
-    -- false = retorna item singular (consistente com server/main.lua)
-    local item = exports.ox_inventory:GetItem(src, sawItem, nil, false)
-    if not item or item.count < 1 then return false end
-
-    -- Esquema idêntico ao server/main.lua: uses_remaining decrescente
-    local remaining = tonumber(item.metadata and item.metadata.uses_remaining) or maxUses
-    remaining = remaining - 1
-
-    exports.ox_inventory:RemoveItem(src, sawItem, 1, item.metadata)
-    if remaining > 0 then
-        exports.ox_inventory:AddItem(src, sawItem, 1, { uses_remaining = remaining })
-    else
-        TriggerClientEvent('vp_chopshop:client:sawBroke', src)
-    end
-    return true
+    return VPChopConsumeTool(src, false)
 end
 
 -- ─── Fase 2: Portas / Capô / Porta-malas ─────────────────────────────────────
@@ -172,8 +161,7 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     if not ValidatePlayerNearPoint(src, vehCoords, 6.0) then return { ok = false, err = 'distance' } end
 
     -- Verificar chave de fenda
-    local sdItem = (Config.AdvancedChop and Config.AdvancedChop.ScrewdriverItem) or 'screwdriver'
-    if InvCount(src, sdItem) < 1 then
+    if not VPChopHasTool(src, true) then
         return { ok = false, err = 'no_screwdriver' }
     end
 
@@ -181,8 +169,8 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     local locked, lockKey = tryLock(netId, 'adv_engine')
     if not locked then return { ok = false, err = 'processing' } end
 
-    -- Consumir chave de fenda (verificado acima; remover após obter o lock para evitar TOCTOU)
-    if not InvRemove(src, sdItem, 1) then
+    -- Consumir chave de fenda (verificado acima; consumido agora no lock)
+    if not VPChopConsumeTool(src, true) then
         unlock(lockKey)
         return { ok = false, err = 'no_screwdriver' }
     end

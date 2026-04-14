@@ -6,14 +6,20 @@
 VPChopCarryingPart = nil
 
 --- Solta e elimina o prop carregado.
+--- Se era um pneu do macaco, remove também o target do ped e para a animação carry.
 function VPChopDropCarryPart()
     if not VPChopCarryingPart then return end
-    local prop = VPChopCarryingPart.propHandle
+    local wasTyre = VPChopCarryingPart.isTyre
+    local prop    = VPChopCarryingPart.propHandle
     if prop and DoesEntityExist(prop) then
         DetachEntity(prop, true, true)
         DeleteEntity(prop)
     end
     VPChopCarryingPart = nil
+    if wasTyre then
+        ClearPedTasksImmediately(PlayerPedId())
+        lib.hideTextUI()
+    end
 end
 
 RegisterNetEvent('vp_chopshop:client:sawBroke', function()

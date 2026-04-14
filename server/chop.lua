@@ -50,6 +50,14 @@ local function tryPartInner(src, netId, partKey)
     if not ChopParts[partKey] then return false, 'part', nil end
     if not Config.CarPartRewards[partKey] then return false, 'config', nil end
 
+    -- Quando advanced chop está ativo, portas/capô/porta-malas pertencem à Fase 2.
+    -- Fase 1 só processa pneus; rejeitar door-kind evita dupla recompensa e conflito de estado.
+    local partDef = ChopParts[partKey]
+    if Config.AdvancedChop and Config.AdvancedChop.Enable
+        and partDef and partDef.kind == 'door' then
+        return false, 'adv_only', nil
+    end
+
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh == 0 or not DoesEntityExist(veh) then return false, 'vehicle', nil end
 

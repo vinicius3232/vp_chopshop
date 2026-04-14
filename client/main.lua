@@ -1,7 +1,10 @@
--- [FIX L-4] Declarar AdvChopState antes do handler onResourceStop que o referencia (linha ~95).
--- Em Lua 5.4, 'local' não tem forward scope: sem esta declaração antecipada, a atribuição
--- em onResourceStop teria acessado _G.AdvChopState (global) em vez da local abaixo.
-local AdvChopState = {}
+-- [FIX L-4] Forward-declarations obrigatórias: o handler onResourceStop (abaixo) é uma closure
+-- que só pode capturar upvalues JÁ EM SCOPE no momento da sua definição (Lua 5.4).
+-- Sem estas declarações, o handler acederia às versões globais (_G.xxx = nil).
+local AdvChopState   = {}
+local JackstandData  = {}
+local destroyToolProp           -- função definida mais abaixo; atribuída antes do 1.º uso
+local _toolProp      = nil      -- prop handle; partilhado com spawnToolProp / destroyToolProp
 
 local function applyWorld(payload)
     if type(payload) ~= 'table' then return end
@@ -69,8 +72,11 @@ RegisterNetEvent('vp_chopshop:client:breakPart', function(netId, partKey)
     if not def then return end
     if def.kind == 'door' then
         SetVehicleDoorBroken(veh, def.index, true)
-    else
-        SetVehicleTyreBurst(veh, def.index, true, 1000.0)
+    elseif def.kind == 'tyre' then
+        -- Burst index (0,1,4,5) → sequential wheel index (0,1,2,3) para SetVehicleWheelXOffset
+        local seqMap = { [0]=0, [1]=1, [4]=2, [5]=3 }
+        local seqIdx = seqMap[def.index]
+        if seqIdx ~= nil then SetVehicleWheelXOffset(veh, seqIdx, 9999999.0) end
     end
 end)
 
@@ -85,7 +91,9 @@ AddEventHandler('onResourceStop', function(res)
     -- [FIX W-07] Props de jackstand (imp_prop_axel_stand_01a) criados em JackstandData
     -- precisam ser deletados explicitamente — caso contrário ficam como entidades orphan
     -- no mundo mesmo após o resource parar.
+    lib.hideTextUI()  -- garante que TextUI de pneu não fique presa
     for veh, data in pairs(JackstandData) do
+        if data._stopTyreThread then data._stopTyreThread() end
         if data.props then
             for _, prop in ipairs(data.props) do
                 if DoesEntityExist(prop) then DeleteEntity(prop) end
@@ -124,16 +132,74 @@ end)
 -- CHOP UTILITIES (moved from lifts.lua after lift removal)
 -- ============================================================
 
-local _toolProp = nil
+-- _toolProp e destroyToolProp são forward-declarados no topo do ficheiro.
+-- As atribuições abaixo preenchem os upvalues capturados pelo onResourceStop.
+
+local function getPlayerTool(requiredType)
+    if not Config.Tools then return nil, nil end
+    local bestName, bestCfg = nil, nil
+    for tName, tCfg in pairs(Config.Tools) do
+        local isDrill = (tName == 'mechanic_drill')
+        local wantDrill = (requiredType == 'drill')
+        if isDrill == wantDrill then
+            local count = exports.ox_inventory:Search('count', tName) or 0
+            if count > 0 then
+                bestName, bestCfg = tName, tCfg
+                break
+            end
+        end
+    end
+    return bestName, bestCfg
+end
+
+function VPChopTriggerDispatch(veh)
+    if not Config.Dispatch or not Config.Dispatch.Enable then return end
+    local sys = Config.Dispatch.System
+    if sys == 'ps-dispatch' then
+        pcall(function() exports['ps-dispatch']:SuspiciousActivity() end)
+    elseif sys == 'cd_dispatch' then
+        pcall(function()
+            local data = exports['cd_dispatch']:GetPlayerInfo()
+            TriggerServerEvent('cd_dispatch:AddNotification', {
+                job_table = {'police', 'sheriff', 'bcso'}, 
+                coords = data.coords,
+                title = '10-90 - Desmanche Ilegal',
+                message = 'Notícia de desmanche de veículo em andamento.', 
+                flash = 0, unique_id = data.unique_id, sound = 1,
+                blip = { sprite = 530, scale = 1.0, color = 1, flashes = false, text = '911 - Desmanche', time = 5, radius = 0 }
+            })
+        end)
+    end
+end
+
+function VPChopCheckAlarmAndDispatch(veh, toolCfg)
+    if Config.AlarmOnChop then
+        local lockStatus = GetVehicleDoorLockStatus(veh)
+        if lockStatus > 1 or (not Config.RequireVehicleKeys and not hasVehicleKeys(veh)) then
+            SetVehicleAlarm(veh, true)
+            StartVehicleAlarm(veh)
+        end
+    end
+    if toolCfg and toolCfg.dispatchChance then
+        if math.random() <= toolCfg.dispatchChance then
+            VPChopTriggerDispatch(veh)
+        end
+    end
+end
 
 local function spawnToolProp(propCfg)
-    local cfg = propCfg or (Config.ChopTool and Config.ChopTool.HandProp)
+    local cfg = propCfg
+    if not cfg then
+        local _, tCfg = getPlayerTool()
+        cfg = tCfg and tCfg.HandProp
+    end
     if not cfg or not cfg.model then return end
     local ok = pcall(lib.requestModel, cfg.model, 5000)
     if not ok then return end
     local ped = PlayerPedId()
     local pos = GetEntityCoords(ped)
     local prop = CreateObject(cfg.model, pos.x, pos.y, pos.z, true, true, false)
+    SetEntityAsMissionEntity(prop, true, true)
     SetModelAsNoLongerNeeded(cfg.model)
     if not prop or prop == 0 then return end
     local handBone = GetPedBoneIndex(ped, 28422)
@@ -145,7 +211,8 @@ local function spawnToolProp(propCfg)
     _toolProp = prop
 end
 
-local function destroyToolProp()
+-- Atribuição ao upvalue forward-declarado (não 'local function' — criaria um novo local)
+destroyToolProp = function()
     if _toolProp and DoesEntityExist(_toolProp) then
         DetachEntity(_toolProp, true, true)
         DeleteEntity(_toolProp)
@@ -168,6 +235,7 @@ local function spawnAndAttachPart(partKey, veh)
     local ok = pcall(lib.requestModel, cfg.model, 5000)
     if not ok then return nil end
     local prop = CreateObject(cfg.model, spawnPos.x, spawnPos.y, spawnPos.z, true, true, false)
+    SetEntityAsMissionEntity(prop, true, true)
     SetModelAsNoLongerNeeded(cfg.model)
     if not prop or prop == 0 then return nil end
     local ped = PlayerPedId()
@@ -183,7 +251,7 @@ end
 local function getPartAnimAndSound(partKey)
     local def = ChopParts[partKey]
     local cfg  = Config.ChopAnimations or {}
-    local defaultAnim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 49 }
+    local defaultAnim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 }
     if partKey == 'bonnet' or partKey == 'boot' then
         return cfg.grinder or defaultAnim, 'grinder'
     end
@@ -254,21 +322,23 @@ local function openJackstandChopMenu(veh)
         VPChopNotify(L('notify_exit_vehicle'), 'error')
         return
     end
-    if not hasVehicleKeys(veh) then
+    if Config.RequireVehicleKeys and not hasVehicleKeys(veh) then
         VPChopNotify(L('notify_no_keys'), 'error')
         return
     end
-    if Config.ChopTool and Config.ChopTool.Item then
-        if exports.ox_inventory:Search('count', Config.ChopTool.Item) < 1 then
-            VPChopNotify(L('notify_no_saw'), 'error')
-            return
-        end
+    local tName, tCfg = getPlayerTool()
+    if not tName then
+        VPChopNotify(L('notify_no_saw'), 'error')
+        return
     end
     local netId = NetworkGetNetworkIdFromEntity(veh)
     local options = {}
     for _, partKey in ipairs(ChopPartOrder) do
         local def = ChopParts[partKey]
-        if def and not isPartMissing(veh, def) then
+        -- Quando advanced chop está activo, portas/capô/porta-malas são exclusivas da Fase 2.
+        local advOwns = Config.AdvancedChop and Config.AdvancedChop.Enable and def and def.kind == 'door'
+        -- Pneus são tratados pelo sistema de proximidade (wheel_theft pattern) — não aparecem aqui.
+        if def and not isPartMissing(veh, def) and not advOwns and def.kind ~= 'tyre' then
             local partLabel = L(def.labelKey)
             options[#options + 1] = {
                 title = partLabel,
@@ -280,9 +350,10 @@ local function openJackstandChopMenu(veh)
                     end
                     local animCfg, soundType = getPartAnimAndSound(partKey)
                     playChopSound(soundType)
-                    spawnToolProp()
+                    spawnToolProp(tCfg and tCfg.HandProp)
+                    VPChopCheckAlarmAndDispatch(veh, tCfg)
                     local ok = lib.progressBar({
-                        duration     = Config.ChopProgressMs,
+                        duration     = math.floor(Config.ChopProgressMs * (tCfg and tCfg.speedMult or 1.0)),
                         label        = L('progress_dismantling_fmt', partLabel),
                         useWhileDead = false,
                         canCancel    = true,
@@ -331,11 +402,9 @@ end
 -- JACKSTAND SYSTEM (inline — avoids FiveM cache issues)
 -- ============================================================
 
-local JackstandData = {}
+JackstandData = {}   -- forward-declared no topo; re-inicializa sem criar novo local
 local JackstandBusy = false
 
--- [STRUCT-07] Convertido para local: usado apenas em VPChopJackstandStealTyre
--- neste mesmo arquivo. Global desnecessária exposta ao ambiente compartilhado.
 local function VPTyreSpawnWheelPropInHand(partKey)
     local modelName = 'prop_wheel_01'
     RequestModel(modelName)
@@ -347,13 +416,25 @@ local function VPTyreSpawnWheelPropInHand(partKey)
     local ped  = PlayerPedId()
     local pos  = GetEntityCoords(ped)
     local prop = CreateObject(GetHashKey(modelName), pos.x, pos.y, pos.z, true, true, true)
+    SetEntityAsMissionEntity(prop, true, true)
     SetModelAsNoLongerNeeded(modelName)
     if not prop or prop == 0 then return nil end
+    -- Attachment idêntico ao PutWheelInHands do wheel_theft (bone 4089, mesmos offsets/rotações)
     local bone = GetPedBoneIndex(ped, 4089)
     AttachEntityToEntity(prop, ped, bone,
         0.1, 0.08, 0.25,
         190.0, 0.0, 0.0,
         true, false, false, false, 2, true)
+    -- Carry animation: igual ao PlayAnimFree do wheel_theft (flag 49 = loop, -1 = sem timeout)
+    RequestAnimDict('anim@heists@box_carry@')
+    local t0 = GetGameTimer()
+    while not HasAnimDictLoaded('anim@heists@box_carry@') do
+        if GetGameTimer() - t0 > 2000 then break end
+        Wait(50)
+    end
+    if HasAnimDictLoaded('anim@heists@box_carry@') then
+        TaskPlayAnim(ped, 'anim@heists@box_carry@', 'idle', 5.0, 1.0, -1, 49, 0.0, false, false, false)
+    end
     return prop
 end
 
@@ -429,15 +510,16 @@ local function doLiftVehicle(veh)
     local targetZ = origZ + liftH
     FreezeEntityPosition(veh, true)
     CreateThread(function()
-        -- [FIX W-09] Guard de existência: sem isso, se o veículo for deletado durante a
-        -- animação (despawn, destruição, saída da OneSync bubble) GetEntityCoords retorna
-        -- {0,0,0} e nz nunca alcança targetZ — loop infinito consumindo CPU para sempre.
+        local duration = 900.0
+        local speed = liftH / duration
         while DoesEntityExist(veh) do
             local cur = GetEntityCoords(veh)
-            local nz  = math.min(targetZ, cur.z + 0.009)
+            if cur.z >= targetZ then break end
+            local dt = GetFrameTime() * 1000.0
+            local step = speed * dt
+            local nz  = math.min(targetZ, cur.z + step)
             SetEntityCoordsNoOffset(veh, cur.x, cur.y, nz, true, true, true)
-            if nz >= targetZ then break end
-            Wait(16)
+            Wait(0)
         end
     end)
     return origZ
@@ -446,20 +528,22 @@ end
 local function doLowerVehicle(veh, originalZ)
     local done = false
     CreateThread(function()
-        -- [FIX W-08] Guard de existência: mesmo motivo que doLiftVehicle — loop infinito
-        -- se o veículo sumir durante a descida.
+        local duration = 450.0
+        local speed = ((Config.Jackstand and Config.Jackstand.LiftHeight) or 0.18) / duration
         while DoesEntityExist(veh) do
             local cur = GetEntityCoords(veh)
-            local nz  = math.max(originalZ, cur.z - 0.013)
-            SetEntityCoordsNoOffset(veh, cur.x, cur.y, nz, true, true, true)
-            if nz <= originalZ then
+            if cur.z <= originalZ then
                 FreezeEntityPosition(veh, false)
                 done = true
                 break
             end
-            Wait(16)
+            local dt = GetFrameTime() * 1000.0
+            local step = speed * dt
+            local nz  = math.max(originalZ, cur.z - step)
+            SetEntityCoordsNoOffset(veh, cur.x, cur.y, nz, true, true, true)
+            Wait(0)
         end
-        done = true -- garante que o while externo saia mesmo se o veh sumiu
+        done = true
     end)
     local deadline = GetGameTimer() + 3000
     while not done and GetGameTimer() < deadline do Wait(50) end
@@ -489,6 +573,249 @@ local function hasNearbyWelder(pos, radius)
     return false
 end
 
+-- ─── Bolt minigame (inline — evita problema de carregamento cross-file lua54) ──
+-- Spawna parafusos 3D (bolt.ydr) na face da roda; jogador segura [E] para girar.
+-- Fallback: lib.skillCheck se o modelo não carregar.
+do
+    local BOLT_MODEL  = 'bolt'
+    local BOLT_COUNT  = 5
+    local BOLT_RADIUS = 0.13
+    local TURNS_DEG   = 720.0
+    local TURN_SPEED  = 5.5
+    local TIMEOUT_MS  = 30000
+    local ANIM_DICT   = 'mini@repair'
+    local ANIM_CLIP   = 'fixing_a_player'
+
+    local function boltWorldPos(vehicle, wheelPos, boltIndex)
+        local vRot  = GetEntityRotation(vehicle, 5)
+        local yaw   = math.rad(vRot.z)
+        local pitch = math.rad(vRot.x)
+        local fX = -math.sin(yaw) * math.cos(pitch)
+        local fY =  math.cos(yaw) * math.cos(pitch)
+        local fZ =  math.sin(pitch)
+        local a  = (2 * math.pi / BOLT_COUNT) * boltIndex
+        local ca, sa = math.cos(a), math.sin(a)
+        return vector3(
+            wheelPos.x + BOLT_RADIUS * (ca * 0 + sa * fX),
+            wheelPos.y + BOLT_RADIUS * (ca * 0 + sa * fY),
+            wheelPos.z + BOLT_RADIUS * (ca * 1 + sa * fZ)
+        )
+    end
+
+    function VPChopBoltMinigameFallback()
+        local jmg   = Config.Jackstand and Config.Jackstand.Minigame
+        local diffs = (jmg and jmg.SkillCheckDifficulties) or { 'easy', 'medium', 'medium' }
+        local keys  = (jmg and jmg.SkillCheckKeys)         or { 'e', 'e', 'e' }
+        local passed = lib.skillCheck(diffs, keys)
+        if not passed then VPChopNotify(L('tyremission_minigame_fail'), 'error') end
+        return passed
+    end
+
+    function VPChopBoltMinigame(vehicle, wheelIndex)
+        local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
+        local boneKey   = boneNames[wheelIndex + 1]
+        if not boneKey then return false end
+        local boneId = GetEntityBoneIndexByName(vehicle, boneKey)
+        if not boneId or boneId == -1 then return VPChopBoltMinigameFallback() end
+        local wheelPos = GetWorldPositionOfEntityBone(vehicle, boneId)
+
+        local boltHash = GetHashKey(BOLT_MODEL)
+        RequestModel(boltHash)
+        local t0 = GetGameTimer()
+        while not HasModelLoaded(boltHash) do
+            if GetGameTimer() - t0 > 4000 then return VPChopBoltMinigameFallback() end
+            Wait(50)
+        end
+
+        RequestAnimDict(ANIM_DICT)
+        t0 = GetGameTimer()
+        while not HasAnimDictLoaded(ANIM_DICT) do
+            if GetGameTimer() - t0 > 3000 then break end
+            Wait(50)
+        end
+
+        local bolts = {}
+        for i = 0, BOLT_COUNT - 1 do
+            local wp  = boltWorldPos(vehicle, wheelPos, i)
+            local obj = CreateObject(boltHash, wp.x, wp.y, wp.z, true, true, false)
+            if obj and obj ~= 0 then
+                SetEntityCollision(obj, false, false)
+                local off = GetOffsetFromEntityGivenWorldCoords(vehicle, wp.x, wp.y, wp.z)
+                AttachEntityToEntity(obj, vehicle, 0,
+                    off.x, off.y, off.z, 0.0, 0.0, 0.0,
+                    false, false, false, false, 0, true)
+                bolts[#bolts + 1] = { ent = obj, deg = 0.0 }
+            end
+        end
+        SetModelAsNoLongerNeeded(boltHash)
+
+        if #bolts == 0 then return VPChopBoltMinigameFallback() end
+
+        local ped = PlayerPedId()
+        if HasAnimDictLoaded(ANIM_DICT) then
+            TaskPlayAnim(ped, ANIM_DICT, ANIM_CLIP, 8.0, -1.0, -1, 49, 0.0, false, false, false)
+        end
+
+        local cancelled, timedOut = false, false
+        local startTime = GetGameTimer()
+        local remaining = #bolts
+
+        for idx = 1, #bolts do
+            local bolt = bolts[idx]
+            lib.showTextUI(('[E] ' .. L('bolt_minigame_bolt_fmt')):format(idx, #bolts),
+                { position = 'right-center', icon = 'wrench' })
+            while bolt.deg < TURNS_DEG do
+                if GetGameTimer() - startTime > TIMEOUT_MS then timedOut = true; break end
+                if IsControlJustReleased(0, 307) then cancelled = true; break end
+                if IsControlPressed(0, 38) then
+                    bolt.deg = bolt.deg + TURN_SPEED
+                    local r = GetEntityRotation(bolt.ent, 5)
+                    SetEntityRotation(bolt.ent, r.x, r.y, r.z + TURN_SPEED, 5, true)
+                end
+                Wait(0)
+            end
+            lib.hideTextUI()
+            if cancelled or timedOut then break end
+            DetachEntity(bolt.ent, true, true)
+            FreezeEntityPosition(bolt.ent, false)
+            SetEntityVelocity(bolt.ent,
+                (math.random() - 0.5) * 0.8,
+                (math.random() - 0.5) * 0.8,
+                math.random() * 0.4 + 0.15)
+            SetEntityAsNoLongerNeeded(bolt.ent)
+            bolts[idx].ent = nil
+            remaining = remaining - 1
+            Wait(120)
+        end
+
+        for _, b in ipairs(bolts) do
+            if b.ent and DoesEntityExist(b.ent) then DeleteEntity(b.ent) end
+        end
+        ClearPedTasksImmediately(ped)
+        if HasAnimDictLoaded(ANIM_DICT) then RemoveAnimDict(ANIM_DICT) end
+
+        if cancelled or timedOut then
+            VPChopNotify(L('tyremission_minigame_fail'), 'error')
+            return false
+        end
+        return remaining == 0
+    end
+end
+
+-- ─── Tyre proximity detection (wheel_theft pattern) ─────────────────────────
+-- Localiza a roda MONTADA mais próxima do jogador.
+-- isMounted via GetVehicleWheelXOffset: roda intacta ≈ 0.0; removida = 9999999.
+-- Só rodas montadas entram na comparação de distância.
+local function findNearestMountedWheel(veh)
+    local ped     = PlayerPedId()
+    local pCoords = GetEntityCoords(ped)
+    local vmin, vmax = GetModelDimensions(GetEntityModel(veh))
+
+    -- Posições aproximadas das 4 rodas no espaço do modelo (igual ao wheel_theft)
+    local offsets = {
+        { x = vmin.x, y = vmax.y - 0.7, z = vmin.z },  -- 0: wheel_lf
+        { x = vmax.x, y = vmax.y - 0.7, z = vmin.z },  -- 1: wheel_rf
+        { x = vmin.x, y = vmin.y + 0.7, z = vmin.z },  -- 2: wheel_lr
+        { x = vmax.x, y = vmin.y + 0.7, z = vmin.z },  -- 3: wheel_rr
+    }
+    local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
+    local suspNames = { 'suspension_lf', 'suspension_rf', 'suspension_lr', 'suspension_rr' }
+
+    local bestDist = 1000.0
+    local bestIdx, bestCoords
+
+    for i, off in ipairs(offsets) do
+        local wheelIdx0 = i - 1  -- índice 0-based
+        -- Só considera rodas ainda montadas (offset normal < 300; removidas = 9999999)
+        local xOff = GetVehicleWheelXOffset(veh, wheelIdx0)
+        if math.abs(xOff) < 300.0 then
+            local wc = GetOffsetFromEntityInWorldCoords(veh, off.x, off.y, off.z)
+            -- Refinar com bone de suspensão se disponível (mais preciso)
+            local suspId = GetEntityBoneIndexByName(veh, suspNames[i])
+            if suspId and suspId ~= -1 then
+                local sc = GetWorldPositionOfEntityBone(veh, suspId)
+                if sc.x ~= 0.0 or sc.y ~= 0.0 then wc = sc end
+            end
+            local d = #(wc - pCoords)
+            if d < bestDist then
+                bestDist   = d
+                bestIdx    = wheelIdx0
+                bestCoords = wc
+            end
+        end
+    end
+
+    if not bestIdx then return nil end  -- todas as rodas já removidas
+
+    local idx1 = bestIdx + 1  -- 1-based para boneNames/suspNames
+    -- isMounted = true garantido: só rodas com offset normal chegam aqui
+    return bestCoords, bestDist, bestIdx, boneNames[idx1], true
+end
+
+-- Executa o roubo de uma roda: progress bar → validação server → visual remove + prop
+local function doJackstandTyreSteal(veh, wheelIdx, partKey)
+    if JackstandBusy then return end
+    JackstandBusy = true
+    CreateThread(function()
+        -- Progress bar: puxando o pneu
+        local okp = lib.progressBar({
+            duration     = 4000,
+            label        = L('tyremission_pulling_tyre'),
+            useWhileDead = false, canCancel = true,
+            disable      = { move = true, car = true, combat = true },
+            anim         = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
+        })
+        if not okp then JackstandBusy = false; return end
+
+        -- Validação server + recompensa pendente
+        local netId = NetworkGetNetworkIdFromEntity(veh)
+        local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:chopPart', false, netId, partKey)
+        if not cbOk then res = nil end
+
+        JackstandBusy = false
+
+        if not res or not res.ok then
+            if res and res.err == 'cooldown' and res.wait then
+                VPChopNotify(L('notify_cooldown_fmt', res.wait), 'error')
+            else
+                VPChopNotify(
+                    (res and res.err) and L('notify_chop_failed_fmt', VPChopLocaleErr(res.err))
+                    or L('notify_generic_error'), 'error')
+            end
+            return
+        end
+
+        -- wheelIdx é 0-3 sequencial (FL=0, FR=1, RL=2, RR=3) — correto para SetVehicleWheelXOffset
+        -- Requer controlo de rede para alterar propriedades visuais do veículo
+        NetworkRequestControlOfEntity(veh)
+        local deadline = GetGameTimer() + 1000
+        while not NetworkHasControlOfEntity(veh) and GetGameTimer() < deadline do
+            Wait(50)
+        end
+        SetVehicleWheelXOffset(veh, wheelIdx, 9999999.0)
+
+        -- Prop nas mãos + reiniciar carry animation (igual ao PutWheelInHands do wheel_theft)
+        local wheelProp = VPTyreSpawnWheelPropInHand(partKey)
+        VPChopDropCarryPart()
+        VPChopCarryingPart = { partKey = partKey, propHandle = wheelProp, isTyre = true }
+
+        -- Thread de carry: exibe TextUI enquanto o pneu estiver na mão.
+        -- A ação [G] é tratada por RegisterKeyMapping abaixo (key bind real, funciona a pé).
+        CreateThread(function()
+            while VPChopCarryingPart and VPChopCarryingPart.isTyre do
+                lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
+                    position = 'left-center',
+                    icon     = 'circle-dot',
+                })
+                Wait(200)
+            end
+            lib.hideTextUI()
+        end)
+    end)
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Broadcast do servidor: porta/capô/porta-malas removida visualmente + atualiza estado local
 RegisterNetEvent('vp_chopshop:adv:breakDoor', function(netId, partKey, doorIndex)
     local veh = NetworkGetEntityFromNetworkId(netId)
@@ -500,12 +827,18 @@ end)
 
 local function doAdvChopPart(veh, netId, partKey)
     if JackstandBusy then return end
+    local tName, tCfg = getPlayerTool()
+    if not tName then
+        VPChopNotify(L('notify_no_saw'), 'error')
+        return
+    end
     JackstandBusy = true
     local ms      = (Config.AdvancedChop and Config.AdvancedChop.DoorProgressMs) or 6000
     local sawAnim = Config.AdvancedChop and Config.AdvancedChop.SawAnim
     spawnToolProp(sawAnim and sawAnim.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
     local ok = lib.progressBar({
-        duration = ms, label = L('adv_progress_door'),
+        duration = math.floor(ms * (tCfg.speedMult or 1.0)), label = L('adv_progress_door'),
         useWhileDead = false, canCancel = true,
         disable = { move = true, car = true, combat = true },
         anim = {
@@ -527,12 +860,15 @@ end
 
 local function doAdvChopEngine(veh, netId)
     if JackstandBusy then return end
+    local tName, tCfg = getPlayerTool('drill')
+    local speedMult = tCfg and tCfg.speedMult or 1.0
     JackstandBusy = true
     local ms      = (Config.AdvancedChop and Config.AdvancedChop.EngineProgressMs) or 8000
     local engAnim = Config.AdvancedChop and Config.AdvancedChop.EngineAnim
     spawnToolProp(engAnim and engAnim.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
     local ok = lib.progressBar({
-        duration = ms, label = L('adv_progress_engine'),
+        duration = math.floor(ms * speedMult), label = L('adv_progress_engine'),
         useWhileDead = false, canCancel = true,
         disable = { move = true, car = true, combat = true },
         anim = {
@@ -558,12 +894,18 @@ local function doAdvChopCarcass(veh, netId)
         VPChopNotify(L('err_no_welder_adv'), 'error')
         return
     end
+    local tName, tCfg = getPlayerTool()
+    if not tName then
+        VPChopNotify(L('notify_no_saw'), 'error')
+        return
+    end
     JackstandBusy = true
     local ms       = (Config.AdvancedChop and Config.AdvancedChop.CarcassProgressMs) or 10000
     local carcAnim = Config.AdvancedChop and Config.AdvancedChop.CarcassAnim
     spawnToolProp(carcAnim and carcAnim.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
     local ok = lib.progressBar({
-        duration = ms, label = L('adv_progress_carcass'),
+        duration = math.floor(ms * (tCfg.speedMult or 1.0)), label = L('adv_progress_carcass'),
         useWhileDead = false, canCancel = true,
         disable = { move = true, car = true, combat = true },
         anim = {
@@ -585,13 +927,6 @@ end
 -- ─────────────────────────────────────────────────────────────────────────────
 
 local function addRaisedCarTargets(veh)
-    -- SetVehicleWheelXOffset uses sequential indices 0-3 (not GTA tyre burst slots 0,1,4,5)
-    local wheelSlots = {
-        { key = 'wheel_lf', idx = 0 },
-        { key = 'wheel_rf', idx = 1 },
-        { key = 'wheel_lr', idx = 2 },
-        { key = 'wheel_rr', idx = 3 },
-    }
     local targets = {}
     targets[#targets + 1] = {
         name        = 'vp_chop_jack_lower_' .. tostring(veh),
@@ -601,32 +936,13 @@ local function addRaisedCarTargets(veh)
         canInteract = function() return JackstandData[veh] ~= nil and not JackstandBusy end,
         onSelect    = function() VPChopJackstandLowerCar(veh) end,
     }
-    for i = 1, #wheelSlots do
-        local w   = wheelSlots[i]
-        local wKey = w.key
-        local wIdx = w.idx
-        local def  = ChopParts and ChopParts[wKey]
-        local lbl  = (def and L(def.labelKey)) or wKey
-        targets[#targets + 1] = {
-            name        = 'vp_chop_jack_tyre_' .. wKey .. '_' .. tostring(veh),
-            label       = L('tyremission_steal_label') .. ' - ' .. lbl,
-            icon        = 'fa-solid fa-circle',
-            distance    = 2.5,
-            canInteract = function()
-                -- wheel already removed when offset > 300 (we set 9999999.0)
-                return JackstandData[veh] ~= nil
-                    and not JackstandBusy
-                    and GetVehicleWheelXOffset(veh, wIdx) < 300
-            end,
-            onSelect = function() VPChopJackstandStealTyre(veh, wKey, wIdx) end,
-        }
-    end
-
     -- Fase 2/3/4: desmanche avançado (requer Config.AdvancedChop.Enable)
     if Config.AdvancedChop and Config.AdvancedChop.Enable then
         local netId = NetworkGetNetworkIdFromEntity(veh)
 
         -- Fase 2: portas / capô / porta-malas (bone-based, requer serra)
+        -- Apenas adiciona o target se o bone existir no rig do veículo
+        -- (carros de 2 portas não têm door_dside_r / door_pside_r)
         local advDoorParts = {
             { key = 'door_dside_f', bone = 'door_dside_f' },
             { key = 'door_pside_f', bone = 'door_pside_f' },
@@ -638,30 +954,38 @@ local function addRaisedCarTargets(veh)
         for _, ap in ipairs(advDoorParts) do
             local aKey  = ap.key
             local aBone = ap.bone
-            local def   = ChopParts[aKey]
-            local lbl   = def and L(def.labelKey) or aKey
-            targets[#targets + 1] = {
-                name     = 'vp_adv_chop_' .. aKey .. '_' .. tostring(veh),
-                label    = L('adv_target_door_fmt', lbl),
-                icon     = 'fa-solid fa-screwdriver-wrench',
-                bones    = { aBone },
-                distance = 2.0,
-                canInteract = function()
-                    return JackstandData[veh] ~= nil and not advIsChopped(netId, aKey)
-                end,
-                onSelect = function() doAdvChopPart(veh, netId, aKey) end,
-            }
+            -- Ignorar se o bone não existe neste veículo
+            if GetEntityBoneIndexByName(veh, aBone) ~= -1 then
+                local def = ChopParts[aKey]
+                local lbl = def and L(def.labelKey) or aKey
+                targets[#targets + 1] = {
+                    name     = 'vp_adv_chop_' .. aKey .. '_' .. tostring(veh),
+                    label    = L('adv_target_door_fmt', lbl),
+                    icon     = 'fa-solid fa-screwdriver-wrench',
+                    bones    = { aBone },
+                    distance = 2.5,
+                    canInteract = function()
+                        return JackstandData[veh] ~= nil
+                            and not JackstandBusy
+                            and not advIsChopped(netId, aKey)
+                    end,
+                    onSelect = function() doAdvChopPart(veh, netId, aKey) end,
+                }
+            end
         end
 
-        -- Fase 3: motor (requer capô removido + chave de fenda)
+        -- Fase 3: motor (requer capô removido)
+        -- Usa o bone 'bonnet' como âncora — engine fica sob o capô;
+        -- 'engine' não existe em todos os rigs GTA V.
         targets[#targets + 1] = {
             name     = 'vp_adv_chop_engine_' .. tostring(veh),
             label    = L('adv_target_engine'),
             icon     = 'fa-solid fa-gear',
-            bones    = { 'engine' },
-            distance = 2.0,
+            bones    = { 'bonnet' },
+            distance = 2.5,
             canInteract = function()
                 return JackstandData[veh] ~= nil
+                    and not JackstandBusy
                     and advIsChopped(netId, 'bonnet')
                     and not advIsChopped(netId, 'adv_engine')
             end,
@@ -673,9 +997,10 @@ local function addRaisedCarTargets(veh)
             name     = 'vp_adv_chop_carcass_' .. tostring(veh),
             label    = L('adv_target_carcass'),
             icon     = 'fa-solid fa-scissors',
-            distance = 3.0,
+            distance = 3.5,
             canInteract = function()
                 return JackstandData[veh] ~= nil
+                    and not JackstandBusy
                     and advIsChopped(netId, 'adv_engine')
                     and not advIsChopped(netId, 'adv_carcass')
             end,
@@ -720,7 +1045,7 @@ local function addRaisedCarTargets(veh)
                     useWhileDead = false,
                     canCancel    = true,
                     disable      = { move = true, car = true, combat = true },
-                    anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 49 },
+                    anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
                 })
                 if not ok2 then return end
                 local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:discardVehicle', false, netId)
@@ -739,6 +1064,39 @@ local function addRaisedCarTargets(veh)
                 end
             end,
         }
+    end
+
+    -- Targets individuais por roda (ox_target mira no bone da roda)
+    -- seqIdx 0-3 para SetVehicleWheelXOffset; partKey = nome do bone = chave em ChopParts
+    local tyreSlots = {
+        { key = 'wheel_lf', bone = 'wheel_lf', seqIdx = 0 },
+        { key = 'wheel_rf', bone = 'wheel_rf', seqIdx = 1 },
+        { key = 'wheel_lr', bone = 'wheel_lr', seqIdx = 2 },
+        { key = 'wheel_rr', bone = 'wheel_rr', seqIdx = 3 },
+    }
+    for _, ts in ipairs(tyreSlots) do
+        local tKey    = ts.key
+        local tBone   = ts.bone
+        local tSeqIdx = ts.seqIdx
+        local def     = ChopParts[tKey]
+        if def then
+            local lbl = L(def.labelKey)
+            targets[#targets + 1] = {
+                name     = 'vp_chop_tyre_' .. tKey .. '_' .. tostring(veh),
+                label    = L('tyremission_steal_label') .. ' — ' .. lbl,
+                icon     = 'fa-solid fa-circle-dot',
+                bones    = { tBone },
+                distance = 3.0,
+                canInteract = function()
+                    return JackstandData[veh] ~= nil
+                        and not JackstandBusy
+                        and math.abs(GetVehicleWheelXOffset(veh, tSeqIdx)) < 300.0
+                end,
+                onSelect = function()
+                    doJackstandTyreSteal(veh, tSeqIdx, tKey)
+                end,
+            }
+        end
     end
 
     exports.ox_target:addLocalEntity(veh, targets)
@@ -818,7 +1176,7 @@ function VPChopJackstandStealTyre(veh, partKey, tyreIdx)
             duration = 4000, label = L('tyremission_pulling_tyre'),
             useWhileDead = false, canCancel = true,
             disable = { move = true, car = true, combat = true },
-            anim = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 49 },
+            anim = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
         })
         -- [FIX H-4] Mover o reset do mutex para DEPOIS das operações assíncronas.
         -- O reset antecipado aqui permitia que uma segunda chamada entrasse enquanto
@@ -858,16 +1216,23 @@ function VPChopJackstandRaiseCar()
     if not best then VPChopNotify(L('jackstand_no_car'), 'error'); return end
     if JackstandData[best] then VPChopNotify(L('jackstand_already_raised'), 'error'); return end
     JackstandBusy = true
+    local raiseAnim = jcfg.RaiseAnim
+    spawnToolProp(raiseAnim and raiseAnim.prop)
     local ok = lib.progressBar({
         duration = jcfg.LiftProgressMs or 8000, label = L('jackstand_progress_raise'),
         useWhileDead = false, canCancel = true,
         disable = { move = true, car = true, combat = true },
-        anim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 49 },
+        anim = {
+            dict = (raiseAnim and raiseAnim.dict) or 'mini@repair',
+            clip = (raiseAnim and raiseAnim.clip) or 'fixing_a_player',
+            flag = (raiseAnim and raiseAnim.flag) or 1,
+        },
     })
+    destroyToolProp()
     if not ok then JackstandBusy = false; return end
     local props = spawnJackstandProps(best)
     local origZ = doLiftVehicle(best)
-    Wait(350)
+    Wait(950)   -- aguarda o levantamento completo (~900ms a 0.001/5ms) antes de fixar os cavaletes
     attachJackstandsToCar(best, props)
     JackstandData[best] = { props = props, originalZ = origZ }
     JackstandBusy = false
@@ -880,12 +1245,19 @@ function VPChopJackstandLowerCar(veh)
     if not data then return end
     if JackstandBusy then VPChopNotify(L('jackstand_busy'), 'error'); return end
     JackstandBusy = true
+    local lowerAnim = Config.Jackstand and Config.Jackstand.LowerAnim
+    spawnToolProp(lowerAnim and lowerAnim.prop)
     local ok = lib.progressBar({
         duration = (Config.Jackstand and Config.Jackstand.LowerProgressMs) or 5000,
         label = L('jackstand_progress_lower'), useWhileDead = false, canCancel = false,
         disable = { move = true, car = true, combat = true },
-        anim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 49 },
+        anim = {
+            dict = (lowerAnim and lowerAnim.dict) or 'mini@repair',
+            clip = (lowerAnim and lowerAnim.clip) or 'fixing_a_player',
+            flag = (lowerAnim and lowerAnim.flag) or 1,
+        },
     })
+    destroyToolProp()
     if not ok then JackstandBusy = false; return end
     doLowerVehicle(veh, data.originalZ)
     for i = 1, #data.props do
@@ -911,3 +1283,96 @@ end)
 exports('useJackstandItem', function(_, _)
     VPChopJackstandRaiseCar()
 end)
+
+-- ─── Tyre carry: keybind [G] para abrir menu de opções ──────────────────────
+
+--- Coloca o prop da mão no chão: desanexa, raycast para Z correto, congela.
+--- Adiciona target ox_target no prop resultante para carregar no truck.
+local function placeTyreHandPropOnGround()
+    if not VPChopCarryingPart or not VPChopCarryingPart.isTyre then return end
+
+    local handProp = VPChopCarryingPart.propHandle
+    -- Anular propHandle ANTES de chamar VPChopDropCarryPart para que a função
+    -- não delete o prop — queremos reutilizá-lo como prop de chão.
+    VPChopCarryingPart.propHandle = nil
+    VPChopDropCarryPart()   -- limpa carry state, para animação, esconde TextUI
+
+    if not handProp or not DoesEntityExist(handProp) then return end
+
+    -- Desancorar sem física por ora, reposicionar exatamente no chão via raycast
+    DetachEntity(handProp, false, false)
+
+    local ped  = PlayerPedId()
+    local px, py, pz = table.unpack(GetEntityCoords(ped))
+    local found, gz = GetGroundZFor_3dCoord(px, py, pz + 2.0, false)
+    local finalZ = found and gz or (pz - 1.0)
+
+    SetEntityCoordsNoOffset(handProp, px, py, finalZ, false, false, false)
+    SetEntityRotation(handProp, 0.0, 0.0, 0.0, 5, true)
+    FreezeEntityPosition(handProp, true)
+
+    -- Target: carregar no truck
+    local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
+    exports.ox_target:addLocalEntity(handProp, {
+        {
+            name        = 'vp_ground_tyre_truck_' .. tostring(handProp),
+            label       = L('tyre_store_in_truck'),
+            icon        = 'fa-solid fa-truck-pickup',
+            distance    = 2.0,
+            canInteract = function() return VPChopFindNearestTruck(5.0) ~= nil end,
+            onSelect    = function()
+                local t   = VPChopFindNearestTruck(5.0)
+                if not t then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
+                local cur = math.floor(tonumber(Entity(t).state.chopTyreCount) or 0)
+                if cur >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
+                Entity(t).state:set('chopTyreCount', cur + 1, true)
+                exports.ox_target:removeLocalEntity(handProp)
+                DeleteEntity(handProp)
+                VPChopNotify(L('tyre_stored_fmt', cur + 1, max), 'success')
+            end,
+        },
+    })
+
+    VPChopNotify(L('tyre_dropped'), 'inform')
+end
+
+-- RegisterKeyMapping cria bind real reconhecido pelo GTA V a pé.
+-- IsControlJustReleased(0, 71) não funciona para G a pé (input de veículo).
+RegisterKeyMapping('+vp_tyre_options', 'Opções do pneu carregado', 'keyboard', 'g')
+RegisterCommand('+vp_tyre_options', function()
+    if not VPChopCarryingPart or not VPChopCarryingPart.isTyre then return end
+
+    local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
+
+    local menuOptions = {
+        {
+            title    = L('tyre_option_drop'),
+            icon     = 'circle-down',
+            onSelect = function() placeTyreHandPropOnGround() end,
+        },
+    }
+
+    local truck = VPChopFindNearestTruck(5.0)
+    if truck then
+        local cur = math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0)
+        menuOptions[#menuOptions + 1] = {
+            title       = L('tyre_option_truck'),
+            icon        = 'truck-pickup',
+            disabled    = cur >= max,
+            description = cur >= max and L('tyre_truck_full') or nil,
+            onSelect    = function()
+                if not VPChopCarryingPart or not VPChopCarryingPart.isTyre then return end
+                local t2  = VPChopFindNearestTruck(5.0)
+                if not t2 then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
+                local c2  = math.floor(tonumber(Entity(t2).state.chopTyreCount) or 0)
+                if c2 >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
+                Entity(t2).state:set('chopTyreCount', c2 + 1, true)
+                VPChopDropCarryPart()
+                VPChopNotify(L('tyre_stored_fmt', c2 + 1, max), 'success')
+            end,
+        }
+    end
+
+    lib.registerContext({ id = 'vp_tyre_carry_menu', title = L('tyre_carry_menu_title'), options = menuOptions })
+    lib.showContext('vp_tyre_carry_menu')
+end, false)

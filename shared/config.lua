@@ -258,15 +258,48 @@ Config.ChopAnimations = {
     door      = { dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1 },
 }
 
---- Ferramenta de desmanche: item requerido + prop na mão durante a animação.
---- O item não é consumido por uso; tem durabilidade (MaxUses usos antes de quebrar).
-Config.ChopTool = {
-    Item    = 'metal_saw',
-    MaxUses = 6,
-    HandProp = {
-        model    = 'prop_tool_consaw',
-        offset   = { 0.05, 0.02, 0.0 },
-        rotation = { 20, 0, -50 },
+--- Integração de Dispatch (ex: ps-dispatch, cd_dispatch, qs-dispatch)
+Config.Dispatch = {
+    Enable = true,
+    System = 'ps-dispatch', -- 'ps-dispatch' | 'cd_dispatch' | 'qs-dispatch'
+}
+
+--- Ativar o alarme do veículo ao desmanchar caso ele esteja trancado
+Config.AlarmOnChop = true
+
+--- Ferramentas de desmanche niveladas por item.
+--- despatchChance: chance 0..1 de alertar a polícia (1.0 = sempre).
+--- speedMult: multiplicador do tempo da barra de progresso (0.5 = metade do tempo).
+Config.Tools = {
+    ['saw_cheap'] = {
+        MaxUses = 2,
+        dispatchChance = 1.0,
+        speedMult = 1.4,
+        HandProp = {
+            model    = 'prop_tool_consaw',
+            offset   = { 0.05, 0.02, 0.0 },
+            rotation = { 20, 0, -50 },
+        },
+    },
+    ['saw_pro'] = {
+        MaxUses = 6,
+        dispatchChance = 0.25,
+        speedMult = 1.0,
+        HandProp = {
+            model    = 'prop_tool_consaw',
+            offset   = { 0.05, 0.02, 0.0 },
+            rotation = { 20, 0, -50 },
+        },
+    },
+    ['mechanic_drill'] = {
+        MaxUses = 10,
+        dispatchChance = 0.0,
+        speedMult = 0.7,
+        HandProp = {
+            model    = 'prop_tool_screwflt01',
+            offset   = { 0.10, 0.03, 0.0 },
+            rotation = { 10, 0, -30 },
+        },
     },
 }
 
@@ -464,6 +497,32 @@ Config.Jackstand = {
     --- Duração da barra "A retirar macacos..." (ms).
     LowerProgressMs = 5000,
 
+    --- Animação ao COLOCAR o macaco.
+    --- amb@world_human_vehicle_mechanic@male@base/base = ped ajoelha de lado e trabalha
+    --- ao nível do chão (idêntico ao wheel_theft). Mais realista que mini@repair.
+    RaiseAnim = {
+        dict = 'amb@world_human_vehicle_mechanic@male@base',
+        clip = 'base',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_wrench',
+            offset   = { 0.12, 0.03, 0.0 },
+            rotation = { 0, 0, -60 },
+        },
+    },
+
+    --- Animação ao RETIRAR o macaco.
+    LowerAnim = {
+        dict = 'amb@world_human_vehicle_mechanic@male@base',
+        clip = 'base',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_wrench',
+            offset   = { 0.12, 0.03, 0.0 },
+            rotation = { 0, 0, -60 },
+        },
+    },
+
     --- Raio máximo do carro para acionar o macaco (metros).
     MaxCarDistance = 5.0,
 
@@ -513,6 +572,14 @@ Config.Fence = {
     XpPerDelivery       = 20,
     --- XP de trust bônus por ordem cumprida no prazo.
     XpOrderBonus        = 80,
+
+    --- Bônus noturno na venda e entrega de carros.
+    NightBonus = {
+        Enable = true,
+        StartHour = 21,
+        EndHour = 6,
+        Multiplier = 1.3,
+    },
 
     --- Preço base por item (multiplicado por trust_mult, tier_fence_mult, heat_penalty).
     BasePrices = {

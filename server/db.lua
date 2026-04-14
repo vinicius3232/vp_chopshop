@@ -78,6 +78,7 @@ function VPChopDbInit()
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
             VPChopDBReady = true
+            TriggerEvent('vp_chopshop:server:dbReady')
         end)
     end)
 end
