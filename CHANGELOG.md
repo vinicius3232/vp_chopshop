@@ -2,6 +2,21 @@
 
 ---
 
+## [1.5.0] — 2026-04-14 — Feature: Vehicle Alarm System
+
+### Added
+- **[Feature] Sistema de alarme veicular probabilístico** (`client/alarm.lua` + `server/main.lua` + `shared/config.lua`):
+  - Todos os veículos podem disparar alarme ao ser desmanchados (não só os trancados).
+  - Probabilidade proporcional à classe do veículo GTA: Compacts 15% → Super 80%, Military 75%, OpenWheel 70%, Emergency 65%.
+  - Janela configurável (padrão 30 s) para o jogador desarmar via ox_target no veículo.
+  - Se não desarmado: servidor notifica o cliente → dispatch ativado (ps-dispatch / cd_dispatch / qs-dispatch).
+  - Estado rastreado 100% server-side (`AlarmActive[netId]`) — sem trust-client.
+  - Alarme limpo automaticamente ao desconectar ou ao descartar o veículo.
+- **`Config.Alarm`** substitui `Config.AlarmOnChop` (bool simples → tabela completa com `ChanceByClass`, `DefaultChance`, `DisarmWindowSeconds`, `DisarmDistance`).
+- Chaves de locale `alarm_title`, `alarm_triggered`, `alarm_disarm_label`, `alarm_disarmed`, `alarm_expired` adicionadas em todos os 5 locales (en/pt/es/fr/tr).
+
+---
+
 ## [1.4.0] — 2026-04-14 — Audit Auto-Fix (Missing Handlers & Bridge API)
 
 ### Fixed (Critical)

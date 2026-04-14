@@ -253,8 +253,41 @@ Config.Dispatch = {
     System = 'ps-dispatch', -- 'ps-dispatch' | 'cd_dispatch' | 'qs-dispatch'
 }
 
---- Ativar o alarme do veículo ao desmanchar caso ele esteja trancado
-Config.AlarmOnChop = true
+--- Sistema de alarme veicular ao desmontar.
+--- O alarme dispara com chance proporcional à classe do veículo (carros mais caros = maior risco).
+--- Se não desarmado dentro da janela, a polícia é notificada.
+Config.Alarm = {
+    Enable = true,
+
+    --- Probabilidade de alarme (0.0–1.0) por classe de veículo GTA (0–22).
+    --- Classes omitidas usam DefaultChance.
+    --- Classe 0=Compacts, 1=Sedans, 2=SUVs, 3=Coupes, 4=Muscle, 5=Sports Classics,
+    ---       6=Sports, 7=Super, 8=Motos, 9=Off-Road, 10=Industrial, 11=Utility,
+    ---       12=Vans, 17=Service, 18=Emergency, 19=Military, 20=Commercial, 22=OpenWheel
+    ChanceByClass = {
+        [0]  = 0.15,  -- Compacts (econômicos)
+        [1]  = 0.20,  -- Sedans
+        [2]  = 0.35,  -- SUVs
+        [3]  = 0.35,  -- Coupes
+        [4]  = 0.40,  -- Muscle
+        [5]  = 0.50,  -- Sports Classics
+        [6]  = 0.55,  -- Sports
+        [7]  = 0.80,  -- Super (alto valor!)
+        [8]  = 0.10,  -- Motos
+        [9]  = 0.30,  -- Off-Road
+        [10] = 0.10,  -- Industrial
+        [11] = 0.10,  -- Utility
+        [12] = 0.20,  -- Vans
+        [17] = 0.15,  -- Service
+        [18] = 0.65,  -- Emergency
+        [19] = 0.75,  -- Military
+        [20] = 0.15,  -- Commercial
+        [22] = 0.70,  -- OpenWheel (corrida)
+    },
+    DefaultChance       = 0.25, -- fallback para classes não listadas acima
+    DisarmWindowSeconds = 30,   -- segundos para desarmar antes de chamar a polícia
+    DisarmDistance      = 6.0,  -- distância máxima (m) do ox_target de desarme
+}
 
 --- Ferramentas de desmanche niveladas por item.
 --- despatchChance: chance 0..1 de alertar a polícia (1.0 = sempre).

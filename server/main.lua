@@ -14,6 +14,10 @@ ServerWelders = {}
 local ServerWeldersById = {}
 ServerWorldLoaded = false
 
+--- Alarmes veiculares ativos: [netId] = { src = number }
+--- Populated quando o alarme dispara; limpo ao desarmar ou ao expirar.
+local AlarmActive = {}
+
 local ServerBenchesById = {}
 local BenchCraftBusy = {} ---@type table<number, boolean>  src → true when crafting
 
@@ -138,6 +142,24 @@ AddEventHandler('playerDropped', function()
     _npcBuyCooldown[key] = nil
     BenchCraftBusy[src] = nil
     VPChopClaimPendingReward(src) -- limpar recompensa pendente (peça perdida ao desconectar)
+    -- Limpar alarme do jogador que saiu (timeout silencioso; sem dispatch)
+    for netId, data in pairs(AlarmActive) do
+        if data.src == src then
+            AlarmActive[netId] = nil
+        end
+    end
+end)
+
+--- Cancela o alarme de um veículo quando o jogador o desarma manualmente.
+RegisterNetEvent('vp_chopshop:server:alarmDisarmed', function(netId)
+    local src = source
+    if not GetPlayerName(src) then return end
+    netId = tonumber(netId)
+    if not netId then return end
+    local alarm = AlarmActive[netId]
+    if alarm and alarm.src == src then
+        AlarmActive[netId] = nil
+    end
 end)
 
 local function runDbLoad()
@@ -292,6 +314,33 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
             end
         end
     end
+
+    -- Sistema de alarme: rolar chance na primeira peça removida deste veículo.
+    local alarmCfg = Config.Alarm
+    if alarmCfg and alarmCfg.Enable and not AlarmActive[netId] then
+        local vehForAlarm = NetworkGetEntityFromNetworkId(netId)
+        if vehForAlarm and vehForAlarm ~= 0 and DoesEntityExist(vehForAlarm) then
+            local class  = GetVehicleClass(vehForAlarm)
+            local chance = (alarmCfg.ChanceByClass and alarmCfg.ChanceByClass[class])
+                           or (alarmCfg.DefaultChance or 0.25)
+            if math.random() <= chance then
+                local capturedNetId = netId
+                local capturedSrc   = source
+                AlarmActive[capturedNetId] = { src = capturedSrc }
+                TriggerClientEvent('vp_chopshop:client:alarmTriggered', capturedSrc, capturedNetId)
+                local windowMs = math.floor((alarmCfg.DisarmWindowSeconds or 30) * 1000)
+                SetTimeout(windowMs, function()
+                    if AlarmActive[capturedNetId] then
+                        AlarmActive[capturedNetId] = nil
+                        if GetPlayerName(capturedSrc) then
+                            TriggerClientEvent('vp_chopshop:client:alarmExpired', capturedSrc, capturedNetId)
+                        end
+                    end
+                end)
+            end
+        end
+    end
+
     return { ok = true }
 end)
 
@@ -382,6 +431,7 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
 
     BridgeAddCash(source, payout)
     VPChopClearVehicle(netId)
+    AlarmActive[netId] = nil  -- veículo descartado: alarme encerrado
     TriggerEvent(VPChopEvt.CAR_DISCARDED, source, netId, plate, payout)
     DeleteEntity(veh)
 

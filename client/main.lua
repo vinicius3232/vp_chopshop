@@ -173,13 +173,8 @@ function VPChopTriggerDispatch(veh)
 end
 
 function VPChopCheckAlarmAndDispatch(veh, toolCfg)
-    if Config.AlarmOnChop then
-        local lockStatus = GetVehicleDoorLockStatus(veh)
-        if lockStatus > 1 or (not Config.RequireVehicleKeys and not hasVehicleKeys(veh)) then
-            SetVehicleAlarm(veh, true)
-            StartVehicleAlarm(veh)
-        end
-    end
+    -- Alarme agora gerenciado pelo servidor via Config.Alarm (probabilidade por classe).
+    -- client/alarm.lua escuta vp_chopshop:client:alarmTriggered.
     if toolCfg and toolCfg.dispatchChance then
         if math.random() <= toolCfg.dispatchChance then
             VPChopTriggerDispatch(veh)

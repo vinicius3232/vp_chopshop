@@ -218,6 +218,12 @@ local Locales = {
         heat_warn_morno                 = 'This car is warm. Watch out.',
         heat_warn_quente                = 'This car is hot. Fence pays less.',
         heat_warn_queimando             = 'Car is burning hot! Fence won\'t touch it.',
+        -- Vehicle alarm system
+        alarm_title                     = 'Vehicle Alarm',
+        alarm_triggered                 = 'The alarm went off! Disarm it before the police respond.',
+        alarm_disarm_label              = 'Disarm alarm',
+        alarm_disarmed                  = 'Alarm disarmed.',
+        alarm_expired                   = 'You didn\'t disarm in time — police are on their way!',
     },
     pt = {
         notify_title = 'Desmanche',
@@ -435,6 +441,12 @@ local Locales = {
         heat_warn_morno                 = 'Este carro está morno. Cuidado.',
         heat_warn_quente                = 'Este carro está quente. O fence paga menos.',
         heat_warn_queimando             = 'Carro queimando! O fence não vai tocar nisso.',
+        -- Sistema de alarme veicular
+        alarm_title                     = 'Alarme Veicular',
+        alarm_triggered                 = 'O alarme disparou! Desative-o antes da polícia chegar.',
+        alarm_disarm_label              = 'Desativar alarme',
+        alarm_disarmed                  = 'Alarme desativado.',
+        alarm_expired                   = 'Você não desarmou a tempo — a polícia foi avisada!',
     },
     es = {
         notify_title = 'Desguace',
@@ -563,6 +575,12 @@ local Locales = {
         heat_warn_morno            = 'Este coche está templado. Ten cuidado.',
         heat_warn_quente           = 'Este coche está caliente. El fence paga menos.',
         heat_warn_queimando        = '¡Coche ardiendo! El fence no lo tocará.',
+        -- Sistema de alarma vehicular
+        alarm_title                = 'Alarma vehicular',
+        alarm_triggered            = '¡La alarma saltó! Desactívala antes de que llegue la policía.',
+        alarm_disarm_label         = 'Desactivar alarma',
+        alarm_disarmed             = 'Alarma desactivada.',
+        alarm_expired              = '¡No desactivaste a tiempo — la policía fue avisada!',
     },
     fr = {
         notify_title = 'Casse auto',
@@ -691,6 +709,12 @@ local Locales = {
         heat_warn_morno            = 'Cette voiture est tiède. Prudence.',
         heat_warn_quente           = 'Cette voiture est chaude. Le receleur paie moins.',
         heat_warn_queimando        = 'Voiture brûlante ! Le receleur refusera.',
+        -- Système d'alarme véhicule
+        alarm_title                = 'Alarme véhicule',
+        alarm_triggered            = 'L\'alarme s\'est déclenchée ! Désactivez-la avant l\'arrivée de la police.',
+        alarm_disarm_label         = 'Désarmer l\'alarme',
+        alarm_disarmed             = 'Alarme désarmée.',
+        alarm_expired              = 'Vous n\'avez pas désarmé à temps — la police arrive !',
     },
     tr = {
         notify_title = 'Çıkma parça',
@@ -819,6 +843,12 @@ local Locales = {
         heat_warn_morno            = 'Bu araç ılık. Dikkatli ol.',
         heat_warn_quente           = 'Bu araç sıcak. Rehin az ödüyor.',
         heat_warn_queimando        = 'Araç alev alev! Rehin dokunmayacak.',
+        -- Araç alarm sistemi
+        alarm_title                = 'Araç Alarmı',
+        alarm_triggered            = 'Alarm çaldı! Polis gelmeden önce devre dışı bırak.',
+        alarm_disarm_label         = 'Alarmı devre dışı bırak',
+        alarm_disarmed             = 'Alarm devre dışı bırakıldı.',
+        alarm_expired              = 'Zamanında etkisiz hale getiremedin — polis yolda!',
     },
 }
 
