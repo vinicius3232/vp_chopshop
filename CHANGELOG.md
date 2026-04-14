@@ -2,6 +2,63 @@
 
 ---
 
+## [1.3.9] — 2026-04-13 — Audit Auto-Fix (Tool Durability & Performance)
+
+### Fixed (High)
+- **[Logic] server/main.lua** — `VPChopConsumeTool` usava `exports.ox_inventory:GetInventoryItems(src)`, export removido no ox_inventory v2+. Função retornava `false` silenciosamente: no basic chop (retorno ignorado) ferramentas nunca degradavam; no advanced chop (retorno verificado) o sistema inteiro era recusado mesmo com ferramenta presente. Substituído por iteração sobre `Config.Tools` com `GetItem(src, toolName, nil, false)` — export documentado — e `RemoveItem` com metadata do slot correspondente.
+
+### Fixed (Medium)
+- **[Performance] server/fence.lua** — `deliverCar` chamava `VPChopHeatGetLabel(plate)` e em seguida `VPChopHeatGetPriceMult(plate)`, cada uma disparando `VPChopHeatCalc` → `MySQL.scalar.await` para VIN scratch. Eliminada segunda query: label calculado uma vez, `heatMult` mapeado localmente via tabela `{ frio=1.0, morno=0.90, quente=0.75, queimando=0.0 }`.
+- **[Performance] server/progression.lua** — `VPChopAddXp` persistia XP com `MySQL.query.await` dentro de `AddEventHandler(PART_CHOPPED)`, bloqueando a coroutine do callback chamador até conclusão do SQL. Persistência movida para `CreateThread` não-bloqueante; snapshot local (`snap`) garante consistência mesmo após playerDropped.
+- **[Structure] fxmanifest.lua** — Removidos 2 tombstones do fxmanifest: `server/npc.lua` e `server/tyres.lua` (arquivos esvaziados desde migração para fence.lua); carregamento desnecessário eliminado.
+
+### Fixed (Low)
+- **[L1] [Structure] sql/vp_chopshop.sql** — comment de versão atualizado de `v1.3.5` para `v1.3.9`.
+- **[L2] [Logic] server/discord.lua** — `VPChopDiscordLogPlace` não verificava `Config.Discord.LogPlaceWelder`; soldadoras eram sempre logadas mesmo com Discord desativado para welders. Adicionado guard simétrico ao de bench.
+- **[L3] [Performance] server/main.lua** — `TriggerClientEvent('vp_chopshop:client:breakPart', -1, ...)` substituído por loop de proximidade (raio 150 u). Clientes além do raio de streaming do veículo não recebem mais o evento; fallback sem filtragem se coords do veículo não estiverem disponíveis.
+
+---
+
+## [1.3.8] — 2026-04-13 — Security & Performance Audit
+
+### Fixed (High)
+- **[Security] server/fence.lua + client/fence.lua** — Tyre count para venda no truck era lido do state bag controlado pelo cliente (`chopTyreCount`), permitindo que um cliente modificado definisse o valor para `MaxTyresInTruck` sem carregar nenhum pneu e recebesse o pagamento integral. Corrigido com rastreio server-side (`ServerTyreCounts[netId]`) via evento `vp_chopshop:tyre:truckLoad` com validação de proximidade e rate limit (3s). Servidor ignora state bag no pagamento; state bag mantido no cliente com `replicate=false` apenas para feedback de UI local.
+
+### Fixed (Medium)
+- **[Performance] client/fence.lua** — `GetGamePool('CVehicle')` chamado por frame dentro de `canInteract` de cada prop de pneu. Substituído por função `isTruckNearby()` com cache compartilhado de 500ms entre todos os props.
+- **[Performance] server/fence.lua** — `rotateFence()` chamava `VPChopFenceGetTrust(pid)` para todos os jogadores online, potencialmente disparando `MySQL.single.await` por jogador não cacheado. Substituído por leitura direta do `TrustCache[pid]`; jogadores sem cache não recebem notificação (irrelevante: trust == 0 não exibe blip).
+- **[Structure] client/minigames.lua + client/bolt_minigame.lua** — Arquivos órfãos removidos. Funções `VPChopRunBoltMinigame`, `VPChopBoltMinigame` e `VPChopBoltMinigameFallback` já estavam implementadas em `client/main.lua`; arquivos externos nunca foram carregados (ausentes do fxmanifest).
+
+### Fixed (Low)
+- **[Structure] client/fence.lua + shared/locale.lua** — Strings hardcoded em português substituídas por chamadas `L()`. Adicionadas 16 chaves nos blocos `en` e `pt` do locale: `fence_rotated_to_fmt`, `fence_rotated_unknown`, `fence_trust_level_{1-4}`, `fence_trust_up_title_fmt`, `fence_trust_up_desc`, `fence_nothing_to_sell`, `fence_already_carrying_tyre`, `fence_tyre_carrying_hint`, `fence_tyre_loaded_fmt`, `fence_no_pickup_nearby`, `fence_truck_full`.
+- **[Low] server/main.lua** — `print()` no comando admin `/choptest` envolvidos com guarda `Config.Debug`; silencioso em produção.
+
+---
+
+## [1.3.7] — 2026-04-12 — Tyre UX Overhaul & Target Fixes
+
+### Fixed (High)
+- **[Logic] client/main.lua** — `doJackstandTyreSteal`: chamada `VTyreSpawnWheelPropInHand` corrigida para `VPTyreSpawnWheelPropInHand`; eliminava crash nil-call ao tentar roubar pneu
+
+### Changed
+- **[UX] client/main.lua** — remoção de pneu migrada de loop de proximidade com tecla E (`startTyreProximityThread`) para **ox_target com `bones`** por roda (`wheel_lf`, `wheel_rf`, `wheel_lr`, `wheel_rr`); opção aparece ao mirar diretamente na roda, sem polling de distância
+- **[UX] client/main.lua** — pneu carregado na mão: substituída lógica de `addLocalEntity(PlayerPedId, ...)` (impossível de interagir) por `RegisterKeyMapping` + `RegisterCommand` (`+vp_tyre_options`, tecla **G** padrão) que exibe context menu `ox_lib` com opções "Colocar no chão" e "Colocar no truck" (quando pickup está a ≤ 5 m)
+- **[UX] client/main.lua** — `placeTyreHandPropOnGround()`: reutiliza o prop da mão em vez de criar novo; `DetachEntity` + `GetGroundZFor_3dCoord` + `SetEntityCoordsNoOffset` + `FreezeEntityPosition`; prop de chão recebe ox_target "Guardar no truck"
+- **[UX] client/main.lua** — carry TextUI exibido via thread `Wait(200)` enquanto `VPChopCarryingPart.isTyre` for verdadeiro; `lib.hideTextUI()` garantido ao largar
+
+### Fixed (Medium)
+- **[Logic] client/main.lua** — `addRaisedCarTargets`: bones de porta verificados com `GetEntityBoneIndexByName ~= -1` antes de criar target; evita zona presa na origem em veículos de 2 portas
+- **[Logic] client/main.lua** — `addRaisedCarTargets`: target de motor com bone `engine` → `bonnet`; `engine` é unreliable em GTA V, `bonnet` é o anchor correto do capô/motor
+- **[Logic] client/main.lua** — `addRaisedCarTargets`: `not JackstandBusy` adicionado ao `canInteract` de todos os targets de AdvancedChop; impede múltiplas fases simultâneas
+
+### Added
+- **[Feature] client/fence.lua** — `VPChopFindNearestTruck(radius)` global: varre `GetGamePool('CVehicle')`, compara modelos com `getTruckHashes()`, retorna handle da pickup mais próxima dentro do raio; compartilhado entre `main.lua` e `fence.lua`
+
+### Changed
+- **[Logic] client/lifts.lua** — `VPChopDropCarryPart`: ao largar pneu carregado (`wasTyre`), chama `ClearPedTasksImmediately` e `lib.hideTextUI()` para encerrar animação carry e UI corretamente
+
+---
+
 ## [1.3.6] — 2026-04-11 — SQL Consolidation & Schema Optimization
 
 ### Changed

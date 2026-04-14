@@ -2,6 +2,13 @@
 -- Fence NPC rotativo: trust, rotação, ordens, compra de itens, entrega de carros.
 -- NPCs removidos: server/npc.lua, server/tyres.lua (funcionalidade migrada aqui).
 -- Expõe: VPChopFenceGetTrust(src), VPChopFenceCurrentLocation()
+-- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
+local VPChopEvt = VPChopEvt or {
+    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
+    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
+    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
+    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
+}
 
 -- ─── Estado do fence ──────────────────────────────────────────────────────────
 local CurrentLocationIdx = 1  -- índice em Config.Fence.Locations
@@ -14,6 +21,11 @@ local TrustCache = {} ---@type table<number, {trust_level:integer, trust_xp:inte
 local OrderGenBusy  = {} ---@type table<string, boolean>
 --- Mutex para entrega de carro inteiro (previne double-call no cooldown DB check)
 local DeliveryBusy  = {} ---@type table<string, boolean>
+
+--- [H1 FIX] Contagem server-side de pneus por veículo (netId → count).
+--- Substitui leitura do state bag do cliente, que era manipulável.
+local ServerTyreCounts    = {} ---@type table<integer, integer>  netId → count
+local TruckLoadCooldown   = {} ---@type table<number, number>    src  → expiry GetGameTimer
 
 -- ─── Helpers de trust ────────────────────────────────────────────────────────
 
@@ -120,11 +132,15 @@ local function rotateFence()
     end
     TriggerEvent('vp_chopshop:server:spawnFenceNpc', loc)
 
-    -- Notificar jogadores por nível de trust
+    -- [M2 FIX] Notificar jogadores por nível de trust — usa apenas TrustCache.
+    -- VPChopFenceGetTrust faz MySQL.single.await para jogadores não cacheados;
+    -- na rotação isso geraria N queries simultâneas. Jogadores sem cache não recebem
+    -- notificação de rotação (irrelevante: trust==0 não usa o blip de qualquer forma).
     for _, playerId in ipairs(GetPlayers()) do
         local pid = tonumber(playerId)
         if pid and GetPlayerName(pid) then
-            local trust = VPChopFenceGetTrust(pid)
+            local cached = TrustCache[pid]
+            local trust  = cached and cached.trust_level or 0
             if trust == 1 then
                 TriggerClientEvent('vp_chopshop:client:fenceRotated', pid, nil, nil)
             elseif trust >= 2 then
@@ -186,6 +202,41 @@ CreateThread(function()
     if loc then TriggerEvent('vp_chopshop:server:spawnFenceNpc', loc) end
 end)
 
+-- ─── Rastreio server-side de pneus em truck ──────────────────────────────────
+-- [H1 FIX] Evento disparado pelo cliente ao carregar um pneu no truck.
+-- O server valida proximidade e incrementa o contador; o cliente não controla o total.
+
+local TRUCK_LOAD_COOLDOWN_MS = 3000  -- mínimo entre cargas por jogador
+
+RegisterNetEvent('vp_chopshop:tyre:truckLoad', function(netId)
+    local src = source
+    if not GetPlayerName(src) then return end
+    netId = tonumber(netId)
+    if not netId then return end
+
+    -- Rate limit: previne spam do evento
+    local now = GetGameTimer()
+    if TruckLoadCooldown[src] and now < TruckLoadCooldown[src] then return end
+    TruckLoadCooldown[src] = now + TRUCK_LOAD_COOLDOWN_MS
+
+    -- Validar veículo e proximidade (trust-no-client)
+    local truck = NetworkGetEntityFromNetworkId(netId)
+    if not truck or truck == 0 or not DoesEntityExist(truck) then return end
+    if not ValidatePlayerNearVehicle(src, truck, 8.0) then return end
+
+    -- Incrementar contador server-side, respeitando o máximo configurado
+    local maxTyres = math.max(1, math.floor(tonumber(Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4))
+    ServerTyreCounts[netId] = math.min((ServerTyreCounts[netId] or 0) + 1, maxTyres)
+end)
+
+-- Limpar contadores ao destruir a entidade
+AddEventHandler('entityRemoved', function(entity)
+    local netId = NetworkGetNetworkIdFromEntity(entity)
+    if netId and netId ~= 0 then
+        ServerTyreCounts[netId] = nil
+    end
+end)
+
 -- ─── Callbacks de interação ───────────────────────────────────────────────────
 
 -- Apresentar-se (trust 0 → 1)
@@ -207,6 +258,21 @@ lib.callback.register('vp_chopshop:fence:introduce', function(src)
     return { ok=true }
 end)
 
+local function getNightBonusMultiplier()
+    if not Config.Fence or not Config.Fence.NightBonus or not Config.Fence.NightBonus.Enable then
+        return 1.0
+    end
+    local h = GetClockHours()
+    local s = Config.Fence.NightBonus.StartHour or 21
+    local e = Config.Fence.NightBonus.EndHour or 6
+    if s > e then
+        if h >= s or h < e then return (Config.Fence.NightBonus.Multiplier or 1.0) end
+    else
+        if h >= s and h < e then return (Config.Fence.NightBonus.Multiplier or 1.0) end
+    end
+    return 1.0
+end
+
 -- Vender materiais do inventário
 lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     if not GetPlayerName(src) then return { ok=false } end
@@ -223,6 +289,7 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     local prog      = VPChopGetProgression(src)
     local tierMult  = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
     local trustM    = trustMult(trust)
+    local nightM    = getNightBonusMultiplier()
     local basePrices = (Config.Fence and Config.Fence.BasePrices) or {}
 
     -- [FIX M1] Dry-run: calcular valor total antes de remover qualquer item.
@@ -237,7 +304,7 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
             local have = exports.ox_inventory:GetItemCount(src, item)
             local sell = math.min(amount, math.floor(tonumber(have) or 0))
             if sell > 0 then
-                local price  = math.floor(basePrices[item] * trustM * tierMult)
+                local price  = math.floor(basePrices[item] * trustM * tierMult * nightM)
                 local earned = price * sell
                 totalValue   = totalValue + earned
                 candidates[#candidates+1] = { name=item, amount=sell, earned=earned }
@@ -287,7 +354,8 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     local prog     = VPChopGetProgression(src)
     local tierMult = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
     local trustM   = trustMult(trust)
-    local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult)
+    local nightM   = getNightBonusMultiplier()
+    local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult * nightM)
 
     -- [FIX H-1] Validar source_type antes de processar
     if source_type ~= 'truck' and source_type ~= 'inventory' then
@@ -297,15 +365,16 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     local count = 0
 
     if source_type == 'truck' and truckNetId then
-        -- Truck: usar state bag chopTyreCount (validado via netId)
-        local truck = NetworkGetEntityFromNetworkId(tonumber(truckNetId) or 0)
+        -- [H1 FIX] Truck: ler contador server-side (não o state bag do cliente).
+        -- O state bag ainda é escrito pelo cliente para feedback de UI local,
+        -- mas o servidor nunca confia nele para calcular o pagamento.
+        local nid = tonumber(truckNetId)
+        local truck = NetworkGetEntityFromNetworkId(nid or 0)
         if truck and truck ~= 0 and DoesEntityExist(truck) then
-            -- [FIX C-3] Limitar chopTyreCount lido do state bag (escrito pelo cliente) ao máximo
-            -- configurado. Sem este cap, um cliente modificado pode definir chopTyreCount=9999.
-            local maxTyres = math.max(1, math.floor(tonumber(Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4))
-            count = math.min(math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0), maxTyres)
+            count = ServerTyreCounts[nid] or 0
             if count > 0 then
-                Entity(truck).state:set('chopTyreCount', 0, true)
+                ServerTyreCounts[nid] = nil
+                Entity(truck).state:set('chopTyreCount', 0, true)  -- reset UI do cliente
             end
         end
     else
@@ -366,17 +435,20 @@ lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
 
     local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
 
-    -- Verificar heat
-    if VPChopHeatGetLabel(plate) == 'queimando' then
+    -- [M1 FIX] Calcular label uma vez (VPChopHeatCalc tem SQL query interna).
+    -- VPChopHeatGetLabel + VPChopHeatGetPriceMult chamariam VPChopHeatCalc 2×; mapeamos localmente.
+    local heatLabel = VPChopHeatGetLabel(plate)
+    if heatLabel == 'queimando' then
         DeliveryBusy[key] = nil
         return { ok=false, err='too_hot' }
     end
-
-    local heatMult  = VPChopHeatGetPriceMult(plate)
+    local _heatLabelToMult = { frio=1.0, morno=0.90, quente=0.75, queimando=0.0 }
+    local heatMult  = _heatLabelToMult[heatLabel] or 1.0
     local tierMult  = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.10
     local trustM    = trustMult(trust)
+    local nightM    = getNightBonusMultiplier()
     local base      = (Config.Fence and Config.Fence.WholeCarBasePayout) or 8000
-    local payout    = math.floor(base * trustM * tierMult * heatMult)
+    local payout    = math.floor(base * trustM * tierMult * heatMult * nightM)
 
     -- Persistir cooldown ANTES de pagar (garante que falha de DB não permite spam)
     local cdOk = pcall(function()
@@ -550,6 +622,7 @@ end)
 AddEventHandler('playerDropped', function()
     local src = source  -- [FIX L-1] localizar antes de qualquer yield potencial
     TrustCache[src] = nil
+    TruckLoadCooldown[src] = nil  -- [H1 FIX]
     local k = ServerChopPlayerKey(src)
     OrderGenBusy[k]  = nil
     DeliveryBusy[k]  = nil

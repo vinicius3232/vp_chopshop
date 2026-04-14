@@ -73,7 +73,8 @@ end
 function VPChopDiscordLogPlace(src, kind, id)
     local d = Config.Discord
     if not d then return end
-    if kind == 'bench' and not d.LogPlaceBench then return end
+    if kind == 'bench'   and not d.LogPlaceBench   then return end
+    if kind == 'welder'  and not d.LogPlaceWelder  then return end
     local name = GetPlayerName(src) or '?'
     VPChopDiscordLog(('vp_chopshop — placed %s'):format(kind), ('**Player:** %s (id %d)\n**Id:** %d'):format(name, src, id))
 end

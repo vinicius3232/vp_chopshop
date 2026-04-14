@@ -1,5 +1,5 @@
 -- =============================================================
--- vp_chopshop — install.sql  (v1.3.5)
+-- vp_chopshop — install.sql  (v1.3.9)
 -- Executar UMA vez na base do servidor (fresh install).
 --   HeidiSQL / phpMyAdmin: importar este arquivo
 --   CLI: mysql -u USER -p DBNAME < vp_chopshop.sql

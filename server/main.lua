@@ -1,6 +1,14 @@
 -- [REMOVED] ServerLifts, ServerLiftsById, LiftMovement, VPChopLiftById:
 -- elevador removido do sistema — apenas macaco (jackstand) é necessário para desmanche.
 
+-- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
+local VPChopEvt = VPChopEvt or {
+    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
+    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
+    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
+    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
+}
+
 ServerBenches = {}
 ServerWelders = {}
 local ServerWeldersById = {}
@@ -132,20 +140,23 @@ AddEventHandler('playerDropped', function()
     VPChopClaimPendingReward(src) -- limpar recompensa pendente (peça perdida ao desconectar)
 end)
 
-CreateThread(function()
-    local waited = 0
-    while not VPChopDBReady and waited < 30000 do
-        Wait(100)
-        waited = waited + 100
-    end
-    if VPChopDBReady then
-        ServerBenches = VPChopDbLoadBenches()
-        for _, bench in ipairs(ServerBenches) do ServerBenchesById[bench.id] = bench end
-        ServerWelders = VPChopDbLoadWelders()
-        for _, w in ipairs(ServerWelders) do ServerWeldersById[w.id] = w end
-    end
+local function runDbLoad()
+    ServerBenches = VPChopDbLoadBenches()
+    for _, bench in ipairs(ServerBenches) do ServerBenchesById[bench.id] = bench end
+    ServerWelders = VPChopDbLoadWelders()
+    for _, w in ipairs(ServerWelders) do ServerWeldersById[w.id] = w end
     ServerWorldLoaded = true
     broadcastWorld()
+end
+
+CreateThread(function()
+    if VPChopDBReady then
+        runDbLoad()
+    end
+end)
+
+AddEventHandler('vp_chopshop:server:dbReady', function()
+    runDbLoad()
 end)
 
 lib.callback.register('vp_chopshop:getWorld', function(source)
@@ -186,6 +197,47 @@ lib.callback.register('vp_chopshop:placeBench', function(source, payload)
     return { ok = true, id = id }
 end)
 
+function VPChopConsumeTool(src, wantDrill)
+    if not Config.Tools then return true end
+    -- [H1 FIX] GetInventoryItems não existe em ox_inventory v2+; substituído por
+    -- GetItem por ferramenta — export documentado que retorna dados + metadata do slot.
+    for toolName, toolCfg in pairs(Config.Tools) do
+        local isDrill = (toolName == 'mechanic_drill')
+        if isDrill == (wantDrill == true) then
+            if InvCount(src, toolName) > 0 then
+                local maxUses = tonumber(toolCfg.MaxUses) or 6
+                local itemData = exports.ox_inventory:GetItem(src, toolName, nil, false)
+                local prevMeta = itemData and itemData.metadata or nil
+                local uses = tonumber(prevMeta and prevMeta.uses_remaining) or maxUses
+                -- Remover a instância com metadata original (match de slot correto)
+                if not exports.ox_inventory:RemoveItem(src, toolName, 1, prevMeta) then
+                    return false
+                end
+                uses = uses - 1
+                if uses > 0 then
+                    exports.ox_inventory:AddItem(src, toolName, 1, { uses_remaining = uses })
+                else
+                    TriggerClientEvent('vp_chopshop:client:sawBroke', src)
+                end
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function VPChopHasTool(src, wantDrill)
+    if not Config.Tools then return true end
+    for toolName, _ in pairs(Config.Tools) do
+        local isDrill = (toolName == 'mechanic_drill')
+        local wd = (wantDrill == true)
+        if isDrill == wd then
+            if InvCount(src, toolName) > 0 then return true end
+        end
+    end
+    return false
+end
+
 lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
 
@@ -195,12 +247,9 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     local cd = VPChopChopCooldownRemaining(source)
     if cd > 0 then return { ok = false, err = 'cooldown', wait = cd } end
 
-    -- Validar ferramenta de desmanche (metal_saw)
-    local chopTool = Config.ChopTool
-    if chopTool and chopTool.Item then
-        if InvCount(source, chopTool.Item) < 1 then
-            return { ok = false, err = 'no_saw' }
-        end
+    -- Validar ferramenta de desmanche
+    if not VPChopHasTool(source, false) then
+        return { ok = false, err = 'no_saw' }
     end
 
     -- Marcar cooldown ANTES do yield em VPChopServerTryPart para evitar race condition
@@ -209,21 +258,8 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     local ok, err, rewards = VPChopServerTryPart(source, netId, partKey)
     if not ok then return { ok = false, err = err } end
 
-    -- Consumir durabilidade da ferramenta (remove + re-add com uses_remaining decrementado)
-    if chopTool and chopTool.Item then
-        local sawItem = exports.ox_inventory:GetItem(source, chopTool.Item, nil, false)
-        if sawItem then
-            local maxUses = tonumber(chopTool.MaxUses) or 6
-            local uses = tonumber(sawItem.metadata and sawItem.metadata.uses_remaining) or maxUses
-            uses = uses - 1
-            exports.ox_inventory:RemoveItem(source, chopTool.Item, 1, sawItem.metadata)
-            if uses > 0 then
-                exports.ox_inventory:AddItem(source, chopTool.Item, 1, { uses_remaining = uses })
-            else
-                TriggerClientEvent('vp_chopshop:client:sawBroke', source)
-            end
-        end
-    end
+    -- Consumir durabilidade da ferramenta
+    VPChopConsumeTool(source, false)
 
     -- Guardar recompensas pendentes; itens só são dados na entrega à bancada.
     VPChopStorePendingReward(source, partKey, rewards)
@@ -239,7 +275,23 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
 
     VPChopDiscordLogChop(source, partKey, rewards)
 
-    TriggerClientEvent('vp_chopshop:client:breakPart', -1, netId, partKey)
+    -- [L3 FIX] Filtrar por proximidade (~150u) em vez de broadcast global (-1).
+    -- Veículos só fazem stream nesse raio; clientes fora descartariam o evento de qualquer forma.
+    local vehEnt = NetworkGetEntityFromNetworkId(netId)
+    local vehPos = (vehEnt and vehEnt ~= 0 and DoesEntityExist(vehEnt)) and GetEntityCoords(vehEnt) or nil
+    for _, pid in ipairs(GetPlayers()) do
+        local pidN = tonumber(pid)
+        if pidN then
+            local ped = GetPlayerPed(pidN)
+            local send = true
+            if vehPos and ped and ped ~= 0 then
+                send = #(GetEntityCoords(ped) - vehPos) < 150.0
+            end
+            if send then
+                TriggerClientEvent('vp_chopshop:client:breakPart', pidN, netId, partKey)
+            end
+        end
+    end
     return { ok = true }
 end)
 
@@ -495,8 +547,10 @@ RegisterCommand('choptest', function(src, args)
     local given, failed = {}, {}
     for _, entry in ipairs(kit) do
         local result = inv:AddItem(target, entry.item, entry.qty)
-        print(('[vp_chopshop] choptest AddItem(%s, %s, %d) → %s'):format(
-            target, entry.item, entry.qty, tostring(result)))
+        if Config.Debug then
+            print(('[vp_chopshop] choptest AddItem(%s, %s, %d) → %s'):format(
+                target, entry.item, entry.qty, tostring(result)))
+        end
         if result and result ~= false then
             given[#given + 1] = entry.item .. ' x' .. entry.qty
         else
@@ -512,11 +566,11 @@ RegisterCommand('choptest', function(src, args)
             title = 'vp_chopshop test', description = msg,
             type = #failed == 0 and 'success' or 'warning', duration = 8000,
         })
-        print('[vp_chopshop] ' .. msg)
+        if Config.Debug then print('[vp_chopshop] ' .. msg) end
     else
         local msg = 'Falhou tudo para ' .. targetName .. '. Itens registados no ox_inventory? Verifica o console.'
         TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = msg, duration = 8000 })
-        print('[vp_chopshop] ' .. msg)
+        if Config.Debug then print('[vp_chopshop] ' .. msg) end
     end
 end, false)
 

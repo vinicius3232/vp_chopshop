@@ -3,6 +3,14 @@
 -- Expõe: VPChopGetProgression(src), VPChopAddXp(src, amount)
 -- Escuta: VPChopEvt.PART_CHOPPED, VPChopEvt.CAR_DISCARDED, VPChopEvt.FENCE_DELIVERY
 
+-- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
+local VPChopEvt = VPChopEvt or {
+    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
+    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
+    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
+    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
+}
+
 --- Cache em memória por source (carregado ao conectar, salvo ao ganhar XP)
 local ProgressCache = {} ---@type table<number, {tier:integer, xp:integer, total_chops:integer}>
 
@@ -85,13 +93,18 @@ function VPChopAddXp(src, amount, reason)
         end
     end
 
-    -- Persistir
-    local key = ServerChopPlayerKey(src)
-    MySQL.query.await(
-        'INSERT INTO vp_chop_progression (identifier, tier, xp, total_chops) VALUES (?,?,?,?) '..
-        'ON DUPLICATE KEY UPDATE tier=VALUES(tier), xp=VALUES(xp), total_chops=VALUES(total_chops)',
-        {key, prog.tier, prog.xp, prog.total_chops}
-    )
+    -- [M2 FIX] Persistir em thread separada: não bloqueia a coroutine do callback enquanto
+    -- aguarda o MySQL. O cache em memória (ProgressCache) já está actualizado — sem risco de
+    -- dados inconsistentes se outro callback ler antes do DB confirmar.
+    local key  = ServerChopPlayerKey(src)
+    local snap = { tier = prog.tier, xp = prog.xp, total_chops = prog.total_chops }
+    CreateThread(function()
+        MySQL.query.await(
+            'INSERT INTO vp_chop_progression (identifier, tier, xp, total_chops) VALUES (?,?,?,?) '..
+            'ON DUPLICATE KEY UPDATE tier=VALUES(tier), xp=VALUES(xp), total_chops=VALUES(total_chops)',
+            {key, snap.tier, snap.xp, snap.total_chops}
+        )
+    end)
 
     notifyXp(src, amount)
     for t = prevTier + 1, prog.tier do

@@ -3,9 +3,9 @@ game 'gta5'
 lua54 'yes'
 
 name 'vp_chopshop'
-author 'VP / scaffold for Qbox'
+author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.3.6'
+version '1.3.9'
 
 dependencies {
     'ox_lib',
@@ -46,18 +46,17 @@ server_scripts {
     'server/discord.lua',
     'server/chop.lua',
     'server/bench.lua',
-    'server/npc.lua',
     'server/heat.lua',
     'server/ambush.lua',
     'server/fence.lua',
     'server/progression.lua',
-    'server/tyres.lua',
     'server/advanced_chop.lua',
     'server/main.lua',
 }
 
 data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'
 data_file 'DLC_ITYP_REQUEST' 'stream/lr_supermod_garage_int.ytyp'
+data_file 'DLC_ITYP_REQUEST' 'stream/wheel_spacer.ytyp'  -- tipo para bolt.ydr (minigame de parafusos)
 
 files {
     'installation/ox_items_snippet.txt',
