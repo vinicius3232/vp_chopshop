@@ -246,7 +246,8 @@ RegisterNetEvent('vp_chopshop:tyres:jackstandTyreStolen', function()
 end)
 
 AddEventHandler('playerDropped', function()
-    JackstandStealCooldown[source] = nil
+    local src = source  -- [L4 FIX] localizar antes de qualquer yield potencial
+    JackstandStealCooldown[src] = nil
 end)
 
 -- ─── Rastreio server-side de pneus em truck ──────────────────────────────────

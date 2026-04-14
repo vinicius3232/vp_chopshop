@@ -434,7 +434,7 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
 
     local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
 
-    BridgeAddCash(source, payout)
+    BridgeAddCash(source, payout, 'discard_payout')  -- [L3 FIX] reason adicionado para transaction logging
     VPChopClearVehicle(netId)
     AlarmActive[netId] = nil  -- veículo descartado: alarme encerrado
     TriggerEvent(VPChopEvt.CAR_DISCARDED, source, netId, plate, payout)
@@ -589,7 +589,7 @@ RegisterCommand('choptest', function(src, args)
     local inv = exports.ox_inventory
     local kit = {
         { item = Config.Items.placeBench,  qty = 1 },
-        { item = Config.Items.fuel,        qty = 5 },
+        -- [M4 FIX] Config.Items.fuel foi removido (combustível exclusivo do elevador) — linha removida.
         { item = Config.Items.placeWelder, qty = 1 },
     }
     if Config.ChopTool and Config.ChopTool.Item then

@@ -18,10 +18,11 @@ RegisterNetEvent('vp_chopshop:client:xpGained', function(amount)
     showXpFloat(amount)
 end)
 
-RegisterNetEvent('vp_chopshop:client:tierUp', function(newTier, label, unlocks)
+RegisterNetEvent('vp_chopshop:client:tierUp', function(newTier)
+    -- [M3 FIX] Labels e unlocks via L() — suporte completo a todos os locales.
     lib.notify({
-        title       = 'Tier ' .. newTier .. ' — ' .. label,
-        description = unlocks,
+        title       = 'Tier ' .. newTier .. ' \226\128\148 ' .. L('tier_label_' .. newTier),
+        description = L('tier_unlock_' .. newTier),
         type        = 'success',
         duration    = 8000,
         position    = 'top-right',

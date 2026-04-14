@@ -2,6 +2,25 @@
 
 ---
 
+## [1.6.1] — 2026-04-14 — Audit Auto-Fix
+
+### Fixed (High)
+- **[Logic] bridge/server_framework.lua** — `ESX.GetPlayerFromId(src)` depreciado na função `ServerPlayerIsReady` substituído por `ESX.Player(src)` — alinha com as demais chamadas ESX no mesmo arquivo.
+
+### Fixed (Medium)
+- **[Structure] client/fence.lua** — ~22 strings PT-BR hardcoded substituídas por chamadas `L()` (menus Vender Materiais, Seu Status, Encomenda Ativa, Entregar Veículo e targets de pneu). Todas as 5 locales agora respeitadas.
+- **[Structure] shared/locale.lua** — 40 novas chaves adicionadas em EN e PT: `fence_sell_*`, `fence_status_*`, `fence_order_*`, `fence_car_*`, `fence_tyre_pick_label`, `fence_tyre_load_label`, `tier_label_1..4`, `tier_unlock_2..4`. ES/FR/TR herdam do EN via fallback automático.
+- **[Logic] client/placement.lua** — `VPChopStartLiftPlacement()` removida — referenciava `Config.LiftBaseModel` (nil) e callback inexistente `vp_chopshop:placeLift`.
+- **[Structure] server/progression.lua + client/progression.lua** — Labels e unlocks de tier-up movidos para `locale.lua`; servidor envia apenas `newTier`, cliente chama `L('tier_label_N')` e `L('tier_unlock_N')`.
+- **[Logic] server/main.lua** — `/choptest` kit: linha `Config.Items.fuel` (nil desde v1.5.x) removida — evitava `AddItem(target, nil, 5)` em runtime.
+
+### Fixed (Low)
+- **[Structure] shared/config.lua** — `Config.Discord.LogPlaceLift = false` removida (elevador removido). `Config.Discord.LogPlaceWelder = false` adicionada (era verificada em `server/discord.lua` mas não existia).
+- **[Logic] server/main.lua:437** — `BridgeAddCash(source, payout)` agora passa `'discard_payout'` como reason para transaction logging.
+- **[Structure] server/fence.lua** — `playerDropped` handler de `JackstandStealCooldown` localiza `source` antes do body (padrão defensivo consistente).
+
+---
+
 ## [1.6.0] — 2026-04-14 — SQL Optimization
 
 ### Fixed / Optimized

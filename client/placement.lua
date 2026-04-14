@@ -80,9 +80,7 @@ local function ghostPlace(modelHash, callbackName)
     end
 end
 
-function VPChopStartLiftPlacement()
-    return ghostPlace(Config.LiftBaseModel, 'vp_chopshop:placeLift')
-end
+-- [M2 FIX] VPChopStartLiftPlacement removida — elevador removido do sistema (Config.LiftBaseModel = nil).
 
 function VPChopStartBenchPlacement()
     return ghostPlace(Config.BenchModel, 'vp_chopshop:placeBench')

@@ -288,18 +288,18 @@ function openSellMenu()
     for _, s in ipairs(sellable) do
         opts[#opts+1] = {
             title    = s.name .. ' ×' .. s.amount,
-            metadata = {{ label='Preço base', value='$'..s.unitPrice..' un.' }},
+            metadata = {{ label=L('fence_sell_price_label'), value='$'..s.unitPrice..' un.' }},
             onSelect = function()
                 local ok, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellItems', false, {{name=s.name, amount=s.amount}})
                 if ok and res and res.ok then
-                    lib.notify({ description='Vendido por $'..res.total, type='success' })
+                    lib.notify({ description=L('fence_sold_fmt', res.total), type='success' })
                 else
-                    lib.notify({ description='Falha na venda.', type='error' })
+                    lib.notify({ description=L('fence_sale_failed'), type='error' })
                 end
             end,
         }
     end
-    lib.registerContext({ id='vp_fence_sell', title='Vender Materiais', options=opts })
+    lib.registerContext({ id='vp_fence_sell', title=L('fence_sell_title'), options=opts })
     lib.showContext('vp_fence_sell')
 end
 
@@ -321,25 +321,24 @@ function sellTyres()
     local srcType = truckNetId and 'truck' or 'inventory'
     local ok, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellTyres', false, srcType, truckNetId)
     if ok and res and res.ok then
-        lib.notify({ description=res.count..' pneu(s) vendido(s) por $'..res.total, type='success' })
+        lib.notify({ description=L('fence_tyres_sold_fmt', res.count, res.total), type='success' })
     else
-        lib.notify({ description=(res and res.err == 'no_tyres') and 'Nenhum pneu disponível.' or 'Falha.', type='error' })
+        lib.notify({ description=L(res and res.err == 'no_tyres' and 'fence_no_tyres' or 'fence_sale_generic_failed'), type='error' })
     end
 end
 
 function showStatus()
     local ok, prog = pcall(lib.callback.await, 'vp_chopshop:getProgression', false)
-    if not ok or not prog then lib.notify({ description='Erro ao carregar status.', type='error' }); return end
-    local tierLabels = { [1]='Novato', [2]='Mecânico', [3]='Especialista', [4]='Mestre' }
+    if not ok or not prog then lib.notify({ description=L('fence_status_error'), type='error' }); return end
     lib.registerContext({
-        id='vp_fence_status', title='Seu Status',
+        id='vp_fence_status', title=L('fence_status_title'),
         options={{
-            title='Perfil',
+            title=L('fence_status_profile'),
             readOnly=true,
             metadata={
-                { label='Tier',    value=tierLabels[prog.tier] or prog.tier },
-                { label='XP',      value=prog.xp .. (prog.nextXp and ' / '..prog.nextXp or ' (máx)') },
-                { label='Chapas',  value=prog.totalChops },
+                { label=L('fence_tier_label'),  value=L('tier_label_' .. prog.tier) },
+                { label=L('fence_xp_label'),    value=prog.xp .. (prog.nextXp and ' / '..prog.nextXp or ' (máx)') },
+                { label=L('fence_chops_label'), value=prog.totalChops },
             }
         }}
     })
@@ -349,7 +348,7 @@ end
 function showOrder()
     local ok, order = pcall(lib.callback.await, 'vp_chopshop:fence:getOrder', false)
     if not ok or not order then
-        lib.notify({ description='Nenhuma encomenda disponível.', type='inform' }); return
+        lib.notify({ description=L('fence_no_order'), type='inform' }); return
     end
     local remaining = math.max(0, order.deadline - os.time())
     local hours = math.floor(remaining / 3600)
@@ -359,14 +358,14 @@ function showOrder()
         itemStr = itemStr .. amount .. '× ' .. item .. '  '
     end
     lib.registerContext({
-        id='vp_fence_order_view', title='Encomenda Ativa',
+        id='vp_fence_order_view', title=L('fence_order_title'),
         options={{
-            title='Detalhes',
+            title=L('fence_order_details'),
             readOnly=true,
             metadata={
-                { label='Itens',    value=itemStr },
-                { label='Bônus',    value='×'..order.mult },
-                { label='Prazo',    value=hours..'h '..mins..'min' },
+                { label=L('fence_order_items_label'),    value=itemStr },
+                { label=L('fence_order_bonus_label'),    value='\195\151'..order.mult },
+                { label=L('fence_order_deadline_label'), value=hours..'h '..mins..'min' },
             }
         }}
     })
@@ -376,17 +375,17 @@ end
 function fulfillOrder()
     local ok, order = pcall(lib.callback.await, 'vp_chopshop:fence:getOrder', false)
     if not ok or not order then
-        lib.notify({ description='Nenhuma encomenda ativa.', type='error' }); return
+        lib.notify({ description=L('fence_no_active_order'), type='error' }); return
     end
     local ok2, res = pcall(lib.callback.await, 'vp_chopshop:fence:fulfillOrder', false, order.id)
     if ok2 and res and res.ok then
-        lib.notify({ description='Encomenda entregue! $'..res.total, type='success', duration=7000 })
+        lib.notify({ description=L('fence_order_delivered_fmt', res.total), type='success', duration=7000 })
     elseif res and res.err == 'missing_item' then
-        lib.notify({ description='Faltam '..res.need..'× '..res.item, type='error' })
+        lib.notify({ description=L('fence_order_missing_fmt', res.need, res.item), type='error' })
     elseif res and res.err == 'expired' then
-        lib.notify({ description='Encomenda expirou.', type='error' })
+        lib.notify({ description=L('fence_order_expired'), type='error' })
     else
-        lib.notify({ description='Falha na entrega.', type='error' })
+        lib.notify({ description=L('fence_delivery_failed'), type='error' })
     end
 end
 
@@ -394,19 +393,19 @@ function deliverCar()
     local ped = PlayerPedId()
     local veh = GetVehiclePedIsIn(ped, false)
     if not veh or veh == 0 then
-        lib.notify({ description='Entre no veículo que quer entregar.', type='error' }); return
+        lib.notify({ description=L('fence_car_no_vehicle'), type='error' }); return
     end
     local netId = NetworkGetNetworkIdFromEntity(veh)
     local ok, res = pcall(lib.callback.await, 'vp_chopshop:fence:deliverCar', false, netId)
     if ok and res and res.ok then
-        lib.notify({ description='Veículo entregue por $'..res.payout, type='success', duration=7000 })
+        lib.notify({ description=L('fence_car_delivered_fmt', res.payout), type='success', duration=7000 })
     elseif res and res.err == 'too_hot' then
-        lib.notify({ description='Veículo quente demais. Fence recusa.', type='error' })
+        lib.notify({ description=L('fence_car_too_hot'), type='error' })
     elseif res and res.err == 'cooldown' then
         local mins = math.ceil(res.wait / 60)
-        lib.notify({ description='Aguarde '..mins..' min.', type='error' })
+        lib.notify({ description=L('fence_car_wait_fmt', mins), type='error' })
     else
-        lib.notify({ description='Fence não quer isso agora.', type='error' })
+        lib.notify({ description=L('fence_car_refused'), type='error' })
     end
 end
 
@@ -436,14 +435,14 @@ function VPChopSpawnTyreProp(position)
     exports.ox_target:addLocalEntity(prop, {
         {
             name     = 'vp_tyre_pick_' .. tostring(prop),
-            label    = 'Pegar pneu',
+            label    = L('fence_tyre_pick_label'),
             icon     = 'fa-solid fa-hand',
             distance = 2.0,
             onSelect = function() VPChopPickUpTyre(prop) end,
         },
         {
             name     = 'vp_tyre_load_' .. tostring(prop),
-            label    = 'Carregar no truck',
+            label    = L('fence_tyre_load_label'),
             icon     = 'fa-solid fa-truck',
             distance = 2.0,
             canInteract = isTruckNearby,  -- [M1 FIX] cache 500ms; evita GetGamePool por frame

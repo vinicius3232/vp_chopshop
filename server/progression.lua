@@ -61,13 +61,8 @@ end
 ---@param src number
 ---@param newTier integer
 local function notifyTierUp(src, newTier)
-    local labels = { [1]='Novato', [2]='Mecânico', [3]='Especialista', [4]='Mestre' }
-    local unlocks = {
-        [2] = '+10% velocidade · +5% materiais',
-        [3] = '+20% velocidade · +10% materiais · VIN scratching · Ordens fence',
-        [4] = '+30% velocidade · +15% materiais · Entrega de carro inteiro · +10% fence',
-    }
-    TriggerClientEvent('vp_chopshop:client:tierUp', src, newTier, labels[newTier] or '?', unlocks[newTier] or '')
+    -- [M3 FIX] Enviar apenas newTier — client/progression.lua chama L() localmente.
+    TriggerClientEvent('vp_chopshop:client:tierUp', src, newTier)
 end
 
 --- Adiciona XP e faz tier-up se necessário.

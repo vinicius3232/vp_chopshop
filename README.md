@@ -2,6 +2,20 @@
 
 ## Security & Compatibility
 
+### Audit — 2026-04-14 (v1.6.1)
+- Audited by fivem-audit skill (Claude Code)
+- 0 critical, 1 high, 4 medium, 4 low issues resolved
+- High: `ESX.GetPlayerFromId` (deprecated) → `ESX.Player` in `ServerPlayerIsReady`
+- Medium: ~22 hardcoded PT-BR strings in `client/fence.lua` replaced by `L()` calls; 40 new locale keys added (EN + PT, ES/FR/TR inherit via fallback); dead function `VPChopStartLiftPlacement` removed; tier-up labels moved to locale system
+- Low: `Config.Discord.LogPlaceLift` orphan removed; `LogPlaceWelder` key added; `BridgeAddCash` reason parameter added; `source` localized in `playerDropped`
+- Framework: QBX/QBCore/ESX compatible (bridge layer)
+- All 5 locales (en/pt/es/fr/tr) now fully supported in fence UI
+
+### v1.6.0 — 2026-04-14 — SQL Optimization
+- `SELECT COUNT(*)` → `SELECT EXISTS(SELECT 1 …)` na verificação de VIN scratch
+- Thread de limpeza periódica (6 h) de ordens fence cumpridas há mais de 7 dias
+- `placed_by` / `identifier` em todas as 6 tabelas: `VARCHAR(50)` → `VARCHAR(60)`
+
 ### v1.5.0 — 2026-04-14
 - Feature: **Sistema de Alarme Veicular** — probabilidade por classe, janela de desarme, dispatch automático
 - Requer chave de fenda + `lib.skillCheck` para desarmar; estado rastreado 100% server-side
@@ -271,6 +285,7 @@ Webhook opcional para log de eventos:
 | `LogChopPart` | Log de cada peça desmontada |
 | `LogBenchCraft` | Log de receitas na bancada |
 | `LogPlaceBench` | Log de colocação de bancada |
+| `LogPlaceWelder` | Log de colocação de soldadora |
 
 ### Venda de pneus (`Config.TyreSelling`)
 
@@ -329,17 +344,19 @@ O script **não depende de framework** para a lógica principal — inventário 
 | `server/chop.lua` | Fase 1: lógica servidor de desmontar peça e recompensas |
 | `server/advanced_chop.lua` | Fases 2-4: porta/motor/carcaça, rate limiting |
 | `server/bench.lua` | Lógica de receitas na bancada |
-| `server/npc.lua` | Ped foreman (spawn, shop, missão) |
 | `server/ambush.lua` | Emboscadas (netId-based): `VPChopAmbushMaybe`, `VPChopNpcMissionAccept` |
-| `server/tyres.lua` | Venda e missões de pneus (server) |
+| `server/fence.lua` | NPC rotativo, trust, ordens, venda de itens, jackstand server-side |
+| `server/heat.lua` | Heat system (VIN scratch, componentes MDT + peças) |
+| `server/progression.lua` | XP e tiers (escuta event bus, persiste em `vp_chop_progression`) |
 | `server/discord.lua` | Webhook Discord opcional |
 | `server/main.lua` | Init, callbacks de placement, broadcast do estado |
 | `client/placement.lua` | Modo colocação de bancada/soldadora (raycast + preview) |
 | `client/lifts.lua` | Utilitários de peças carregadas (`VPChopCarryingPart`) |
 | `client/bench.lua` | Bancada e crafting (client) |
 | `client/welder.lua` | Soldadora (client) |
-| `client/npc.lua` | Blip + ox_target no NPC foreman |
-| `client/tyres.lua` | Venda e missões de pneus (client) |
+| `client/fence.lua` | Blip rotativo, targets NPC, carry de pneu, truck loading |
+| `client/alarm.lua` | Alarme veicular: trigger, skillcheck, dispatch |
+| `client/progression.lua` | XP float, tier-up notification |
 | `client/main.lua` | Jackstand system, Fases 1-4, sync do mundo, descarte |
 
 ---
@@ -376,4 +393,4 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.3.6` — definida em `fxmanifest.lua`.
+`1.6.1` — definida em `fxmanifest.lua`.

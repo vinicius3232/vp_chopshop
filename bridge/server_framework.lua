@@ -20,7 +20,7 @@ function ServerPlayerIsReady(src)
     end
     if Framework == 'esx' then
         local ESX = exports['es_extended']:getSharedObject()
-        return ESX.GetPlayerFromId(src) ~= nil
+        return ESX.Player(src) ~= nil  -- [H1 FIX] GetPlayerFromId deprecado → ESX.Player()
     end
     return true
 end

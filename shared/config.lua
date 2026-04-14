@@ -45,8 +45,9 @@ Config.Discord = {
     Color = 3447003,
     LogChopPart = true,
     LogBenchCraft = true,
-    LogPlaceLift = false,
+    -- [L1 FIX] LogPlaceLift removido — elevador removido do sistema.
     LogPlaceBench = false,
+    LogPlaceWelder = false,  -- [L2 FIX] chave ausente; discord.lua verifica esta flag
 }
 
 -- [L2 FIX] Config.Partner removido — sistema de parceiro era lift-scoped; removido com o elevador.
