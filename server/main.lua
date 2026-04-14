@@ -151,15 +151,20 @@ AddEventHandler('playerDropped', function()
 end)
 
 --- Cancela o alarme de um veículo quando o jogador o desarma manualmente.
+--- Valida server-side que o jogador possui o item exigido (trust-no-client).
 RegisterNetEvent('vp_chopshop:server:alarmDisarmed', function(netId)
     local src = source
     if not GetPlayerName(src) then return end
     netId = tonumber(netId)
     if not netId then return end
     local alarm = AlarmActive[netId]
-    if alarm and alarm.src == src then
-        AlarmActive[netId] = nil
-    end
+    if not alarm or alarm.src ~= src then return end
+
+    -- Validar item (servidor não confia no cliente para esta verificação)
+    local disarmItem = (Config.Alarm and Config.Alarm.DisarmItem) or 'screwdriver'
+    if InvCount(src, disarmItem) < 1 then return end
+
+    AlarmActive[netId] = nil
 end)
 
 local function runDbLoad()

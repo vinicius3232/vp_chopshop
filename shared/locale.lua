@@ -224,6 +224,8 @@ local Locales = {
         alarm_disarm_label              = 'Disarm alarm',
         alarm_disarmed                  = 'Alarm disarmed.',
         alarm_expired                   = 'You didn\'t disarm in time — police are on their way!',
+        alarm_no_item                   = 'You need a screwdriver to disarm the alarm.',
+        alarm_skill_fail                = 'Failed to disarm — alarm still active!',
     },
     pt = {
         notify_title = 'Desmanche',
@@ -447,6 +449,8 @@ local Locales = {
         alarm_disarm_label              = 'Desativar alarme',
         alarm_disarmed                  = 'Alarme desativado.',
         alarm_expired                   = 'Você não desarmou a tempo — a polícia foi avisada!',
+        alarm_no_item                   = 'Você precisa de uma chave de fenda para desarmar o alarme.',
+        alarm_skill_fail                = 'Falhou ao desarmar — alarme ainda ativo!',
     },
     es = {
         notify_title = 'Desguace',
@@ -581,6 +585,8 @@ local Locales = {
         alarm_disarm_label         = 'Desactivar alarma',
         alarm_disarmed             = 'Alarma desactivada.',
         alarm_expired              = '¡No desactivaste a tiempo — la policía fue avisada!',
+        alarm_no_item              = 'Necesitas un destornillador para desactivar la alarma.',
+        alarm_skill_fail           = '¡Fallo al desactivar — la alarma sigue activa!',
     },
     fr = {
         notify_title = 'Casse auto',
@@ -715,6 +721,8 @@ local Locales = {
         alarm_disarm_label         = 'Désarmer l\'alarme',
         alarm_disarmed             = 'Alarme désarmée.',
         alarm_expired              = 'Vous n\'avez pas désarmé à temps — la police arrive !',
+        alarm_no_item              = 'Vous avez besoin d\'un tournevis pour désarmer l\'alarme.',
+        alarm_skill_fail           = 'Échec du désarmement — l\'alarme est toujours active !',
     },
     tr = {
         notify_title = 'Çıkma parça',
@@ -849,6 +857,8 @@ local Locales = {
         alarm_disarm_label         = 'Alarmı devre dışı bırak',
         alarm_disarmed             = 'Alarm devre dışı bırakıldı.',
         alarm_expired              = 'Zamanında etkisiz hale getiremedin — polis yolda!',
+        alarm_no_item              = 'Alarmı devre dışı bırakmak için tornavidaya ihtiyacın var.',
+        alarm_skill_fail           = 'Devre dışı bırakma başarısız — alarm hâlâ aktif!',
     },
 }
 

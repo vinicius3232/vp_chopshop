@@ -287,6 +287,16 @@ Config.Alarm = {
     DefaultChance       = 0.25, -- fallback para classes não listadas acima
     DisarmWindowSeconds = 30,   -- segundos para desarmar antes de chamar a polícia
     DisarmDistance      = 6.0,  -- distância máxima (m) do ox_target de desarme
+
+    --- Item necessário para iniciar o desarme do alarme.
+    --- Use o mesmo item de Config.AdvancedChop.ScrewdriverItem para consistência.
+    DisarmItem = 'screwdriver',
+
+    --- Minigame de desarme: lib.skillCheck. `false` = desligado (desarme instantâneo).
+    DisarmSkillCheck = {
+        difficulties = { 'easy', 'medium' },
+        keys         = { 'e', 'e' },
+    },
 }
 
 --- Ferramentas de desmanche niveladas por item.

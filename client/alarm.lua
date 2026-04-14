@@ -36,24 +36,39 @@ RegisterNetEvent('vp_chopshop:client:alarmTriggered', function(netId)
     })
 
     -- Adicionar ox_target de desarme no veículo
-    local disarmDist = (Config.Alarm and Config.Alarm.DisarmDistance) or 6.0
+    local alarmCfg   = Config.Alarm or {}
+    local disarmDist = alarmCfg.DisarmDistance or 6.0
+    local disarmItem = alarmCfg.DisarmItem or 'screwdriver'
+    local skillCfg   = alarmCfg.DisarmSkillCheck  -- tabela ou false
+
     exports.ox_target:addLocalEntity(veh, {
         {
             name     = 'vp_chopshop:disarmAlarm',
             label    = L('alarm_disarm_label'),
-            icon     = 'fas fa-bell-slash',
+            icon     = 'fas fa-screwdriver',
             distance = disarmDist,
             onSelect = function()
-                -- Informar servidor que o alarme foi desarmado
+                -- 1. Verificar item (client-side, confirma server-side também)
+                local count = exports.ox_inventory:Search('count', disarmItem) or 0
+                if count < 1 then
+                    lib.notify({ description = L('alarm_no_item'), type = 'error', duration = 4000 })
+                    return
+                end
+
+                -- 2. Minigame de desarme (opcional)
+                if skillCfg then
+                    local passed = lib.skillCheck(skillCfg.difficulties, skillCfg.keys)
+                    if not passed then
+                        lib.notify({ description = L('alarm_skill_fail'), type = 'error', duration = 3000 })
+                        return  -- alarme continua ativo; jogador pode tentar de novo
+                    end
+                end
+
+                -- 3. Informar servidor e silenciar alarme localmente
                 TriggerServerEvent('vp_chopshop:server:alarmDisarmed', netId)
-                -- Silenciar alarme localmente
                 SetVehicleAlarm(veh, false)
                 clearAlarm()
-                lib.notify({
-                    description = L('alarm_disarmed'),
-                    type        = 'success',
-                    duration    = 4000,
-                })
+                lib.notify({ description = L('alarm_disarmed'), type = 'success', duration = 4000 })
             end,
         },
     })
