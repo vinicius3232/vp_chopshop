@@ -8,12 +8,14 @@
 - **[Feature] Sistema de alarme veicular probabilístico** (`client/alarm.lua` + `server/main.lua` + `shared/config.lua`):
   - Todos os veículos podem disparar alarme ao ser desmanchados (não só os trancados).
   - Probabilidade proporcional à classe do veículo GTA: Compacts 15% → Super 80%, Military 75%, OpenWheel 70%, Emergency 65%.
+  - Para desarmar: requer **chave de fenda** (`Config.Alarm.DisarmItem`) + `lib.skillCheck` (`easy` + `medium`).
+  - Falha no skillCheck mantém alarme ativo — jogador pode tentar novamente dentro da janela.
   - Janela configurável (padrão 30 s) para o jogador desarmar via ox_target no veículo.
   - Se não desarmado: servidor notifica o cliente → dispatch ativado (ps-dispatch / cd_dispatch / qs-dispatch).
-  - Estado rastreado 100% server-side (`AlarmActive[netId]`) — sem trust-client.
+  - Estado rastreado 100% server-side (`AlarmActive[netId]`); validação de item também server-side — sem trust-client.
   - Alarme limpo automaticamente ao desconectar ou ao descartar o veículo.
-- **`Config.Alarm`** substitui `Config.AlarmOnChop` (bool simples → tabela completa com `ChanceByClass`, `DefaultChance`, `DisarmWindowSeconds`, `DisarmDistance`).
-- Chaves de locale `alarm_title`, `alarm_triggered`, `alarm_disarm_label`, `alarm_disarmed`, `alarm_expired` adicionadas em todos os 5 locales (en/pt/es/fr/tr).
+- **`Config.Alarm`** substitui `Config.AlarmOnChop` (bool simples → tabela completa com `ChanceByClass`, `DefaultChance`, `DisarmWindowSeconds`, `DisarmDistance`, `DisarmItem`, `DisarmSkillCheck`).
+- Chaves de locale `alarm_title`, `alarm_triggered`, `alarm_disarm_label`, `alarm_disarmed`, `alarm_expired`, `alarm_no_item`, `alarm_skill_fail` adicionadas em todos os 5 locales (en/pt/es/fr/tr).
 
 ---
 

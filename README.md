@@ -2,6 +2,10 @@
 
 ## Security & Compatibility
 
+### v1.5.0 — 2026-04-14
+- Feature: **Sistema de Alarme Veicular** — probabilidade por classe, janela de desarme, dispatch automático
+- Requer chave de fenda + `lib.skillCheck` para desarmar; estado rastreado 100% server-side
+
 ### Audit — 2026-04-14 (v1.4.0)
 - Audited by fivem-audit skill (Claude Code)
 - 2 critical, 4 high, 3 medium, 4 low issues resolved
@@ -74,7 +78,25 @@ Os **rótulos dos itens** no `ox_inventory` (`installation/ox_items_snippet.txt`
 > **Fase 3** requer o capô removido na Fase 2.
 > **Fase 4** requer o motor removido na Fase 3 e uma soldadora colocada no raio `Config.AdvancedChop.WelderRadius`.
 
-### 3. Descarte de veículo
+### 3. Alarme veicular
+
+Ao desmontar a **primeira peça** de um veículo, o servidor rola uma chance de disparar o alarme proporcional à classe do carro (Super 80%, Military 75%, Compacts 15%…).
+
+**Se o alarme disparar:**
+- Som e luzes de alarme ativados no veículo
+- Notificação `error`: *"O alarme disparou! Desative-o antes da polícia chegar."*
+- Target `🪛 Desativar alarme` aparece no veículo
+
+**Para desarmar** (janela de 30 s configurável):
+1. Precisa de **chave de fenda** (`screwdriver`) no inventário
+2. Passa um `lib.skillCheck` (fácil + médio)
+3. Se falhar, pode tentar novamente até o tempo expirar
+
+**Se o tempo expirar sem desarme:** dispatch automático para a polícia com a localização do veículo.
+
+> Configurável via `Config.Alarm` — veja a seção de Configuração abaixo.
+
+### 4. Descarte de veículo
 
 Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar veículo** aparece. O jogador recebe cash (`DefaultPayout`). Com `CopsBonus.Enable`, o valor é multiplicado quando há polícias suficientes online.
 
@@ -143,7 +165,7 @@ Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar ve
 | `Config.ChopSkillCheck` | Skillcheck opcional antes da barra de progresso |
 | `Config.ChopProgressMs` | Duração da barra de desmanche (ms) |
 | `Config.Tools` | Configura ferramentas individuais, sua velocidade, durabilidade e propensão a avisar a polícia (`dispatchChance`) |
-| `Config.AlarmOnChop` | Tocar alarme do veículo automaticamente ao iniciar desmonte sem as chaves |
+| `Config.Alarm` | Sistema de alarme veicular — veja tabela abaixo |
 | `Config.Dispatch` | Integração automática para notificar DP via `ps-dispatch`, `cd-dispatch`, ou `qs-dispatch` |
 | `Config.CarPartRewards` | Materiais por peça na Fase 1 |
 | `Config.PartProps` | Props visuais carregados ao remover peça |
@@ -171,6 +193,36 @@ Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar ve
 | `DoorReward` | Recompensa por peça na Fase 2 |
 | `EngineReward` | Recompensa pelo motor na Fase 3 |
 | `CarcassRewards` | Recompensas com chance na Fase 4 |
+
+### Alarme veicular (`Config.Alarm`)
+
+| Chave | Descrição |
+|-------|-----------|
+| `Enable` | Liga/desliga o sistema (`true` por padrão) |
+| `ChanceByClass` | Tabela `[classId] = chance` (0.0–1.0) por classe GTA. Classes omitidas usam `DefaultChance` |
+| `DefaultChance` | Probabilidade padrão para classes não mapeadas (`0.25`) |
+| `DisarmWindowSeconds` | Segundos para desarmar antes do dispatch (`30`) |
+| `DisarmDistance` | Distância máxima do target de desarme em metros (`6.0`) |
+| `DisarmItem` | Item necessário para iniciar o minigame (`'screwdriver'`) |
+| `DisarmSkillCheck` | `{ difficulties, keys }` para `lib.skillCheck`; `false` = sem minigame |
+
+**Probabilidades padrão por classe:**
+
+| Classe GTA | Exemplos | Chance |
+|------------|----------|--------|
+| Super (7) | Zentorno, T20 | 80% |
+| Military (19) | Insurgent, Rhino | 75% |
+| OpenWheel (22) | BR8, Formula | 70% |
+| Emergency (18) | Police, Ambulance | 65% |
+| Sports (6) | Elegy, Rapid GT | 55% |
+| Sports Classics (5) | Coquette, Monroe | 50% |
+| Muscle (4) | Gauntlet, Vigero | 40% |
+| SUVs (2) / Coupes (3) | Granger, Buffalo | 35% |
+| Off-Road (9) | Sandking, Kamacho | 30% |
+| Sedans (1) | Stanier, Emperor | 20% |
+| Compacts (0) / Vans (12) | Issi, Rumpo | 15–20% |
+| Motos (8) | PCJ, Bati | 10% |
+| Outros | — | 25% (padrão) |
 
 ### Descarte (`Config.Discard`)
 | Chave | Descrição |
