@@ -100,8 +100,8 @@ Después de quitar `Config.Discard.MinPartsToDiscard` piezas, aparece el objetiv
    add_ace group.admin command.chopremove allow
    ```
 
-5. **Framework (opcional)**
-   No es obligatorio tener QBCore/QBox/ESX. Sin ninguno de ellos, `ServerPlayerIsReady` devolverá `true` para todos. El puente (bridge) en `bridge/server_framework.lua` solo usa el framework para `ServerPlayerIsReady` y el dinero en la tienda del NPC.
+5. **Framework**
+   Requiere **ESX** (`es_extended`). El bridge en `bridge/server_framework.lua` usa ESX para `ServerPlayerIsReady` y para transacciones de dinero en la tienda del NPC.
 
 ---
 
@@ -120,7 +120,7 @@ Después de quitar `Config.Discard.MinPartsToDiscard` piezas, aparece el objetiv
 
 | Clave | Descripción |
 |-------|-----------|
-| `Config.RequireVehicleKeys` | Exige llaves del vehículo (`qbx_vehiclekeys` / `qb-vehiclekeys`) |
+| `Config.RequireVehicleKeys` | Exige llaves del vehículo (ver `Config.VehicleKeys`) |
 | `Config.ChopCooldownSeconds` | Tiempo de espera tras desmontar cada pieza (`0` = apagado) |
 | `Config.ChopSkillCheck` | Skillcheck opcional antes de la barra de progreso |
 | `Config.ChopProgressMs` | Duración de la barra de desguace (ms) |
@@ -234,12 +234,11 @@ Este script **no requiere un framework** para la lógica principal; el inventari
 
 | Framework | Soporte |
 |-----------|---------|
-| QBox (`qbx_core`) | Completo |
-| QBCore (`qb-core`) | Completo |
+| ESX (`es_extended`) | Completo |
 | ESX (`es_extended`) | Funcional (sin soporte para `esx_inventory`) |
 | Ninguno | Funcional (la tienda con dinero estará desactivada) |
 
-**Llaves de vehículos:** integración explícita con `qbx_vehiclekeys` y `qb-vehiclekeys`. Con otro sistema, `Config.RequireVehicleKeys = false` desactiva la comprobación.
+**Llaves de vehículos:** usa `Config.VehicleKeys` para apuntar tu resource/export de llaves en ESX. Si prefieres desactivar la verificación, define `Config.RequireVehicleKeys = false`.
 
 ---
 
@@ -259,21 +258,23 @@ Este script **no requiere un framework** para la lógica principal; el inventari
 | `server/chop.lua` | Fase 1: lógica de servidor e inventario |
 | `server/advanced_chop.lua` | Fases 2-4: puerta/motor/chasis, limitadores |
 | `server/bench.lua` | Lógica de recetas en la mesa |
-| `server/npc.lua` | NPC principal (spawn, tienda, misiones) |
 | `server/ambush.lua` | Emboscadas (netId-based): `VPChopAmbushMaybe`, `VPChopNpcMissionAccept` |
-| `server/tyres.lua` | Venta manual y contratos de neumáticos (server) |
+| `server/fence.lua` | Fence NPC rotativo, confianza, pedidos, venta de neumáticos |
+| `server/heat.lua` | Sistema de calor (VIN scratch, componentes MDT) |
+| `server/progression.lua` | XP y tiers (persiste en `vp_chop_progression`) |
 | `server/discord.lua` | Webhook Discord opcional |
 | `server/main.lua` | Init, colocaciones, sync de mundo |
 | `client/placement.lua` | Vista de modo colocación (raycast + preestreno) |
-| `client/lifts.lua` | Utilidades para cargar piezas (`VPChopCarryingPart`) |
+| `client/carry.lua` | Sistema de carga de piezas (`VPChopCarryingPart`) |
 | `client/bench.lua` | Mesa y crafteo (client) |
 | `client/welder.lua` | Soldadora (client) |
-| `client/npc.lua` | Blip + ox_target para el NPC principal |
-| `client/tyres.lua` | Venta y contratos de neumáticos (client) |
+| `client/fence.lua` | Blip rotativo, targets NPC fence, carga de neumáticos |
+| `client/alarm.lua` | Alarma vehicular: activación, skillcheck, dispatch |
+| `client/progression.lua` | Texto flotante XP, notificación de tier |
 | `client/main.lua` | Sistema gato hidr., Fases 1-4, sync, descarte |
 
 ---
 
 ## Versión
 
-`1.3.7` — definida en `fxmanifest.lua`.
+`1.6.7` — definida en `fxmanifest.lua`.

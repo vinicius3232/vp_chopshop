@@ -2,13 +2,34 @@
 
 ## Security & Compatibility
 
+### Audit — 2026-04-27 (v1.6.7)
+- Audited by fivem-audit skill (Claude Code)
+- ESX fix: `_ESX.Player()` → `_ESX.GetPlayerFromId()`; `ExtendedPlayers()` → `GetPlayers()` + iteração; `xPlayer.getJob()` → `xPlayer.job.name` (property)
+- Framework: **ESX-only** (bridge layer)
+
+### Audit — 2026-04-27 (v1.6.6)
+- Audited by fivem-audit skill (Claude Code)
+- 1 critical, 4 high, 4 medium, 2 low resolvidos (code-reviewer pass)
+- Critical C1: `ServerTyreCounts` movido para global — `server/main.lua` e `server/fence.lua` partilham a única fonte de verdade do contador de pneus
+- High H1-H4: race condition na venda de pneus (`SellTyresBusy` mutex); trust decay XP floor corrigido; dead code `_npcBuyCooldown` removido; alarm dispatch quando jogador original desconectou
+- Medium M1-M4: refund AddItem com pcall; tyre contract target gated por feature flag; dispatch usa coords do veículo; XP persist em pcall
+
+### Audit — 2026-04-27 (v1.6.4)
+- Audited by fivem-audit skill (Claude Code)
+- 0 critical, 2 high, 1 medium issues resolved
+- High: double SQL query per `VPChopHeatCheck` eliminated (H2); ghost `data_file` ytyp removed (H1)
+- Medium: ESX `getAccount('money')` nil guard adicionado em `BridgeGetCash` / `BridgeRemoveCash`
+- oxmysql: NECESSÁRIO — 4 tipos de query em 4 arquivos server
+- Framework: **ESX-only** (bridge layer)
+- oxmysql queries: 100% parametrizadas (`?` placeholders) — sem SQL injection
+
 ### Audit — 2026-04-14 (v1.6.1)
 - Audited by fivem-audit skill (Claude Code)
 - 0 critical, 1 high, 4 medium, 4 low issues resolved
 - High: `ESX.GetPlayerFromId` (deprecated) → `ESX.Player` in `ServerPlayerIsReady`
 - Medium: ~22 hardcoded PT-BR strings in `client/fence.lua` replaced by `L()` calls; 40 new locale keys added (EN + PT, ES/FR/TR inherit via fallback); dead function `VPChopStartLiftPlacement` removed; tier-up labels moved to locale system
 - Low: `Config.Discord.LogPlaceLift` orphan removed; `LogPlaceWelder` key added; `BridgeAddCash` reason parameter added; `source` localized in `playerDropped`
-- Framework: QBX/QBCore/ESX compatible (bridge layer)
+- Framework: **ESX-only** (bridge layer)
 - All 5 locales (en/pt/es/fr/tr) now fully supported in fence UI
 
 ### v1.6.0 — 2026-04-14 — SQL Optimization
@@ -24,15 +45,15 @@
 - Audited by fivem-audit skill (Claude Code)
 - 2 critical, 4 high, 3 medium, 4 low issues resolved
 - Critical: missing server handler for `jackstandTyreStolen`; `TyreMissionStart` nil-call crash
-- High: `truckNetId` nil in tyre truck-load path; deprecated QBX/ESX bridge APIs; `breakDoor` global broadcast
-- Framework: QBX/QBCore/ESX compatible (bridge layer)
+- High: `truckNetId` nil in tyre truck-load path; deprecated ESX bridge APIs; `breakDoor` global broadcast
+- Framework: **ESX-only** (bridge layer)
 - Lua 5.4 default (lua54 directive removed — deprecated June 2025)
 - All SQL queries use parameterized `?` placeholders
 
 ### Audit — 2026-04-13 (v1.3.9)
 - Audited by fivem-audit skill (Claude Code)
 - 0 critical, 1 high issue resolved (tool durability, XP persistence, broadcast filter)
-- Framework: QBX/QBCore/ESX compatible (bridge layer)
+- Framework: **ESX-only** (bridge layer)
 
 ---
 
@@ -155,7 +176,7 @@ Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar ve
    ```
 
 5. **Framework (opcional)**
-   Não é obrigatório ter QBCore/QBox/ESX. Sem nenhum, `ServerPlayerIsReady` retorna `true` para todos. O bridge em `bridge/server_framework.lua` usa o framework apenas para `ServerPlayerIsReady` e para dinheiro na loja do NPC.
+   **Requer ESX** (`es_extended`). O bridge em `bridge/server_framework.lua` usa o ESX para `ServerPlayerIsReady` e para transações em dinheiro na loja do NPC.
 
 ---
 
@@ -174,7 +195,7 @@ Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar ve
 
 | Chave | Descrição |
 |-------|-----------|
-| `Config.RequireVehicleKeys` | Exige chaves do veículo (`qbx_vehiclekeys` / `qb-vehiclekeys`) |
+| `Config.RequireVehicleKeys` | Exige chaves do veículo (ver `Config.VehicleKeys`) |
 | `Config.ChopCooldownSeconds` | Espera após cada peça desmontada (`0` = desligado) |
 | `Config.ChopSkillCheck` | Skillcheck opcional antes da barra de progresso |
 | `Config.ChopProgressMs` | Duração da barra de desmanche (ms) |
@@ -237,6 +258,59 @@ Após remover `Config.Discard.MinPartsToDiscard` peças, o target **Descartar ve
 | Compacts (0) / Vans (12) | Issi, Rumpo | 15–20% |
 | Motos (8) | PCJ, Bati | 10% |
 | Outros | — | 25% (padrão) |
+
+### Fence NPC rotativo (`Config.Fence`)
+
+O fence é um NPC que muda de localização a cada intervalo configurável (padrão 45 min).
+
+| Chave | Descrição |
+|-------|-----------|
+| `Locations` | Lista de `{ coords=vector4, blipLabel }` — o fence aparece num deles de cada vez |
+| `RotationMinutes` | Minutos entre mudança de local |
+| `IntroduceItem` | Item necessário para a primeira apresentação (`fence_referral`) |
+| `TrustDecayDays` | Dias de inatividade antes de baixar nível de confiança |
+| `TrustXpPerLevel` | Tabela `[1]=100, [2]=300, [3]=600, [4]=1000` — XP cumulativo por nível |
+| `NightBonus` | `{ Enable, StartHour, EndHour, Multiplier }` — bônus noturno no preço |
+| `ItemPrices` | Preço base por item (modificado por trust/tier/heat) |
+| `WholeCarEnable` | Liga entrega de carro inteiro (requer Trust 4) |
+| `WholeCarPayout` | Cash base por carro inteiro entregue |
+| `OrdersEnable` | Liga sistema de encomendas (requer Trust 3+) |
+
+**Níveis de confiança:**
+
+| Nível | Nome | Acesso |
+|-------|------|--------|
+| 1 | Conhecido | Vender materiais e pneus |
+| 2 | Confiável | Comprar bancada no fence |
+| 3 | Parceiro | Receber encomendas com bônus (×1.35–1.5) |
+| 4 | Sócio | Entregar carros inteiros; bônus máximo |
+
+### Progressão (`Config.Progression`)
+
+Sistema de XP e tiers por jogador, persistido em `vp_chop_progression`.
+
+| Chave | Descrição |
+|-------|-----------|
+| `TierXp` | `[1]=0, [2]=500, [3]=2000, [4]=5000` — XP cumulativo por tier |
+| `SpeedMult` | Multiplicador de velocidade da barra de progresso por tier |
+| `MaterialMult` | Multiplicador de quantidade de materiais por tier |
+| `FencePriceMult` | Multiplicador de preço no fence por tier (Tier 4 = +10%) |
+
+**XP por ação:**
+
+| Ação | XP |
+|------|-----|
+| Fase 1 (peça básica) | 8 |
+| Fase 2 (peça estrutural) | 15 |
+| Fase 3 (motor) | 40 |
+| Fase 4 (carcaça) | 60 |
+| Descarte de veículo | 25 |
+| Venda de pneu | 5 |
+| Encomenda entregue | 120 |
+| Missão de pneus | 80 |
+| VIN scratch | 30 |
+| Venda de material | 10 |
+| Entrega de carro inteiro | 150 |
 
 ### Descarte (`Config.Discard`)
 | Chave | Descrição |
@@ -319,12 +393,11 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 | Framework | Suporte |
 |-----------|---------|
-| QBox (`qbx_core`) | Completo |
-| QBCore (`qb-core`) | Completo |
-| ESX (`es_extended`) | Funcional (sem suporte a `esx_inventory`) |
+| ESX (`es_extended`) | Completo |
+| ESX Legacy (`es_extended`) | Completo — usa `GetPlayerFromId`, `GetPlayers`, `xPlayer.job.name` |
 | Nenhum | Funcional (loja NPC em dinheiro desativada) |
 
-**Chaves de veículo:** integração explícita com `qbx_vehiclekeys` e `qb-vehiclekeys`. Com outro sistema, `Config.RequireVehicleKeys = false` desativa a verificação.
+**Chaves de veículo:** use `Config.VehicleKeys` para apontar seu resource/export de chaves no ESX. Se preferir desligar a verificação, defina `Config.RequireVehicleKeys = false`.
 
 ---
 
@@ -351,7 +424,7 @@ O script **não depende de framework** para a lógica principal — inventário 
 | `server/discord.lua` | Webhook Discord opcional |
 | `server/main.lua` | Init, callbacks de placement, broadcast do estado |
 | `client/placement.lua` | Modo colocação de bancada/soldadora (raycast + preview) |
-| `client/lifts.lua` | Utilitários de peças carregadas (`VPChopCarryingPart`) |
+| `client/carry.lua` | Carry system de peças carregadas (`VPChopCarryingPart`) |
 | `client/bench.lua` | Bancada e crafting (client) |
 | `client/welder.lua` | Soldadora (client) |
 | `client/fence.lua` | Blip rotativo, targets NPC, carry de pneu, truck loading |
@@ -373,6 +446,15 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Segurança & Compatibilidade
 
+### Auditoria — 2026-04-14 (v1.6.2)
+- Auditado por fivem-audit skill (Claude Code)
+- 0 críticos, 1 alto resolvido (H1: jackstandTyreStolen — exploit de pneus infinitos via evento sem validação de proximidade)
+- 2 médios resolvidos (M1: pcall em saveTrust + rollback de item; M2: trust lookup redundante)
+- 1 baixo pendente (L1: TyreMission stub com Enable=true)
+- Framework: ESX-only
+- Lua 5.4 (padrão desde jun/2025) — globals cross-file verificadas
+- ox_inventory v2+, ox_target, oxmysql, ox_lib — versões atuais suportadas
+
 ### Auditoria — 2026-04-12
 - Auditado por fivem-audit skill (Claude Code)
 - 3 críticos, 5 altos resolvidos (v1.3.3 → v1.3.5)
@@ -385,7 +467,7 @@ O script **não depende de framework** para a lógica principal — inventário 
 - Fix: bones inexistentes (2 portas) não criam mais targets na origem do veículo
 - Fix: bone do motor corrigido de `engine` → `bonnet`
 - lua54: `VPChopFindNearestTruck` exposta como global em `client/fence.lua`
-- Framework: QBox / QBCore / ESX compatível
+- Framework: ESX-only
 - lua54: yes — todas as funções cross-file verificadas como globais
 - ox_inventory, ox_target, oxmysql, ox_lib — versões atuais suportadas
 
@@ -393,4 +475,4 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.6.1` — definida em `fxmanifest.lua`.
+`1.6.7` — definida em `fxmanifest.lua`.

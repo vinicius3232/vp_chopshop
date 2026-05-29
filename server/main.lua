@@ -1,14 +1,6 @@
 -- [REMOVED] ServerLifts, ServerLiftsById, LiftMovement, VPChopLiftById:
 -- elevador removido do sistema — apenas macaco (jackstand) é necessário para desmanche.
 
--- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
-local VPChopEvt = VPChopEvt or {
-    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
-    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
-    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
-    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
-}
-
 ServerBenches = {}
 ServerWelders = {}
 local ServerWeldersById = {}
@@ -119,28 +111,12 @@ local function isBenchTooClose(coords)
     return false
 end
 
-local _npcBuyCooldown = {} ---@type table<string, number>
-
-local function npcBuyCooldownCheck(src)
-    local sec = (Config.NPC and Config.NPC.Shop and tonumber(Config.NPC.Shop.CooldownSeconds)) or 0
-    if sec < 1 then return false end
-    local key = ServerChopPlayerKey(src)
-    local t = _npcBuyCooldown[key]
-    return t and os.time() < t
-end
-
-local function npcBuyCooldownMark(src)
-    local sec = (Config.NPC and Config.NPC.Shop and tonumber(Config.NPC.Shop.CooldownSeconds)) or 0
-    if sec < 1 then return end
-    local key = ServerChopPlayerKey(src)
-    _npcBuyCooldown[key] = os.time() + sec
-end
 
 AddEventHandler('playerDropped', function()
     local src = source
-    local key = ServerChopPlayerKey(src)
-    _npcBuyCooldown[key] = nil
     BenchCraftBusy[src] = nil
+    _chopPartRateLimit[src] = nil
+    _benchCraftRateLimit[src] = nil
     VPChopClaimPendingReward(src) -- limpar recompensa pendente (peça perdida ao desconectar)
     -- Limpar alarme do jogador que saiu (timeout silencioso; sem dispatch)
     for netId, data in pairs(AlarmActive) do
@@ -150,11 +126,30 @@ AddEventHandler('playerDropped', function()
     end
 end)
 
+-- Tyre count autoritativo no servidor: cliente envia evento, servidor valida e
+-- incrementa. State bag espelha ServerTyreCounts para UI do cliente.
+RegisterNetEvent('vp_chopshop:server:addTyreToTruck', function(netId)
+    local src = source
+    if not IsValidSource(src) then return end
+    netId = tonumber(netId)
+    if not netId then return end
+    local truck = NetworkGetEntityFromNetworkId(netId)
+    if truck == 0 or not DoesEntityExist(truck) then return end
+    if not ValidatePlayerNearVehicle(src, truck, 8.0) then return end
+    local max = tonumber((Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck)) or 4
+    local cur = ServerTyreCounts[netId] or 0
+    if cur >= max then return end
+    -- [C1 FIX] Write to ServerTyreCounts (the source of truth for sellTyres payout).
+    -- Both client load paths (jackstand carry and fence prop) now share one counter.
+    ServerTyreCounts[netId] = cur + 1
+    Entity(truck).state:set('chopTyreCount', cur + 1, true)
+end)
+
 --- Cancela o alarme de um veículo quando o jogador o desarma manualmente.
 --- Valida server-side que o jogador possui o item exigido (trust-no-client).
 RegisterNetEvent('vp_chopshop:server:alarmDisarmed', function(netId)
     local src = source
-    if not GetPlayerName(src) then return end
+    if not IsValidSource(src) then return end
     netId = tonumber(netId)
     if not netId then return end
     local alarm = AlarmActive[netId]
@@ -187,7 +182,7 @@ AddEventHandler('vp_chopshop:server:dbReady', function()
 end)
 
 lib.callback.register('vp_chopshop:getWorld', function(source)
-    if not GetPlayerName(source) then return nil end
+    if not IsValidSource(source) then return nil end
     local tries = 0
     while not ServerWorldLoaded and tries < 200 do
         Wait(50)
@@ -198,10 +193,12 @@ end)
 
 lib.callback.register('vp_chopshop:placeBench', function(source, payload)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if type(payload) ~= 'table' then return { ok = false, err = 'coords' } end
     local x, y, z = tonumber(payload.x), tonumber(payload.y), tonumber(payload.z)
     local heading = tonumber(payload.heading) or 0.0
     if not x or not y or not z then return { ok = false, err = 'coords' } end
     local coords = vector3(x, y, z)
+    if not ValidateMapCoords(coords) then return { ok = false, err = 'coords' } end
     if not ValidatePlayerPlacementRange(source, coords) then return { ok = false, err = 'distance' } end
     if isBenchTooClose(coords) then return { ok = false, err = 'too_close' } end
 
@@ -265,11 +262,28 @@ function VPChopHasTool(src, wantDrill)
     return false
 end
 
+-- Rate-limit de segurança: bloqueia spam de vp_chopshop:chopPart (independente do ChopCooldownSeconds)
+local _chopPartRateLimit = {}  ---@type table<number, number>  src → expiry GetGameTimer
+local CHOP_PART_MIN_INTERVAL_MS = 2000  -- mínimo 2s entre chamadas por jogador
+
 lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
 
+    -- Rate limit de segurança (anti-flood independente do cooldown configurável)
+    local now = GetGameTimer()
+    if _chopPartRateLimit[source] and now < _chopPartRateLimit[source] then
+        LogSuspicious(source, 'chopPart', 'Rate limit excedido (flood de callback)')
+        return { ok = false, err = 'cooldown', wait = 2 }
+    end
+    _chopPartRateLimit[source] = now + CHOP_PART_MIN_INTERVAL_MS
+
     netId = tonumber(netId)
-    if not netId then return { ok = false, err = 'net' } end
+    if not netId or netId <= 0 then return { ok = false, err = 'net' } end
+
+    -- Validar tipo e comprimento de partKey (rejeita payloads malformados de lua executor)
+    if type(partKey) ~= 'string' or #partKey > 32 or #partKey < 3 then
+        return { ok = false, err = 'part' }
+    end
 
     local cd = VPChopChopCooldownRemaining(source)
     if cd > 0 then return { ok = false, err = 'cooldown', wait = cd } end
@@ -337,8 +351,28 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
                 SetTimeout(windowMs, function()
                     if AlarmActive[capturedNetId] then
                         AlarmActive[capturedNetId] = nil
-                        if GetPlayerName(capturedSrc) then
-                            TriggerClientEvent('vp_chopshop:client:alarmExpired', capturedSrc, capturedNetId)
+                        -- [H4 FIX] Original chopper may have disconnected during the disarm window.
+                        -- Police dispatch must still fire — find any nearby online player.
+                        local dispatchTarget = GetPlayerName(capturedSrc) and capturedSrc
+                        if not dispatchTarget then
+                            local vehEnt = NetworkGetEntityFromNetworkId(capturedNetId)
+                            local vehPos = (vehEnt and vehEnt ~= 0 and DoesEntityExist(vehEnt))
+                                           and GetEntityCoords(vehEnt) or nil
+                            for _, pid in ipairs(GetPlayers()) do
+                                local pidN = tonumber(pid)
+                                if pidN and GetPlayerName(pidN) then
+                                    if not vehPos then
+                                        dispatchTarget = pidN; break
+                                    end
+                                    local pped = GetPlayerPed(pidN)
+                                    if pped and pped ~= 0 and #(GetEntityCoords(pped) - vehPos) < 200.0 then
+                                        dispatchTarget = pidN; break
+                                    end
+                                end
+                            end
+                        end
+                        if dispatchTarget then
+                            TriggerClientEvent('vp_chopshop:client:alarmExpired', dispatchTarget, capturedNetId)
                         end
                     end
                 end)
@@ -349,8 +383,17 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     return { ok = true }
 end)
 
+-- Rate-limit de segurança para benchCraft
+local _benchCraftRateLimit = {}  ---@type table<number, number>  src → expiry GetGameTimer
+local BENCH_CRAFT_MIN_INTERVAL_MS = 3000
+
 lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipeIndex)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    local nowBC = GetGameTimer()
+    if _benchCraftRateLimit[source] and nowBC < _benchCraftRateLimit[source] then
+        return { ok = false, err = 'busy' }
+    end
+    _benchCraftRateLimit[source] = nowBC + BENCH_CRAFT_MIN_INTERVAL_MS
     if BenchCraftBusy[source] then return { ok = false, err = 'busy' } end
     BenchCraftBusy[source] = true
     local bench = benchById(benchId)
@@ -434,6 +477,10 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
 
     local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
 
+    -- Sanity cap: payout nunca deve exceder 10× o DefaultPayout
+    local maxPayout = math.floor((tonumber((Config.Discard or {}).DefaultPayout) or 1500) * 10)
+    payout = math.min(payout, maxPayout)
+
     BridgeAddCash(source, payout, 'discard_payout')  -- [L3 FIX] reason adicionado para transaction logging
     VPChopClearVehicle(netId)
     AlarmActive[netId] = nil  -- veículo descartado: alarme encerrado
@@ -444,7 +491,7 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
 end)
 
 lib.callback.register('vp_chopshop:maybeAmbush', function(source, netId)
-    if not GetPlayerName(source) then return false end
+    if not IsValidSource(source) then return false end
     -- Resolver placa para heat multiplier
     local vehForPlate = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
     local plate = (vehForPlate and vehForPlate ~= 0 and DoesEntityExist(vehForPlate))
@@ -455,39 +502,12 @@ lib.callback.register('vp_chopshop:maybeAmbush', function(source, netId)
 end)
 
 lib.callback.register('vp_chopshop:npcAcceptMission', function(source)
-    if not GetPlayerName(source) then return { ok=false } end
+    if not IsValidSource(source) then return { ok=false } end
     return VPChopNpcMissionAccept(source)
 end)
 
-lib.callback.register('vp_chopshop:npcBuy', function(source, kind)
-    if not Config.NPC or not Config.NPC.Enable then return { ok = false, err = 'disabled' } end
-    local shop = Config.NPC.Shop
-    if not shop or not shop.Enable then return { ok = false, err = 'disabled' } end
-
-    local c = Config.NPC.Coords
-    -- [DC-05] Removido + 0.0: Config.NPC.Coords é vector4 literal — campos já são numbers
-    local npos = vector3(c.x, c.y, c.z)
-    if not ValidatePlayerNearPoint(source, npos, 3.0) then return { ok = false, err = 'distance' } end
-    if npcBuyCooldownCheck(source) then return { ok = false, err = 'cooldown' } end
-
-    -- [REMOVED] kind == 'lift': elevador não está mais disponível na loja do NPC.
-    if kind ~= 'bench' then return { ok = false, err = 'args' } end
-
-    local price = math.floor(tonumber(shop.BenchPrice) or 0)
-    local itemName = Config.Items.placeBench
-    if price < 1 then return { ok = false, err = 'disabled' } end
-
-    local cash = BridgeGetCash(source)
-    if cash < price then return { ok = false, err = 'money' } end
-    if not BridgeRemoveCash(source, price) then return { ok = false, err = 'money' } end
-
-    if not InvAdd(source, itemName, 1) then
-        BridgeAddCash(source, price)
-        return { ok = false, err = 'inventory' }
-    end
-    npcBuyCooldownMark(source)
-    return { ok = true }
-end)
+-- [H3 FIX] vp_chopshop:npcBuy removed — dead callback. All clients now call
+-- vp_chopshop:fence:buyBench (validates against rotative fence location).
 
 lib.callback.register('vp_chopshop:pickupBench', function(source, benchId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
@@ -513,11 +533,14 @@ end)
 
 lib.callback.register('vp_chopshop:placeWelder', function(source, payload)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if type(payload) ~= 'table' then return { ok = false, err = 'coords' } end
     local x, y, z = tonumber(payload.x), tonumber(payload.y), tonumber(payload.z)
     local heading = tonumber(payload.heading) or 0.0
     if not x or not y or not z then return { ok = false, err = 'coords' } end
     local coords = vector3(x, y, z)
+    if not ValidateMapCoords(coords) then return { ok = false, err = 'coords' } end
     if not ValidatePlayerPlacementRange(source, coords) then return { ok = false, err = 'distance' } end
+    if isWelderTooClose(coords) then return { ok = false, err = 'too_close' } end
 
     local item = Config.Items.placeWelder
     if InvCount(source, item) < 1 then return { ok = false, err = 'item' } end
@@ -589,11 +612,11 @@ RegisterCommand('choptest', function(src, args)
     local inv = exports.ox_inventory
     local kit = {
         { item = Config.Items.placeBench,  qty = 1 },
-        -- [M4 FIX] Config.Items.fuel foi removido (combustível exclusivo do elevador) — linha removida.
         { item = Config.Items.placeWelder, qty = 1 },
     }
-    if Config.ChopTool and Config.ChopTool.Item then
-        kit[#kit + 1] = { item = Config.ChopTool.Item, qty = 1 }
+    -- [M2 FIX] Config.ChopTool never existed; iterate Config.Tools (the real tool registry).
+    for toolName, _ in pairs(Config.Tools or {}) do
+        kit[#kit + 1] = { item = toolName, qty = 1 }
     end
     if Config.Jackstand and Config.Jackstand.Enable and Config.Jackstand.Item then
         kit[#kit + 1] = { item = Config.Jackstand.Item, qty = 1 }

@@ -136,11 +136,15 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
                 icon='fa-solid fa-circle-dot', distance=2.5,
                 onSelect=function() sellTyres() end,
             }
-            options[#options+1] = {
-                name='vp_fence_tyre_contract', label=L('fence_target_tyre_contract'),
-                icon='fa-solid fa-file-contract', distance=2.5,
-                onSelect=function() TyreMissionStart() end,
-            }
+            -- [M3 FIX] Only register the contract target when the feature is actually
+            -- enabled. When disabled the stub body shows "Erro." — hide instead.
+            if Config.TyreMission and Config.TyreMission.Enable then
+                options[#options+1] = {
+                    name='vp_fence_tyre_contract', label=L('fence_target_tyre_contract'),
+                    icon='fa-solid fa-file-contract', distance=2.5,
+                    onSelect=function() TyreMissionStart() end,
+                }
+            end
         end
 
         if trust >= 2 then

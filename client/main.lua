@@ -160,11 +160,13 @@ function VPChopTriggerDispatch(veh)
     elseif sys == 'cd_dispatch' then
         pcall(function()
             local data = exports['cd_dispatch']:GetPlayerInfo()
+            -- [L2 FIX] Use vehicle coords when available — player may have fled the scene.
+            local pos = (veh and DoesEntityExist(veh)) and GetEntityCoords(veh) or data.coords
             TriggerServerEvent('cd_dispatch:AddNotification', {
-                job_table = {'police', 'sheriff', 'bcso'}, 
-                coords = data.coords,
+                job_table = {'police', 'sheriff', 'bcso'},
+                coords = pos,
                 title = '10-90 - Desmanche Ilegal',
-                message = 'Notícia de desmanche de veículo em andamento.', 
+                message = 'Notícia de desmanche de veículo em andamento.',
                 flash = 0, unique_id = data.unique_id, sound = 1,
                 blip = { sprite = 530, scale = 1.0, color = 1, flashes = false, text = '911 - Desmanche', time = 5, radius = 0 }
             })
@@ -294,13 +296,41 @@ end
 
 local function hasVehicleKeys(vehicle)
     if not Config.RequireVehicleKeys then return true end
-    if GetResourceState('qbx_vehiclekeys') == 'started' then
-        return exports.qbx_vehiclekeys:HasKeys(vehicle)
+
+    -- Configurable vehicle-keys bridge (recommended for ESX servers).
+    local vk = Config.VehicleKeys
+    if vk and vk.Enable and type(vk.Resource) == 'string' and vk.Resource ~= '' and GetResourceState(vk.Resource) == 'started' then
+        local ok, res
+        if (vk.Mode or 'plate') == 'entity' then
+            ok, res = pcall(function()
+                return exports[vk.Resource][vk.Export](vehicle)
+            end)
+        else
+            local plate = trimPlate(GetVehicleNumberPlateText(vehicle))
+            ok, res = pcall(function()
+                return exports[vk.Resource][vk.Export](plate)
+            end)
+        end
+        if ok and type(res) == 'boolean' then
+            return res
+        end
+        -- If misconfigured, fall back to embedded integrations below.
     end
-    if GetResourceState('qb-vehiclekeys') == 'started' then
+
+    -- Best-effort ESX integrations (non-breaking; only used if resource exists).
+    if GetResourceState('esx_vehiclelock') == 'started' then
         local plate = trimPlate(GetVehicleNumberPlateText(vehicle))
-        return exports['qb-vehiclekeys']:HasKeys(plate)
+        local ok, res = pcall(function()
+            return exports.esx_vehiclelock.hasKey and exports.esx_vehiclelock:hasKey(plate)
+        end)
+        if ok and type(res) == 'boolean' then return res end
+
+        ok, res = pcall(function()
+            return exports.esx_vehiclelock.HasKey and exports.esx_vehiclelock:HasKey(plate)
+        end)
+        if ok and type(res) == 'boolean' then return res end
     end
+
     return true
 end
 
@@ -1180,7 +1210,8 @@ function VPChopJackstandStealTyre(veh, partKey, tyreIdx)
         -- visually remove the wheel (same as wheel_theft resource)
         SetVehicleWheelXOffset(veh, tyreIdx, 9999999.0)
         -- give tyre item to player inventory
-        TriggerServerEvent('vp_chopshop:tyres:jackstandTyreStolen')
+        -- [H1 FIX] Passa netId do veículo para o servidor validar proximidade (trust-no-client).
+        TriggerServerEvent('vp_chopshop:tyres:jackstandTyreStolen', NetworkGetNetworkIdFromEntity(veh))
         -- Spawnar prop de pneu no chão na posição da roda (para truck loading via ox_target)
         local boneIdx = GetEntityBoneIndexByName(veh, partKey)
         if boneIdx and boneIdx >= 0 then
@@ -1320,7 +1351,8 @@ local function placeTyreHandPropOnGround()
                 if not t then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
                 local cur = math.floor(tonumber(Entity(t).state.chopTyreCount) or 0)
                 if cur >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
-                Entity(t).state:set('chopTyreCount', cur + 1, true)
+                -- [H3 FIX] Servidor valida e incrementa a contagem (state bag set via servidor).
+                TriggerServerEvent('vp_chopshop:server:addTyreToTruck', NetworkGetNetworkIdFromEntity(t))
                 exports.ox_target:removeLocalEntity(handProp)
                 DeleteEntity(handProp)
                 VPChopNotify(L('tyre_stored_fmt', cur + 1, max), 'success')
@@ -1361,7 +1393,8 @@ RegisterCommand('+vp_tyre_options', function()
                 if not t2 then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
                 local c2  = math.floor(tonumber(Entity(t2).state.chopTyreCount) or 0)
                 if c2 >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
-                Entity(t2).state:set('chopTyreCount', c2 + 1, true)
+                -- [H3 FIX] Servidor valida e incrementa a contagem (state bag set via servidor).
+                TriggerServerEvent('vp_chopshop:server:addTyreToTruck', NetworkGetNetworkIdFromEntity(t2))
                 VPChopDropCarryPart()
                 VPChopNotify(L('tyre_stored_fmt', c2 + 1, max), 'success')
             end,

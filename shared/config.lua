@@ -27,8 +27,27 @@ Config.Items = {
 -- [L2 FIX] Removidas: Config.UseFuel, Config.FuelMax, Config.FuelPerPartMin/Max, Config.FuelRefillPerItem
 -- — todas eram exclusivas do sistema de combustível do elevador, que foi removido.
 
---- Desmanche: exige chaves do veículo (qbx_vehiclekeys / qb-vehiclekeys)
+--- Desmanche: exige chaves do veículo (ESX-only; configure `Config.VehicleKeys`)
 Config.RequireVehicleKeys = true
+
+--- Integração de chaves (ESX-first friendly).
+--- Se você usa ESX, configure aqui o resource/export do seu sistema de chaves.
+--- - Enable=false: usa apenas integrações best-effort (por exemplo `esx_vehiclelock`).
+--- - Resource: nome do resource que expõe o export.
+--- - Export: nome do export (função) que retorna boolean.
+--- - Mode:
+---    - 'entity' → chama export(vehicle)
+---    - 'plate'  → chama export(plate) com a placa trimada
+--- Observação: não existe “padrão ESX” universal para chaves; por isso é configurável.
+Config.VehicleKeys = {
+    Enable = false,
+    --- Valores sugeridos (exemplos): 'esx_vehiclelock', 'qs-vehiclekeys', etc.
+    Resource = 'esx_vehiclelock',
+    --- Nome do export no resource acima (ex.: 'hasKey', 'HasKeys', etc.)
+    Export = 'hasKey',
+    --- 'entity' | 'plate'
+    Mode = 'plate',
+}
 
 --- Segundos de espera após uma peça desmontada com sucesso (0 = desligado). Inspirado em cooldown de job chop.
 Config.ChopCooldownSeconds = 0
@@ -66,7 +85,7 @@ Config.NPC = {
         Color = 5,
         Scale = 0.75,
     },
-    --- Loja: precisa framework (ESX/QB/QBX) para dinheiro. `Enable = false` só mostra info / parceiro.
+    --- Loja: precisa ESX para dinheiro. `Enable = false` só mostra info / parceiro.
     Shop = {
         Enable = false,
         LiftPrice = 5000,
@@ -190,6 +209,20 @@ Config.BenchRecipes = {
         duration = 10000,
         inputs = { metalscrap = 15, plastic = 10 },
         outputs = { copper = 8 },
+    },
+    -- Integração qs-mechanic-creator: peças furtadas + sucata → kit de reparo para oficinas
+    {
+        labelKey = 'bench_repairkit',
+        duration = 12000,
+        inputs = { car_parts = 5, metalscrap = 10 },
+        outputs = { repairkit = 1 },
+    },
+    -- Integração qs-mechanic-creator: borracha + plástico da carcaça → corda de recuperação
+    {
+        labelKey = 'bench_rope',
+        duration = 8000,
+        inputs = { rubber = 8, plastic = 5 },
+        outputs = { rope = 1 },
     },
 }
 
@@ -384,7 +417,9 @@ Config.TyreSelling = {
 --- Missões de roubo de pneus: um NPC dá o contrato, o jogador vai ao veículo alvo,
 --- rouba os 4 pneus com minigame de parafusos (lib.skillCheck) e entrega ao NPC vendedor.
 Config.TyreMission = {
-    Enable = true,
+    Enable = false, -- [L1 FIX] TyreMissionStart() é stub não implementado; desabilitado para evitar "Erro." no menu fence.
+
+
 
     --- Cooldown entre contratos (segundos por jogador).
     MissionCooldown = 300,

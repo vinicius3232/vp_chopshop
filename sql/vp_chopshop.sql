@@ -1,5 +1,5 @@
 -- =============================================================
--- vp_chopshop — install.sql  (v1.6.0)
+-- vp_chopshop — install.sql  (v1.6.4)
 -- Executar UMA vez na base do servidor (fresh install).
 --   HeidiSQL / phpMyAdmin: importar este arquivo
 --   CLI: mysql -u USER -p DBNAME < vp_chopshop.sql
@@ -14,13 +14,14 @@
 -- =============================================================
 
 -- ─── Bancadas de desmanche ───────────────────────────────────────────────────
--- position: JSON compacto de vector3 (~50 chars); TEXT é mais que suficiente.
+-- position: JSON compacto de vector3 (~40 chars); VARCHAR(100) mantém inline no
+--           B-tree (evita leitura off-page do InnoDB gerada por TEXT).
 -- heading:  armazenado como inteiro (math.floor); 0-359 cabe em SMALLINT UNSIGNED.
 -- placed_by: VARCHAR(60) cobre license2: (49 chars) com margem.
 
 CREATE TABLE IF NOT EXISTS `vp_chopshop_benches` (
   `id`        INT UNSIGNED      NOT NULL AUTO_INCREMENT,
-  `position`  TEXT              NOT NULL COMMENT 'JSON {x,y,z}',
+  `position`  VARCHAR(100)      NOT NULL COMMENT 'JSON {x,y,z}',
   `heading`   SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   `placed_by` VARCHAR(60)       DEFAULT NULL COMMENT 'license:... do jogador',
   PRIMARY KEY (`id`)
@@ -30,9 +31,9 @@ CREATE TABLE IF NOT EXISTS `vp_chopshop_benches` (
 
 CREATE TABLE IF NOT EXISTS `vp_chopshop_welders` (
   `id`        INT UNSIGNED      NOT NULL AUTO_INCREMENT,
-  `position`  TEXT              NOT NULL COMMENT 'JSON {x,y,z}',
+  `position`  VARCHAR(100)      NOT NULL COMMENT 'JSON {x,y,z}',
   `heading`   SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-  `placed_by` VARCHAR(60)       DEFAULT NULL,
+  `placed_by` VARCHAR(60)       DEFAULT NULL COMMENT 'license:... do jogador',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

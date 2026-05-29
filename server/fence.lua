@@ -2,14 +2,6 @@
 -- Fence NPC rotativo: trust, rotação, ordens, compra de itens, entrega de carros.
 -- NPCs removidos: server/npc.lua, server/tyres.lua (funcionalidade migrada aqui).
 -- Expõe: VPChopFenceGetTrust(src), VPChopFenceCurrentLocation()
--- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
-local VPChopEvt = VPChopEvt or {
-    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
-    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
-    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
-    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
-}
-
 -- ─── Estado do fence ──────────────────────────────────────────────────────────
 local CurrentLocationIdx = 1  -- índice em Config.Fence.Locations
 local FenceNpcNetId      = nil ---@type integer|nil
@@ -21,10 +13,14 @@ local TrustCache = {} ---@type table<number, {trust_level:integer, trust_xp:inte
 local OrderGenBusy  = {} ---@type table<string, boolean>
 --- Mutex para entrega de carro inteiro (previne double-call no cooldown DB check)
 local DeliveryBusy  = {} ---@type table<string, boolean>
+--- Mutex para venda de pneus (previne double-payout por double-fire simultâneo)
+local SellTyresBusy = {} ---@type table<number, boolean>
 
 --- [H1 FIX] Contagem server-side de pneus por veículo (netId → count).
 --- Substitui leitura do state bag do cliente, que era manipulável.
-local ServerTyreCounts    = {} ---@type table<integer, integer>  netId → count
+-- [C1 FIX] Global: server/main.lua's addTyreToTruck handler also writes here so both
+-- client load paths share the same authoritative counter for sellTyres payout.
+ServerTyreCounts    = {} ---@type table<integer, integer>  netId → count
 local TruckLoadCooldown   = {} ---@type table<number, number>    src  → expiry GetGameTimer
 
 -- ─── Helpers de trust ────────────────────────────────────────────────────────
@@ -47,9 +43,13 @@ local function loadTrust(src)
         local decayDays = (Config.Fence and Config.Fence.TrustDecayDays) or 7
         if daysSince >= decayDays and row.trust_level > 0 then
             row.trust_level = math.max(0, row.trust_level - 1)
+            -- [H2 FIX] Reset trust_xp to the floor of the new level so the next
+            -- addTrustXp call does not re-fire tierUp notifications for lost levels.
+            local _xpFloor = (Config.Fence and Config.Fence.TrustXpPerLevel) or { [1]=100, [2]=300, [3]=600, [4]=1000 }
+            row.trust_xp = (row.trust_level > 0 and _xpFloor[row.trust_level]) or 0
             MySQL.query.await(
-                'UPDATE vp_chop_fence_trust SET trust_level=?, last_seen=NOW() WHERE identifier=?',
-                {row.trust_level, key}
+                'UPDATE vp_chop_fence_trust SET trust_level=?, trust_xp=?, last_seen=NOW() WHERE identifier=?',
+                {row.trust_level, row.trust_xp, key}
             )
         end
         TrustCache[src] = { trust_level=row.trust_level, trust_xp=row.trust_xp, last_seen=row.last_seen or os.time() }
@@ -225,14 +225,27 @@ end)
 local JackstandStealCooldown = {} ---@type table<number, number>  src → expiry
 local JACKSTAND_STEAL_CD_MS  = 5000
 
-RegisterNetEvent('vp_chopshop:tyres:jackstandTyreStolen', function()
+RegisterNetEvent('vp_chopshop:tyres:jackstandTyreStolen', function(netId)
     local src = source
-    if not GetPlayerName(src) then return end
+    if not IsValidSource(src) then return end
+    -- [H1 FIX] Validar netId e proximidade do veículo (trust-no-client).
+    -- Sem esta verificação, qualquer cliente podia disparar o evento sem restrições
+    -- e receber chopshop_tyre a cada 5 s indefinidamente.
+    netId = tonumber(netId)
+    if not netId then return end
 
     -- Rate-limit: evita spam do evento
     local now = GetGameTimer()
-    if JackstandStealCooldown[src] and now < JackstandStealCooldown[src] then return end
+    if JackstandStealCooldown[src] and now < JackstandStealCooldown[src] then
+        LogSuspicious(src, 'jackstandTyreStolen', 'Rate limit excedido')
+        return
+    end
     JackstandStealCooldown[src] = now + JACKSTAND_STEAL_CD_MS
+
+    -- Proximidade: jogador deve estar perto do veículo jacked
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return end
+    if not ValidatePlayerNearVehicle(src, veh, 8.0) then return end
 
     local tyreItem = Config.Jackstand and Config.Jackstand.TyreItem
     if not tyreItem then return end
@@ -258,7 +271,7 @@ local TRUCK_LOAD_COOLDOWN_MS = 3000  -- mínimo entre cargas por jogador
 
 RegisterNetEvent('vp_chopshop:tyre:truckLoad', function(netId)
     local src = source
-    if not GetPlayerName(src) then return end
+    if not IsValidSource(src) then return end
     netId = tonumber(netId)
     if not netId then return end
 
@@ -289,7 +302,7 @@ end)
 
 -- Apresentar-se (trust 0 → 1)
 lib.callback.register('vp_chopshop:fence:introduce', function(src)
-    if not GetPlayerName(src) then return { ok=false } end
+    if not IsValidSource(src) then return { ok=false } end
     local trust = VPChopFenceGetTrust(src)
     if trust > 0 then return { ok=false, err='already_known' } end
 
@@ -300,7 +313,17 @@ lib.callback.register('vp_chopshop:fence:introduce', function(src)
     local t = loadTrust(src)
     t.trust_level = 1
     t.trust_xp    = 0
-    saveTrust(src)
+    -- [M1 FIX] pcall: se DB falhar, devolve o item e retorna erro em vez de
+    -- deixar o jogador sem fence_referral E sem trust persistido no banco.
+    local saveOk = pcall(saveTrust, src)
+    if not saveOk then
+        -- [M1 FIX] Check refund return: if inventory is also full, log so the item can be
+        -- manually restored — otherwise player loses the referral with nothing granted.
+        if not exports.ox_inventory:AddItem(src, 'fence_referral', 1) then
+            print(('[vp_chopshop] WARN: fence_referral refund failed (inv full) for %s'):format(ServerChopPlayerKey(src)))
+        end
+        return { ok=false, err='db' }
+    end
     TrustCache[src] = t
 
     return { ok=true }
@@ -321,9 +344,18 @@ local function getNightBonusMultiplier()
     return 1.0
 end
 
+-- Rate-limit para venda de itens (anti-spam de cash)
+local _sellItemsRateLimit = {}  ---@type table<number, number>  src → expiry GetGameTimer
+local SELL_ITEMS_MIN_INTERVAL_MS = 3000
+
 -- Vender materiais do inventário
 lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
-    if not GetPlayerName(src) then return { ok=false } end
+    if not IsValidSource(src) then return { ok=false } end
+    local nowSI = GetGameTimer()
+    if _sellItemsRateLimit[src] and nowSI < _sellItemsRateLimit[src] then
+        return { ok=false, err='cooldown' }
+    end
+    _sellItemsRateLimit[src] = nowSI + SELL_ITEMS_MIN_INTERVAL_MS
     local trust = VPChopFenceGetTrust(src)
     if trust < 1 then return { ok=false, err='no_trust' } end
 
@@ -332,6 +364,11 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     if not loc then return { ok=false, err='no_fence' } end
     if not ValidatePlayerNearPoint(src, vector3(loc.coords.x, loc.coords.y, loc.coords.z), 5.0) then
         return { ok=false, err='range' }
+    end
+
+    -- Limitar tamanho da lista (defesa contra payload gigante de lua executor)
+    if type(itemList) ~= 'table' or #itemList > 50 then
+        return { ok=false, err='invalid' }
     end
 
     local prog      = VPChopGetProgression(src)
@@ -389,14 +426,20 @@ end)
 
 -- Vender pneus (truck OU inventário)
 lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, truckNetId)
-    if not GetPlayerName(src) then return { ok=false } end
+    if not IsValidSource(src) then return { ok=false } end
+    -- [H1 FIX] Mutex per player: prevents double-payout from rapid double-fire.
+    -- release() clears it on every code path and returns the result table.
+    if SellTyresBusy[src] then return { ok=false, err='processing' } end
+    SellTyresBusy[src] = true
+    local function release(res) SellTyresBusy[src] = nil; return res end
+
     local trust = VPChopFenceGetTrust(src)
-    if trust < 1 then return { ok=false, err='no_trust' } end
+    if trust < 1 then return release({ ok=false, err='no_trust' }) end
 
     local loc = VPChopFenceCurrentLocation()
-    if not loc then return { ok=false, err='no_fence' } end
+    if not loc then return release({ ok=false, err='no_fence' }) end
     if not ValidatePlayerNearPoint(src, vector3(loc.coords.x, loc.coords.y, loc.coords.z), 5.0) then
-        return { ok=false, err='range' }
+        return release({ ok=false, err='range' })
     end
 
     local prog     = VPChopGetProgression(src)
@@ -405,24 +448,21 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     local nightM   = getNightBonusMultiplier()
     local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult * nightM)
 
-    -- [FIX H-1] Validar source_type antes de processar
     if source_type ~= 'truck' and source_type ~= 'inventory' then
-        return { ok=false, err='invalid_type' }
+        return release({ ok=false, err='invalid_type' })
     end
 
     local count = 0
 
     if source_type == 'truck' and truckNetId then
-        -- [H1 FIX] Truck: ler contador server-side (não o state bag do cliente).
-        -- O state bag ainda é escrito pelo cliente para feedback de UI local,
-        -- mas o servidor nunca confia nele para calcular o pagamento.
+        -- Truck: ler contador server-side (não o state bag do cliente).
         local nid = tonumber(truckNetId)
         local truck = NetworkGetEntityFromNetworkId(nid or 0)
         if truck and truck ~= 0 and DoesEntityExist(truck) then
             count = ServerTyreCounts[nid] or 0
             if count > 0 then
                 ServerTyreCounts[nid] = nil
-                Entity(truck).state:set('chopTyreCount', 0, true)  -- reset UI do cliente
+                Entity(truck).state:set('chopTyreCount', 0, true)
             end
         end
     else
@@ -430,24 +470,24 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
         count = exports.ox_inventory:GetItemCount(src, 'chopshop_tyre') or 0
         if count > 0 then
             if not exports.ox_inventory:RemoveItem(src, 'chopshop_tyre', count) then
-                return { ok=false, err='remove_failed' }
+                return release({ ok=false, err='remove_failed' })
             end
         end
     end
 
-    if count <= 0 then return { ok=false, err='no_tyres' } end
+    if count <= 0 then return release({ ok=false, err='no_tyres' }) end
 
     local total = unitPrice * count
     BridgeAddCash(src, total, 'fence_tyres')
     addTrustXp(src, math.floor(((Config.Fence and Config.Fence.XpPerDelivery) or 20) * 0.5) * count)
     TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
 
-    return { ok=true, count=count, total=total }
+    return release({ ok=true, count=count, total=total })
 end)
 
 -- Entregar carro inteiro (Tier 4 + trust 4)
 lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
-    if not GetPlayerName(src) then return { ok=false } end
+    if not IsValidSource(src) then return { ok=false } end
     local trust = VPChopFenceGetTrust(src)
     if trust < 4 then return { ok=false, err='no_trust' } end
 
@@ -498,6 +538,10 @@ lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
     local base      = (Config.Fence and Config.Fence.WholeCarBasePayout) or 8000
     local payout    = math.floor(base * trustM * tierMult * heatMult * nightM)
 
+    -- Sanity cap: entrega de carro não deve exceder 5× o WholeCarBasePayout
+    local maxCarPayout = math.floor(((Config.Fence and Config.Fence.WholeCarBasePayout) or 8000) * 5)
+    payout = math.min(payout, maxCarPayout)
+
     -- Persistir cooldown ANTES de pagar (garante que falha de DB não permite spam)
     local cdOk = pcall(function()
         MySQL.query.await('UPDATE vp_chop_progression SET last_car_delivery=NOW() WHERE identifier=?', {key})
@@ -520,7 +564,7 @@ end)
 
 -- Retornar nível de trust do jogador (usado pelo cliente para montar targets)
 lib.callback.register('vp_chopshop:fence:getTrust', function(src)
-    if not GetPlayerName(src) then return 0 end
+    if not IsValidSource(src) then return 0 end
     return VPChopFenceGetTrust(src)
 end)
 
@@ -528,7 +572,7 @@ end)
 -- Substitui vp_chopshop:npcBuy para o contexto do fence (server/main.lua ainda registra
 -- vp_chopshop:npcBuy mas valida contra Config.NPC.Coords — coordenada estática incorreta).
 lib.callback.register('vp_chopshop:fence:buyBench', function(src)
-    if not GetPlayerName(src) then return { ok=false, err='invalid' } end
+    if not IsValidSource(src) then return { ok=false, err='invalid' } end
     local shop = Config.NPC and Config.NPC.Shop
     if not shop or not shop.Enable then return { ok=false, err='disabled' } end
 
@@ -555,7 +599,7 @@ end)
 
 -- Pegar ordem ativa (trust ≥ 3)
 lib.callback.register('vp_chopshop:fence:getOrder', function(src)
-    if not GetPlayerName(src) then return nil end
+    if not IsValidSource(src) then return nil end
     if VPChopFenceGetTrust(src) < 3 then return nil end
 
     local key = ServerChopPlayerKey(src)
@@ -601,8 +645,11 @@ end)
 
 -- Entregar ordem
 lib.callback.register('vp_chopshop:fence:fulfillOrder', function(src, orderId)
-    if not GetPlayerName(src) then return { ok=false } end
-    if VPChopFenceGetTrust(src) < 3 then return { ok=false, err='no_trust' } end
+    if not IsValidSource(src) then return { ok=false } end
+    -- [M2 FIX] Guardar resultado em variável local para reusar na linha do trustM abaixo
+    -- (evita 2ª chamada a VPChopFenceGetTrust que, sem cache, dispararia MySQL.single.await).
+    local trust = VPChopFenceGetTrust(src)
+    if trust < 3 then return { ok=false, err='no_trust' } end
 
     local key = ServerChopPlayerKey(src)
     local row = MySQL.single.await(
@@ -635,7 +682,7 @@ lib.callback.register('vp_chopshop:fence:fulfillOrder', function(src, orderId)
     local basePrices = (Config.Fence and Config.Fence.BasePrices) or {}
     local prog    = VPChopGetProgression(src)
     local tierM   = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
-    local trustM  = trustMult(VPChopFenceGetTrust(src))
+    local trustM  = trustMult(trust)  -- [M2 FIX] reutiliza valor já obtido no guard acima
     local baseVal = 0
     for item, amount in pairs(data.items) do
         baseVal = baseVal + ((basePrices[item] or 100) * amount)
@@ -670,7 +717,10 @@ end)
 AddEventHandler('playerDropped', function()
     local src = source  -- [FIX L-1] localizar antes de qualquer yield potencial
     TrustCache[src] = nil
-    TruckLoadCooldown[src] = nil  -- [H1 FIX]
+    TruckLoadCooldown[src] = nil
+    SellTyresBusy[src] = nil  -- [H1 FIX] evitar mutex stuck se jogador desconectar mid-sale
+    _sellItemsRateLimit[src] = nil
+    JackstandStealCooldown[src] = nil
     local k = ServerChopPlayerKey(src)
     OrderGenBusy[k]  = nil
     DeliveryBusy[k]  = nil

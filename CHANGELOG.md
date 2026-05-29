@@ -2,6 +2,146 @@
 
 ---
 
+## [1.6.7] — 2026-04-27 — ESX Bridge Fix
+
+### Fixed
+- [ESX] `bridge/server_framework.lua`: todas as ocorrências de `_ESX.Player(src)` substituídas
+  por `_ESX.GetPlayerFromId(src)` — API documentada do ESX Legacy; `.Player()` não existe no
+  ESX Legacy padrão, tornando `ServerPlayerIsReady`, `BridgeGetCash`, `BridgeRemoveCash` e
+  `BridgeAddCash` sempre nil no ESX
+- [ESX] `BridgeCountCops`: `_ESX.ExtendedPlayers()` substituído por `_ESX.GetPlayers()` +
+  `GetPlayerFromId(pid)` — `ExtendedPlayers` não existe no ESX Legacy → nil call crash
+- [ESX] `BridgeCountCops`: `xPlayer.getJob().name` substituído por `xPlayer.job.name` —
+  no ESX Legacy moderno `job` é uma propriedade, não um método; cops nunca eram contados
+- [ESX] `removeAccountMoney` / `addAccountMoney`: removido o parâmetro `label` (terceiro
+  argumento) — ESX Legacy não aceita este parâmetro na assinatura padrão
+
+---
+
+## [1.6.6] — 2026-04-27 — Code Review Fix-All
+
+### Fixed (Critical)
+- [Logic] `server/main.lua` + `server/fence.lua`: split tyre counter — `vp_chopshop:server:addTyreToTruck`
+  now writes `ServerTyreCounts[netId]` (made global) instead of only the state bag; both client
+  load paths (jackstand carry and fence prop ox_target) share one authoritative counter for
+  `sellTyres` payout (C1)
+
+### Fixed (High)
+- [Concurrency] `server/fence.lua`: `vp_chopshop:fence:sellTyres` — added `SellTyresBusy[src]`
+  mutex (identical pattern to `DeliveryBusy`); `release()` helper clears mutex on all code paths;
+  `ServerTyreCounts[nid]` already zeroed before any yield (H1)
+- [Logic] `server/fence.lua` `loadTrust`: trust decay now also resets `trust_xp` to
+  `xpTable[new_level]` and persists both in the same UPDATE; prevents `addTrustXp` from
+  immediately re-firing tierUp notifications for lost levels (H2)
+- [Security] `server/main.lua`: removed dead `vp_chopshop:npcBuy` callback — no client path
+  calls it (replaced by `vp_chopshop:fence:buyBench`); removed dead `_npcBuyCooldown` helpers
+  and cleanup from `playerDropped` (H3)
+- [Logic] `server/main.lua` alarm timeout: when the original chopper disconnects during the
+  disarm window, police dispatch now fires to the nearest online player within 200m instead of
+  silently dropping (H4)
+
+### Fixed (Medium)
+- [Logic] `server/fence.lua` `introduce`: `AddItem` refund return value now checked; failure
+  logged to console so the item can be manually restored on DB+inventory-full edge case (M1)
+- [Logic] `server/main.lua` `/choptest`: replaced `Config.ChopTool.Item` (undefined) with
+  iteration over `Config.Tools` keys — admin kit now correctly includes saws and drills (M2)
+- [Structure] `client/fence.lua`: `vp_fence_tyre_contract` ox_target option is no longer
+  registered when `Config.TyreMission.Enable` is false — hides the button instead of showing
+  "Erro." on click (M3)
+- [Reliability] `server/progression.lua`: XP persist `MySQL.query.await` now wrapped in `pcall`;
+  DB failures print a WARN line to console instead of silently discarding tier-ups (M4)
+
+### Fixed (Low)
+- [Versioning] `fxmanifest.lua`: bumped version `1.6.3` → `1.6.6` (L1)
+- [Logic] `client/main.lua` `VPChopTriggerDispatch`: `cd_dispatch` branch now uses
+  `GetEntityCoords(veh)` when available instead of player coords — dispatch blip lands on
+  the vehicle, not on the fleeing player (L2)
+
+---
+
+## [1.6.5] — 2026-04-27 — SQL Consolidation
+
+### Changed
+- [Structure] `sql/`: consolidado para arquivo único `vp_chopshop.sql`; `migrate_v1.6.0.sql`
+  removido (migração histórica v1.5.x→v1.6.0; servidores já atualizados não precisam mais)
+- [Performance] `vp_chopshop_benches` e `vp_chopshop_welders`: coluna `position TEXT` alterada
+  para `position VARCHAR(100)` — evita leitura off-page do InnoDB para JSON curto (~40 chars);
+  dados ficam inline no B-tree leaf
+- [Documentation] `vp_chopshop_welders.placed_by`: adicionado COMMENT ausente
+  (`'license:... do jogador'`); alinhado com `vp_chopshop_benches`
+
+---
+
+## [1.6.4] — 2026-04-27 — Audit Auto-Fix
+
+### Fixed (High)
+- [Performance] `server/heat.lua`: `VPChopHeatCheck` chamava `VPChopHeatCalc` (SQL) duas
+  vezes — via `notifyHeatChange` e depois via `VPChopHeatGetLabel`. Agora calcula o label
+  uma vez e passa como parâmetro opcional para `notifyHeatChange` (H2)
+- [Structure] `fxmanifest.lua`: `data_file 'DLC_ITYP_REQUEST' 'stream/wheel_spacer.ytyp'`
+  removido — arquivo não existe na pasta stream, causando warning no console. O bolt
+  minigame usa `lib.skillCheck` como fallback enquanto o modelo não for incluído (H1)
+
+### Fixed (Medium)
+- [Logic] `bridge/server_framework.lua` ESX: `x.getAccount('money')` agora tem nil guard
+  antes de acessar `.money` em `BridgeGetCash` e `BridgeRemoveCash` — previne crash em
+  contas ESX ausentes/corrompidas (M1)
+
+### Fixed (Medium)
+- [Structure] Deletados tombstones server (npc.lua, tyres.lua, partners.lua) — não listados
+  no manifest; limpeza de diretório (M2)
+- [Structure] Removidos 5 blocos `local VPChopEvt = VPChopEvt or {...}` redundantes em
+  heat.lua, main.lua, fence.lua, advanced_chop.lua, progression.lua — VPChopEvt é global
+  definido em bridge/mdt.lua (primeiro server_script); os fallbacks nunca eram atingidos (M3)
+
+### Fixed (Low)
+- [Structure] Deletados tombstones client (tyres.lua, npc.lua) — não listados no manifest (L1)
+- [Structure] `client/lifts.lua` renomeado para `client/carry.lua` — nome reflete conteúdo
+  real (carry state + VPChopDropCarryPart); fxmanifest atualizado (L2)
+
+---
+
+## [1.6.3] — 2026-04-25 — Audit Auto-Fix
+
+### Fixed (High)
+- [Performance] `bridge/server_framework.lua`: `exports['es_extended']:getSharedObject()` era chamado
+  em CADA invocação de bridge. Migrado para cache único em `CreateThread` (`_ESX`); todas as
+  funções usam o cache com guarda nil (H2)
+- [Security] `client/main.lua` + `server/main.lua`: contagem de pneus no truck migrada
+  de state bag cliente (`Entity(t).state:set(...)`) para evento de servidor
+  `vp_chopshop:server:addTyreToTruck`; servidor valida proximidade e faz o set
+  autoritativo — previne exploit de reset do contador via state bag (H3)
+
+### Fixed (Medium)
+- [Performance] `server/main.lua`: `_npcBuyCooldown` migrado de `os.time()` (suscetível
+  a ajuste de relógio) para `GetGameTimer()` em ms (monotônico) (M4)
+
+---
+
+## [1.6.3] — 2026-04-15 — Integração qs-mechanic-creator
+
+### Added
+- **[Feature] shared/config.lua + shared/locale.lua** — 2 novas receitas de bancada para integração com `qs-mechanic-creator`:
+  - `bench_repairkit`: `car_parts×5 + metalscrap×10 → repairkit×1` (12s) — converte peças de desmanche em kit de reparo para oficinas legítimas
+  - `bench_rope`: `rubber×8 + plastic×5 → rope×1` (8s) — transforma sobras da carcaça (Fase 4) em corda de recuperação de veículos
+- Chaves de locale adicionadas em todas as 5 línguas (en, pt, es, fr, tr)
+
+---
+
+## [1.6.2] — 2026-04-14 — Audit Auto-Fix
+
+### Fixed (High)
+- **[Security] server/fence.lua + client/main.lua** — `jackstandTyreStolen` disparado sem parâmetros: cliente não passava netId do veículo, servidor não tinha como validar proximidade. Um cliente modificado podia obter `chopshop_tyre` indefinidamente (1 item/5s via rate-limit). Agora o cliente passa `NetworkGetNetworkIdFromEntity(veh)` e o servidor executa `ValidatePlayerNearVehicle(src, veh, 8.0)` antes de `AddItem`.
+
+### Fixed (Medium)
+- **[Logic] server/fence.lua:fence:introduce** — `saveTrust(src)` era chamado sem pcall depois de `RemoveItem('fence_referral')`. Falha de DB resultava em item consumido mas trust não persistido: ao desconectar, `TrustCache` limpo → trust volta a 0. Agora: `pcall(saveTrust, src)`; em erro → `AddItem(src, 'fence_referral', 1)` + retorno `{ ok=false, err='db' }`.
+- **[Logic] server/fence.lua:fulfillOrder** — `VPChopFenceGetTrust(src)` chamado duas vezes (guard na linha 621 + cálculo de `trustM` na linha 654): segunda chamada era redundante (cache hit mas desnecessária). Armazenado em `local trust` e reutilizado.
+
+### Fixed (Low)
+- **[Logic] shared/config.lua** — `Config.TyreMission.Enable` alterado de `true` para `false`. `TyreMissionStart()` é stub não implementado; target "Contrato de pneus" exibia "Erro." no menu fence.
+
+---
+
 ## [1.6.1] — 2026-04-14 — Audit Auto-Fix
 
 ### Fixed (High)
@@ -58,7 +198,7 @@
 
 ### Fixed (High)
 - **[Logic] client/fence.lua:556** — `VPChopLoadTyreInTruck` usava variável `truckNetId` (nil, não definida no scope) em vez de `NetworkGetNetworkIdFromEntity(truck)`. Server recebia nil, guard `if not netId then return end` descartava silenciosamente. Resultado: pneus carregados via prop no chão → ox_target nunca registavam no `ServerTyreCounts` → venda tipo 'truck' retornava 0. `VPChopLoadTyreInTruckFromCarry` (linha 591) já estava correto; corrigido o path do prop.
-- **[Logic] bridge/server_framework.lua** — `BridgeGetCash`, `BridgeRemoveCash` e `BridgeAddCash` (QBX) usavam `Player.Functions.GetMoney/RemoveMoney/AddMoney` (shim deprecado). Substituído por `exports.qbx_core:GetMoney/RemoveMoney/AddMoney` com assinatura canônica.
+- **[Logic] bridge/server_framework.lua** — ponte ESX para `BridgeGetCash`, `BridgeRemoveCash` e `BridgeAddCash`.
 - **[Logic] bridge/server_framework.lua** — `BridgeGetIdentifier`, `BridgeGetCash` e `BridgeRemoveCash` (ESX) usavam `ESX.GetPlayerFromId(src)` (deprecado). Substituído por `ESX.Player(src)` (modern API) em 3 locais.
 - **[Performance] server/advanced_chop.lua:137** — `TriggerClientEvent('vp_chopshop:adv:breakDoor', -1, ...)` fazia broadcast para todos os clientes conectados. Substituído por loop de proximidade (raio 150 u), mesmo padrão do fix L3 de v1.3.9 para breakPart.
 

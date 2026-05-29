@@ -3,14 +3,6 @@
 -- Expõe: VPChopGetProgression(src), VPChopAddXp(src, amount)
 -- Escuta: VPChopEvt.PART_CHOPPED, VPChopEvt.CAR_DISCARDED, VPChopEvt.FENCE_DELIVERY
 
--- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
-local VPChopEvt = VPChopEvt or {
-    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
-    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
-    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
-    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
-}
-
 --- Cache em memória por source (carregado ao conectar, salvo ao ganhar XP)
 local ProgressCache = {} ---@type table<number, {tier:integer, xp:integer, total_chops:integer}>
 
@@ -70,7 +62,7 @@ end
 ---@param amount integer
 ---@param reason string  chave da XP_TABLE ou string livre para log
 function VPChopAddXp(src, amount, reason)
-    if not GetPlayerName(src) then return end
+    if not IsValidSource(src) then return end
     local prog = VPChopGetProgression(src)
     if not prog then return end
 
@@ -94,11 +86,16 @@ function VPChopAddXp(src, amount, reason)
     local key  = ServerChopPlayerKey(src)
     local snap = { tier = prog.tier, xp = prog.xp, total_chops = prog.total_chops }
     CreateThread(function()
-        MySQL.query.await(
+        -- [M4 FIX] Wrap in pcall: a DB outage should be visible in console, not silently
+        -- discard the player's tier-up (cache is cleared at playerDropped).
+        local ok, err = pcall(MySQL.query.await,
             'INSERT INTO vp_chop_progression (identifier, tier, xp, total_chops) VALUES (?,?,?,?) '..
             'ON DUPLICATE KEY UPDATE tier=VALUES(tier), xp=VALUES(xp), total_chops=VALUES(total_chops)',
             {key, snap.tier, snap.xp, snap.total_chops}
         )
+        if not ok then
+            print(('[vp_chopshop] WARN: XP persist failed for %s — %s'):format(key, tostring(err)))
+        end
     end)
 
     notifyXp(src, amount)
@@ -146,6 +143,7 @@ end)
 -- ─── Callback: consulta de status (usado pelo fence para exibir ao jogador) ──
 
 lib.callback.register('vp_chopshop:getProgression', function(src)
+    if not IsValidSource(src) then return nil end
     local prog = VPChopGetProgression(src)
     if not prog then return nil end
     local tierXp = Config.Progression and Config.Progression.TierXp or { [1]=0, [2]=500, [3]=2000, [4]=5000 }
