@@ -2,6 +2,34 @@
 
 ---
 
+## [1.8.0] — 2026-05-31 — Roubo de placa física (Fase 1)
+
+### Added (Feature — Fase 1 de placas)
+- **Roubo de placa física.** Nova mecânica: o jogador usa uma chave de fenda (`screwdriver`)
+  num veículo alvo, passa um skillcheck e arranca a placa, recebendo o item `stolen_plate`
+  com metadata `{ plate, model, takenAt }`. O veículo fica sem placa visível (broadcast
+  filtrado por proximidade ~150u). Vendável no fence (~$250) e insumo futuro para placa falsa.
+- **Arquivos novos:** `client/plates.lua` (ox_target em veículos + `lib.skillCheck` + handlers
+  de placa-limpa/dispatch) e `server/plates.lua` (callback `vp_chopshop:stealPlate` com todas
+  as validações server-side: `IsValidSource`, cooldown 30s/jogador, proximity, placa resolvida
+  no servidor, flag anti-duplo-roubo por netId, rollback se inventário cheio).
+- **Novo item:** `stolen_plate` (`installation/ox_items_snippet.txt`; registrar em
+  `ox_inventory/data/items.lua`).
+- **Config:** novo bloco `Config.Plates` (Enable, MaxDistance, StealCooldownSeconds, SkillCheck,
+  ToolItem, DispatchOnSteal). `stolen_plate` adicionado a `Config.Fence.BasePrices` (250).
+- **Progressão:** `XP_TABLE.plate_theft = 12` (tier 1) + tratamento no listener `PART_CHOPPED`.
+- **Dispatch:** ao roubar a placa, dispara alerta de polícia reusando o mesmo mecanismo do alarme.
+- **MDT:** `VPChopMDT.ReportActivity(realPlate, src, 'plate_stolen')`.
+- **Locale:** 7 chaves novas em 5 idiomas (en/pt/es/fr/tr).
+
+### Notes
+- Integração: feature ligada por `Config.Plates.Enable`. Requer registrar o item `stolen_plate`
+  no `ox_inventory/data/items.lua` para funcionar.
+- Fase 1 não persiste a placa apagada (recarregar a entidade restaura a placa original) —
+  intencional; persistência/placa falsa/garagem vêm nas Fases 2-3.
+
+---
+
 ## [1.7.0] — 2026-05-31 — Auditoria: limpeza, gameplay, segurança, performance
 
 ### Changed (Gameplay)

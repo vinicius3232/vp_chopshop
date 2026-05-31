@@ -58,3 +58,14 @@
     stack = true,
     close = true,
 },
+
+-- [FASE1 placas] Placa física arrancada de um veículo alvo com a chave de fenda.
+-- Insumo de venda no fence. Sem client.export — não é "usável", só carregada/vendida.
+-- Metadata definida em runtime pelo servidor: { plate, model, takenAt }.
+-- stack=false porque cada placa é única (metadata distinta por instância).
+['stolen_plate'] = {
+    label = 'Placa Roubada',
+    weight = 800,
+    stack = false,
+    close = true,
+},

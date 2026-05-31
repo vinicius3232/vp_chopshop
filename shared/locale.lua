@@ -268,6 +268,14 @@ local Locales = {
         alarm_expired                   = 'You didn\'t disarm in time — police are on their way!',
         alarm_no_item                   = 'You need a screwdriver to disarm the alarm.',
         alarm_skill_fail                = 'Failed to disarm — alarm still active!',
+        -- [FASE1 placas] Physical plate theft
+        plate_target_steal              = 'Rip off plate',
+        plate_stolen_success            = 'Plate ripped off and pocketed.',
+        plate_no_tool                   = 'You need a screwdriver to rip the plate.',
+        plate_too_far                   = 'Get closer to the vehicle.',
+        plate_own_vehicle               = 'You can\'t rip the plate of your own vehicle.',
+        plate_cooldown                  = 'Wait before ripping another plate.',
+        plate_generic_error             = 'Could not rip the plate.',
     },
     pt = {
         notify_title = 'Desmanche',
@@ -535,6 +543,14 @@ local Locales = {
         alarm_expired                   = 'Você não desarmou a tempo — a polícia foi avisada!',
         alarm_no_item                   = 'Você precisa de uma chave de fenda para desarmar o alarme.',
         alarm_skill_fail                = 'Falhou ao desarmar — alarme ainda ativo!',
+        -- [FASE1 placas] Roubo de placa física
+        plate_target_steal              = 'Arrancar placa',
+        plate_stolen_success            = 'Placa arrancada e guardada.',
+        plate_no_tool                   = 'Você precisa de uma chave de fenda para arrancar a placa.',
+        plate_too_far                   = 'Chegue mais perto do veículo.',
+        plate_own_vehicle               = 'Você não pode arrancar a placa do seu próprio veículo.',
+        plate_cooldown                  = 'Aguarde antes de arrancar outra placa.',
+        plate_generic_error             = 'Não foi possível arrancar a placa.',
     },
     es = {
         notify_title = 'Desguace',
@@ -673,6 +689,14 @@ local Locales = {
         alarm_expired              = '¡No desactivaste a tiempo — la policía fue avisada!',
         alarm_no_item              = 'Necesitas un destornillador para desactivar la alarma.',
         alarm_skill_fail           = '¡Fallo al desactivar — la alarma sigue activa!',
+        -- [FASE1 placas] Robo de placa física
+        plate_target_steal         = 'Arrancar placa',
+        plate_stolen_success       = 'Placa arrancada y guardada.',
+        plate_no_tool              = 'Necesitas un destornillador para arrancar la placa.',
+        plate_too_far              = 'Acércate más al vehículo.',
+        plate_own_vehicle          = 'No puedes arrancar la placa de tu propio vehículo.',
+        plate_cooldown             = 'Espera antes de arrancar otra placa.',
+        plate_generic_error        = 'No se pudo arrancar la placa.',
     },
     fr = {
         notify_title = 'Casse auto',
@@ -811,6 +835,14 @@ local Locales = {
         alarm_expired              = 'Vous n\'avez pas désarmé à temps — la police arrive !',
         alarm_no_item              = 'Vous avez besoin d\'un tournevis pour désarmer l\'alarme.',
         alarm_skill_fail           = 'Échec du désarmement — l\'alarme est toujours active !',
+        -- [FASE1 placas] Vol de plaque physique
+        plate_target_steal         = 'Arracher la plaque',
+        plate_stolen_success       = 'Plaque arrachée et empochée.',
+        plate_no_tool              = 'Vous avez besoin d\'un tournevis pour arracher la plaque.',
+        plate_too_far              = 'Approchez-vous du véhicule.',
+        plate_own_vehicle          = 'Vous ne pouvez pas arracher la plaque de votre propre véhicule.',
+        plate_cooldown             = 'Attendez avant d\'arracher une autre plaque.',
+        plate_generic_error        = 'Impossible d\'arracher la plaque.',
     },
     tr = {
         notify_title = 'Çıkma parça',
@@ -949,6 +981,14 @@ local Locales = {
         alarm_expired              = 'Zamanında etkisiz hale getiremedin — polis yolda!',
         alarm_no_item              = 'Alarmı devre dışı bırakmak için tornavidaya ihtiyacın var.',
         alarm_skill_fail           = 'Devre dışı bırakma başarısız — alarm hâlâ aktif!',
+        -- [FASE1 placas] Fiziksel plaka hırsızlığı
+        plate_target_steal         = 'Plakayı sök',
+        plate_stolen_success       = 'Plaka söküldü ve cebe atıldı.',
+        plate_no_tool              = 'Plakayı sökmek için tornavidaya ihtiyacın var.',
+        plate_too_far              = 'Araca yaklaş.',
+        plate_own_vehicle          = 'Kendi aracının plakasını sökemezsin.',
+        plate_cooldown             = 'Başka bir plaka sökmeden önce bekle.',
+        plate_generic_error        = 'Plaka sökülemedi.',
     },
 }
 

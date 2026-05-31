@@ -338,6 +338,37 @@ Config.Alarm = {
     },
 }
 
+-- [FASE1 placas] Roubo de placa física.
+-- Jogador usa chave de fenda num veículo ALVO (não o próprio), passa o skillcheck e
+-- arranca a placa → recebe item `stolen_plate` com metadata e o carro fica sem placa visível.
+Config.Plates = {
+    --- Liga/desliga a feature inteira (client e server).
+    Enable = true,
+
+    --- Distância máxima (m) jogador↔veículo validada no SERVIDOR (verdade).
+    MaxDistance = 3.0,
+
+    --- Cooldown anti-farm por jogador, em segundos (revalidado no servidor).
+    StealCooldownSeconds = 30,
+
+    --- Se true, só permite arrancar placa de veículos "owned" (reservado p/ Fase 2/3;
+    --- na Fase 1 mantemos false — sem integração de garagem/ownership ainda).
+    OwnedOnly = false,
+
+    --- Minigame antes de arrancar (mesmo formato de Config.Alarm.DisarmSkillCheck →
+    --- lib.skillCheck(difficulties, keys)). `false` desliga o minigame.
+    SkillCheck = {
+        difficulties = { 'easy', 'medium', 'medium' },
+        keys         = { 'e', 'e', 'e' },
+    },
+
+    --- Ferramenta exigida (verificada no client p/ UX e no servidor como verdade).
+    ToolItem = 'screwdriver',
+
+    --- Dispara alerta de polícia (mesmo mecanismo do alarme) ao roubar a placa.
+    DispatchOnSteal = true,
+}
+
 --- Ferramentas de desmanche niveladas por item.
 --- despatchChance: chance 0..1 de alertar a polícia (1.0 = sempre).
 --- speedMult: multiplicador do tempo da barra de progresso (0.5 = metade do tempo).
@@ -655,6 +686,7 @@ Config.Fence = {
         glass         = 90,
         car_parts     = 400,
         chopshop_tyre = 400,
+        stolen_plate  = 250,  -- [FASE1 placas] placa física vendável no fence
     },
 
     --- TrustXpPerLevel[N] = XP acumulado para ATINGIR o nível N.

@@ -17,6 +17,7 @@ local XP_TABLE = {
     order      = 120,
     tyre_mission = 80,
     vin_scratch  = 30,
+    plate_theft  = 12,  -- [FASE1 placas] XP de roubo de placa física (progressão tier 1)
     material     = 10,
     car          = 150,
 }
@@ -113,6 +114,10 @@ AddEventHandler(VPChopEvt.PART_CHOPPED, function(src, netId, partKey, phase)
     if partKey == 'vin_scratch' then
         amount = XP_TABLE.vin_scratch
         reason = 'vin_scratch'
+    -- [FASE1 placas] roubo de placa física tem XP próprio (espelha o vin_scratch)
+    elseif partKey == 'plate_theft' then
+        amount = XP_TABLE.plate_theft
+        reason = 'plate_theft'
     end
     VPChopAddXp(src, amount, reason)
 end)
