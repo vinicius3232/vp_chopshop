@@ -107,12 +107,15 @@ Config.NPC = {
 
 --- Emboscada ao **iniciar** desmanche (após skillcheck): missão no NPC e/ou aleatório. `Enable = false` desliga spawns.
 Config.Ambush = {
-    Enable = false,
+    -- [GAMEPLAY] Ligado: emboscada é a ÚNICA fonte de fence_referral (destrava o fence).
+    -- Com Enable=false, jogadores novos não conseguiam acessar o desmanche.
+    Enable = true,
     --- Se `true`, aplica `Chance` + `CooldownSeconds` em cada desmanche (além de missões NPC).
     --- Se `false`, só resolução de **Config.NPC.Mission** na próxima desmontagem (com `Mission.AmbushChance` pode não haver hostil).
-    RandomOnDismantle = false,
+    RandomOnDismantle = true,
     --- Probabilidade 0..1 por tentativa quando `RandomOnDismantle` está ativo (valor alto = mais emboscadas).
-    Chance = 0.07,
+    -- [GAMEPLAY] 0.05 = emboscada incomum (risco sem ser punitivo). Ajuste a gosto.
+    Chance = 0.05,
     --- Pesos relativos do tipo de hostil: `pistol`, `dog`, `bat`. Omite ou tudo zero = equiprovável (1/3 cada).
     KindWeights = { pistol = 40, dog = 25, bat = 35 },
     --- Mínimo de segundos entre emboscadas por jogador.
@@ -126,7 +129,9 @@ Config.Ambush = {
     HumanModels = { `g_m_y_mexgoon_03`, `g_m_y_famfor_01`, `g_m_y_ballasout_01` },
     DogModels = { `a_c_chop`, `a_c_rottweiler` },
     --- Chance (0.0-1.0) de dropar item fence_referral ao matar ped de emboscada.
-    ReferralDropChance = 0.15,
+    -- [GAMEPLAY] 0.5: como emboscada é incomum (Chance 0.05), o referral precisa ser
+    -- provável QUANDO ela acontece, senão o fence fica inacessível na prática.
+    ReferralDropChance = 0.5,
 }
 
 --- Recompensas por peça: [item] = { amount = n, chance = 0..1 }

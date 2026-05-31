@@ -16,32 +16,10 @@ local function clearBench(id)
     BenchEntities[id] = nil
 end
 
-local function deliverPartToBench(benchId)
-    if not VPChopCarryingPart then
-        VPChopNotify(L('notify_no_part_carrying'), 'error')
-        return
-    end
-    local ok = lib.progressBar({
-        duration     = 4000,
-        label        = L('progress_delivering_part'),
-        useWhileDead = false,
-        canCancel    = true,
-        disable      = { move = true, car = true, combat = true },
-        anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
-    })
-    if not ok then return end
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:deliverPart', false, benchId)
-    if not cbOk then res = nil end
-    if res and res.ok then
-        VPChopDropCarryPart()
-        VPChopNotify(L('notify_part_delivered'), 'success')
-    else
-        VPChopNotify(
-            (res and res.err) and L('notify_bench_fail_fmt', VPChopLocaleErr(res.err)) or L('notify_generic_error'),
-            'error'
-        )
-    end
-end
+-- [GAMEPLAY unificação] Função deliverPartToBench REMOVIDA.
+-- A recompensa da Fase 1 agora cai no inventário na hora do desmanche; a bancada não
+-- recebe mais peças. O carry prop (visual e necessário pro fluxo de pneu→truck) continua
+-- spawnando após o chop — só o REWARD deixou de depender da bancada.
 
 local function craftOnBench(benchId, recipeIndex, recipe)
     local ok = lib.progressBar({
@@ -99,18 +77,9 @@ function VPChopUpsertBench(bench)
         }
     end
 
-    options[#options + 1] = {
-        name = ('vp_chop_bench_deliver_%s'):format(bench.id),
-        label = L('target_deliver_part'),
-        icon = 'fa-solid fa-box-archive',
-        distance = Config.InteractDistance,
-        canInteract = function()
-            return VPChopCarryingPart ~= nil
-        end,
-        onSelect = function()
-            deliverPartToBench(bench.id)
-        end,
-    }
+    -- [GAMEPLAY unificação] Target "entregar peça" REMOVIDO da bancada.
+    -- A recompensa agora é imediata no desmanche; a bancada só faz craft (recipes acima)
+    -- e pickup (abaixo). O fluxo de pneu→truck→fence NÃO usa a bancada e segue intacto.
 
     options[#options + 1] = {
         name = ('vp_chop_bench_pickup_%s'):format(bench.id),

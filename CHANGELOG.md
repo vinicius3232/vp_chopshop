@@ -2,6 +2,57 @@
 
 ---
 
+## [1.7.0] — 2026-05-31 — Auditoria: limpeza, gameplay, segurança, performance
+
+### Changed (Gameplay)
+- [Economia] **Recompensa da Fase 1 agora é IMEDIATA**, unificada com as fases avançadas
+  (2-4). Antes a recompensa ficava pendente e só era entregue ao carregar a peça até a
+  bancada (`vp_chopshop:deliverPart`); agora os itens caem no inventário no momento do
+  desmanche, no callback `vp_chopshop:chopPart`. Removido todo o sistema de recompensa
+  pendente (`PendingPartRewards`, `VPChopStorePendingReward`, `VPChopClaimPendingReward`),
+  o callback `vp_chopshop:deliverPart` e o target "entregar peça" da bancada. Fluxo
+  pneu→truck→fence e craft na bancada (`benchCraft`) preservados intactos.
+- [Progressão] **Emboscada ligada** (`Config.Ambush.Enable/RandomOnDismantle = true`,
+  `Chance = 0.05`, `ReferralDropChance = 0.5`). A emboscada é a única fonte de
+  `fence_referral` — com ela desligada, jogadores novos não conseguiam acessar o fence.
+
+### Fixed (Security)
+- [Concurrency] `server/main.lua` `playerDropped`: **bug latente corrigido** — os rate-limits
+  `_chopPartRateLimit`/`_benchCraftRateLimit` eram declarados `local` *depois* do handler,
+  então a limpeza no disconnect referenciava um global `nil` (leak + possível erro no
+  console). Movidos para forward-declaration no topo do arquivo.
+- [Security] `server/main.lua` `vp_chopshop:server:alarmDisarmed`: adicionado rate-limit
+  anti-flood (2s) — cada chamada fazia lookup + export de inventário sem gating.
+- [Security] `server/fence.lua` `vp_chopshop:tyres:jackstandTyreStolen`: adicionado cap de
+  4 pneus por veículo (`JackstandTyreCount`) — sem isto, um cheater podia disparar o evento
+  repetidamente (espaçando >5s) e gerar pneus infinitos do mesmo carro.
+
+### Performance
+- [Client] `client/main.lua`: TextUI de carry de pneu exibida 1× em vez de uma thread
+  repetindo `showTextUI` a cada 200ms (5 roundtrips NUI/s desnecessários).
+- [Client] `client/main.lua` `doLiftVehicle`/`doLowerVehicle`: `Wait(0)` → `Wait(16)` nos
+  loops de levantar/baixar veículo (movimento é delta por `GetFrameTime`, sem perda visual).
+- [Client] `client/placement.lua`: raycast de ghost-placement `Wait(16)` → `Wait(33)`.
+
+### Removed (Dead code)
+- Deletados 6 arquivos stub/tombstone do refactor do elevador: `client/npc.lua`,
+  `client/tyres.lua`, `server/npc.lua`, `server/partners.lua`, `server/tyres.lua` e
+  `client/lifts.lua` (este byte-idêntico ao `client/carry.lua`; nenhum estava no manifest).
+- Removida função órfã `VPChopJackstandStealTyre` (`client/main.lua`) — zero chamadas; o
+  fluxo vivo é `doJackstandTyreSteal`.
+
+### Fixed (UX)
+- [Client] `client/fence.lua`: opção "comprar bancada" agora só aparece se `Config.NPC.Shop.Enable`
+  (espelha o gate já existente da TyreMission). Antes mostrava notificação de erro quando a
+  feature estava desligada.
+
+### Notes
+- Chaves de locale órfãs (sem uso em código vivo, inofensivas): `progress_delivering_part`,
+  `target_deliver_part`, `notify_part_delivered`, `notify_no_part_carrying`.
+- ⚠️ Item de economia (recompensa imediata) requer teste in-game antes de produção.
+
+---
+
 ## [1.6.7] — 2026-04-27 — ESX Bridge Fix
 
 ### Fixed

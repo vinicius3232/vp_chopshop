@@ -4,25 +4,11 @@ local ChoppedByNetId = {}
 --- Mutex leve: bloqueia coroutines concorrentes para o mesmo netId:partKey
 local ChopInProgress = {} ---@type table<string, true>
 
---- Recompensas pendentes até o jogador entregar a peça na bancada.
---- [src] = { partKey = string, rewards = table }
-local PendingPartRewards = {}
-
---- Guarda recompensas pendentes para um jogador (chamado após chop bem-sucedido).
-function VPChopStorePendingReward(src, partKey, rewards)
-    PendingPartRewards[src] = { partKey = partKey, rewards = rewards }
-end
-
---- Reclama e remove as recompensas pendentes de um jogador.
----@return { partKey: string, rewards: table }|nil
-function VPChopClaimPendingReward(src)
-    local r = PendingPartRewards[src]
-    PendingPartRewards[src] = nil
-    return r
-end
-
--- [STRUCT-05] VPChopHasPendingReward removida: nunca foi chamada em nenhum arquivo.
--- VPChopClaimPendingReward já retorna nil quando não há recompensa — comportamento equivalente.
+-- [GAMEPLAY unificação] Sistema de "recompensa pendente entregue na bancada" REMOVIDO.
+-- Removidos: PendingPartRewards, VPChopStorePendingReward, VPChopClaimPendingReward.
+-- A Fase 1 agora dá os itens imediatamente no callback 'vp_chopshop:chopPart' (server/main.lua),
+-- igual às fases avançadas (advanced_chop.lua). VPChopServerTryPart segue retornando `rewards`,
+-- mas quem entrega os itens agora é o chamador (chopPart), não a bancada.
 
 ---@param netId integer
 ---@param partKey string
@@ -81,7 +67,8 @@ local function tryPartInner(src, netId, partKey)
         rewards.metalscrap = 1
     end
 
-    -- NÃO dar itens aqui: ficam pendentes até o jogador entregar na bancada.
+    -- [GAMEPLAY unificação] Os itens NÃO são dados aqui; o callback chopPart (server/main.lua)
+    -- entrega via InvAdd imediatamente após receber estes `rewards`.
 
     MarkChopped(netId, partKey)
     return true, nil, rewards

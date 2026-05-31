@@ -224,6 +224,10 @@ end)
 
 local JackstandStealCooldown = {} ---@type table<number, number>  src → expiry
 local JACKSTAND_STEAL_CD_MS  = 5000
+-- [SEGURANÇA] Limite de pneus por veículo. Sem isto, um cheater podia disparar o evento
+-- repetidamente (espaçando >5s p/ furar o cooldown) e gerar pneus infinitos do mesmo carro.
+local JackstandTyreCount = {} ---@type table<number, number>  netId → pneus já extraídos
+local MAX_TYRES_PER_VEHICLE = 4
 
 RegisterNetEvent('vp_chopshop:tyres:jackstandTyreStolen', function(netId)
     local src = source
@@ -247,10 +251,20 @@ RegisterNetEvent('vp_chopshop:tyres:jackstandTyreStolen', function(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return end
     if not ValidatePlayerNearVehicle(src, veh, 8.0) then return end
 
+    -- [SEGURANÇA] Limite de 4 pneus por veículo (anti-duplicação)
+    local already = JackstandTyreCount[netId] or 0
+    if already >= MAX_TYRES_PER_VEHICLE then
+        LogSuspicious(src, 'jackstandTyreStolen', 'Acima do limite de pneus do veículo netId=' .. netId)
+        return
+    end
+
     local tyreItem = Config.Jackstand and Config.Jackstand.TyreItem
     if not tyreItem then return end
 
-    if not exports.ox_inventory:AddItem(src, tyreItem, 1) then
+    if exports.ox_inventory:AddItem(src, tyreItem, 1) then
+        -- Conta o pneu só quando entregue de fato (anti-duplicação)
+        JackstandTyreCount[netId] = already + 1
+    else
         TriggerClientEvent('ox_lib:notify', src, {
             type = 'error',
             description = 'Inventário cheio — pneu perdido.',
@@ -295,6 +309,7 @@ AddEventHandler('entityRemoved', function(entity)
     local netId = NetworkGetNetworkIdFromEntity(entity)
     if netId and netId ~= 0 then
         ServerTyreCounts[netId] = nil
+        JackstandTyreCount[netId] = nil
     end
 end)
 

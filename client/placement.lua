@@ -38,7 +38,7 @@ local function ghostPlace(modelHash, callbackName)
     end
 
     while true do
-        Wait(16)
+        Wait(33)  -- [PERF] 30fps é suficiente p/ ghost de posicionamento; raycast custa caro por frame
         local hit, pos = raycastFromCamera(14.0)
         if hit and pos then
             if not preview or not DoesEntityExist(preview) then

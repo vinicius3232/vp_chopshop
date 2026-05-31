@@ -544,7 +544,7 @@ local function doLiftVehicle(veh)
             local step = speed * dt
             local nz  = math.min(targetZ, cur.z + step)
             SetEntityCoordsNoOffset(veh, cur.x, cur.y, nz, true, true, true)
-            Wait(0)
+            Wait(16)  -- [PERF] delta por GetFrameTime: 30-60fps não muda a duração nem a suavidade
         end
     end)
     return origZ
@@ -566,7 +566,7 @@ local function doLowerVehicle(veh, originalZ)
             local step = speed * dt
             local nz  = math.max(originalZ, cur.z - step)
             SetEntityCoordsNoOffset(veh, cur.x, cur.y, nz, true, true, true)
-            Wait(0)
+            Wait(16)  -- [PERF] idem doLiftVehicle
         end
         done = true
     end)
@@ -824,18 +824,13 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
         VPChopDropCarryPart()
         VPChopCarryingPart = { partKey = partKey, propHandle = wheelProp, isTyre = true }
 
-        -- Thread de carry: exibe TextUI enquanto o pneu estiver na mão.
-        -- A ação [G] é tratada por RegisterKeyMapping abaixo (key bind real, funciona a pé).
-        CreateThread(function()
-            while VPChopCarryingPart and VPChopCarryingPart.isTyre do
-                lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
-                    position = 'left-center',
-                    icon     = 'circle-dot',
-                })
-                Wait(200)
-            end
-            lib.hideTextUI()
-        end)
+        -- [PERF] TextUI exibida UMA vez (persiste até hideTextUI). Antes havia uma thread
+        -- repetindo showTextUI a cada 200ms (5 roundtrips NUI/s sem mudar nada).
+        -- VPChopDropCarryPart() (carry.lua) chama hideTextUI ao soltar o pneu.
+        lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
+            position = 'left-center',
+            icon     = 'circle-dot',
+        })
     end)
 end
 
@@ -1188,39 +1183,9 @@ function VPChopRunBoltMinigame(cfg)
     return true
 end
 
-function VPChopJackstandStealTyre(veh, partKey, tyreIdx)
-    if JackstandBusy then return end
-    JackstandBusy = true
-    -- Explicit CreateThread: função contém Wait() via VPChopSpawnTyreProp + VPTyreSpawnWheelPropInHand.
-    -- Garante coroutine context independente de como ox_target dispatcha onSelect.
-    CreateThread(function()
-        local jmg    = Config.Jackstand and Config.Jackstand.Minigame
-        local passed = VPChopRunBoltMinigame(jmg)
-        if not passed then JackstandBusy = false; return end
-        local okp = lib.progressBar({
-            duration = 4000, label = L('tyremission_pulling_tyre'),
-            useWhileDead = false, canCancel = true,
-            disable = { move = true, car = true, combat = true },
-            anim = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
-        })
-        -- [FIX H-4] Mover o reset do mutex para DEPOIS das operações assíncronas.
-        -- O reset antecipado aqui permitia que uma segunda chamada entrasse enquanto
-        -- VPChopSpawnTyreProp / VPTyreSpawnWheelPropInHand ainda estavam em execução.
-        if not okp then JackstandBusy = false; return end
-        -- visually remove the wheel (same as wheel_theft resource)
-        SetVehicleWheelXOffset(veh, tyreIdx, 9999999.0)
-        -- give tyre item to player inventory
-        -- [H1 FIX] Passa netId do veículo para o servidor validar proximidade (trust-no-client).
-        TriggerServerEvent('vp_chopshop:tyres:jackstandTyreStolen', NetworkGetNetworkIdFromEntity(veh))
-        -- Spawnar prop de pneu no chão na posição da roda (para truck loading via ox_target)
-        local boneIdx = GetEntityBoneIndexByName(veh, partKey)
-        if boneIdx and boneIdx >= 0 then
-            local wheelPos = GetWorldPositionOfEntityBone(veh, boneIdx)
-            VPChopSpawnTyreProp(wheelPos)
-        end
-        JackstandBusy = false
-    end)
-end
+-- [LIMPEZA] VPChopJackstandStealTyre removida — função órfã (zero chamadas).
+-- O fluxo vivo de roubo de pneu via jackstand é doJackstandTyreSteal (mais acima),
+-- acionado pelo target de cada roda.
 
 function VPChopJackstandRaiseCar()
     local jcfg = Config.Jackstand

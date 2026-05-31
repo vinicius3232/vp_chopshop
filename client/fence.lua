@@ -153,11 +153,15 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
                 icon='fa-solid fa-skull-crossbones', distance=2.5,
                 onSelect=function() tryNpcMission() end,
             }
-            options[#options+1] = {
-                name='vp_fence_buy_bench', label=L('fence_target_buy_bench'),
-                icon='fa-solid fa-toolbox', distance=2.5,
-                onSelect=function() tryNpcBuy('bench') end,
-            }
+            -- [LIMPEZA] Só mostra "comprar bancada" se a loja estiver ligada — senão o
+            -- callback retorna err='disabled' e o jogador via uma notificação de erro.
+            if Config.NPC and Config.NPC.Shop and Config.NPC.Shop.Enable then
+                options[#options+1] = {
+                    name='vp_fence_buy_bench', label=L('fence_target_buy_bench'),
+                    icon='fa-solid fa-toolbox', distance=2.5,
+                    onSelect=function() tryNpcBuy('bench') end,
+                }
+            end
             options[#options+1] = {
                 name='vp_fence_status', label=L('fence_target_status'),
                 icon='fa-solid fa-chart-line', distance=2.5,

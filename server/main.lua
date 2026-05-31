@@ -13,6 +13,16 @@ local AlarmActive = {}
 local ServerBenchesById = {}
 local BenchCraftBusy = {} ---@type table<number, boolean>  src → true when crafting
 
+-- [SEGURANÇA] Rate-limits forward-declared aqui (ANTES do playerDropped) para que a
+-- limpeza no disconnect realmente os enxergue. Antes eram declarados local lá embaixo
+-- (após o handler), então o playerDropped limpava um global nil — leak + erro no console.
+local _chopPartRateLimit    = {}  ---@type table<number, number>  src → expiry GetGameTimer
+local _benchCraftRateLimit  = {}  ---@type table<number, number>
+-- [GAMEPLAY unificação] _deliverPartRateLimit / DELIVER_PART_MIN_INTERVAL_MS removidos:
+-- o callback 'vp_chopshop:deliverPart' deixou de existir (recompensa agora é imediata).
+local _alarmDisarmRateLimit = {}  ---@type table<number, number>
+local ALARM_DISARM_MIN_INTERVAL_MS = 2000
+
 local function benchById(id)
     return ServerBenchesById[id]
 end
@@ -117,7 +127,9 @@ AddEventHandler('playerDropped', function()
     BenchCraftBusy[src] = nil
     _chopPartRateLimit[src] = nil
     _benchCraftRateLimit[src] = nil
-    VPChopClaimPendingReward(src) -- limpar recompensa pendente (peça perdida ao desconectar)
+    -- [GAMEPLAY unificação] _deliverPartRateLimit[src] e VPChopClaimPendingReward(src) removidos:
+    -- não há mais recompensa pendente nem callback de entrega (recompensa é imediata no chop).
+    _alarmDisarmRateLimit[src] = nil
     -- Limpar alarme do jogador que saiu (timeout silencioso; sem dispatch)
     for netId, data in pairs(AlarmActive) do
         if data.src == src then
@@ -150,6 +162,12 @@ end)
 RegisterNetEvent('vp_chopshop:server:alarmDisarmed', function(netId)
     local src = source
     if not IsValidSource(src) then return end
+
+    -- [SEGURANÇA] Rate limit anti-flood (cada chamada faz lookup + export ox_inventory)
+    local nowAD = GetGameTimer()
+    if _alarmDisarmRateLimit[src] and nowAD < _alarmDisarmRateLimit[src] then return end
+    _alarmDisarmRateLimit[src] = nowAD + ALARM_DISARM_MIN_INTERVAL_MS
+
     netId = tonumber(netId)
     if not netId then return end
     local alarm = AlarmActive[netId]
@@ -263,7 +281,7 @@ function VPChopHasTool(src, wantDrill)
 end
 
 -- Rate-limit de segurança: bloqueia spam de vp_chopshop:chopPart (independente do ChopCooldownSeconds)
-local _chopPartRateLimit = {}  ---@type table<number, number>  src → expiry GetGameTimer
+-- (_chopPartRateLimit declarado no topo do arquivo — forward declaration para o playerDropped)
 local CHOP_PART_MIN_INTERVAL_MS = 2000  -- mínimo 2s entre chamadas por jogador
 
 lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
@@ -302,8 +320,24 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     -- Consumir durabilidade da ferramenta
     VPChopConsumeTool(source, false)
 
-    -- Guardar recompensas pendentes; itens só são dados na entrega à bancada.
-    VPChopStorePendingReward(source, partKey, rewards)
+    -- [GAMEPLAY unificação] Recompensa IMEDIATA (igual às fases 2-4 em advanced_chop.lua):
+    -- itens caem no inventário na hora. Se o inventário estiver cheio, notificar e seguir —
+    -- a peça já foi marcada como chopped (MarkChopped em VPChopServerTryPart), NÃO fazer rollback.
+    -- Sistema de "recompensa pendente entregue na bancada" removido.
+    local invFull = false
+    for itemName, amount in pairs(rewards) do
+        if amount and amount > 0 then
+            if not InvAdd(source, itemName, amount) then
+                invFull = true
+            end
+        end
+    end
+    if invFull then
+        TriggerClientEvent('ox_lib:notify', source, {
+            type = 'warning',
+            description = 'Inventário cheio — parte da recompensa foi perdida.',
+        })
+    end
 
     -- Resolver placa server-side (trust-no-client)
     local vehForPlate = NetworkGetEntityFromNetworkId(netId)
@@ -383,8 +417,7 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     return { ok = true }
 end)
 
--- Rate-limit de segurança para benchCraft
-local _benchCraftRateLimit = {}  ---@type table<number, number>  src → expiry GetGameTimer
+-- Rate-limit de segurança para benchCraft (_benchCraftRateLimit declarado no topo)
 local BENCH_CRAFT_MIN_INTERVAL_MS = 3000
 
 lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipeIndex)
@@ -409,33 +442,9 @@ lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipe
     return { ok = true }
 end)
 
-lib.callback.register('vp_chopshop:deliverPart', function(source, benchId)
-    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
-    benchId = tonumber(benchId)
-    if not benchId then return { ok = false, err = 'args' } end
-    local bench = benchById(benchId)
-    if not bench then return { ok = false, err = 'bench' } end
-    if not isWelderNearBench(bench) then return { ok = false, err = 'no_welder' } end
-    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
-
-    local pending = VPChopClaimPendingReward(source)
-    if not pending then return { ok = false, err = 'no_part' } end
-
-    -- Dar itens com rollback atómico
-    local added = {}
-    for itemName, amount in pairs(pending.rewards) do
-        if amount > 0 then
-            if not InvAdd(source, itemName, amount) then
-                for rName, rAmt in pairs(added) do InvRemove(source, rName, rAmt) end
-                VPChopStorePendingReward(source, pending.partKey, pending.rewards)
-                return { ok = false, err = 'inventory' }
-            end
-            added[itemName] = amount
-        end
-    end
-
-    return { ok = true, rewards = pending.rewards }
-end)
+-- [GAMEPLAY unificação] Callback 'vp_chopshop:deliverPart' REMOVIDO.
+-- A recompensa da Fase 1 agora é imediata (ver callback 'vp_chopshop:chopPart' acima),
+-- igual às fases avançadas. Não há mais "entrega de peça na bancada" — a bancada só faz craft.
 
 lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     if not (Config.Discard and Config.Discard.Enable) then return { ok = false, err = 'disabled' } end
