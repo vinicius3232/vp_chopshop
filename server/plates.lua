@@ -228,6 +228,10 @@ lib.callback.register('vp_chopshop:stealPlate', function(src, netId, witnessScor
     -- [EVIDENCE] Arrancar a placa deixa vestígio no veículo. `vehCoords` e `realPlate` (REAL,
     -- resolvida server-side acima) já em escopo → coords + heat scaling.
     VPChopLeaveEvidence(src, vehCoords, 'plate_steal', realPlate)
+    -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
+    if Config.TyreMarks and Config.TyreMarks.Enable then
+        TriggerClientEvent('vp_chopshop:armTyreMark', src, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+    end
 
     -- [F4 testemunhas] Devolver o bônus aplicado p/ o client notificar (cosmético).
     return { ok = true, bonusXp = bonusXp, bonusCash = bonusCash }
@@ -369,6 +373,10 @@ lib.callback.register('vp_chopshop:forgeFakePlate', function(src, sourcePlate)
     -- [EVIDENCE] A forja não envolve veículo: vestígio fica no local do jogador (junto à
     -- bancada, já validado por isPlayerNearAnyBench). Coords do ped server-side.
     VPChopLeaveEvidence(src, GetEntityCoords(GetPlayerPed(src)), 'plate_forge')
+    -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
+    if Config.TyreMarks and Config.TyreMarks.Enable then
+        TriggerClientEvent('vp_chopshop:armTyreMark', src, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+    end
 
     return { ok = true, plate = chosenPlate }
 end)
@@ -495,6 +503,10 @@ lib.callback.register('vp_chopshop:applyFakePlate', function(src, netId, sourceP
         local evCoords = (veh and veh ~= 0 and DoesEntityExist(veh))
             and GetEntityCoords(veh) or GetEntityCoords(GetPlayerPed(src))
         VPChopLeaveEvidence(src, evCoords, 'plate_apply', realPlate)
+        -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
+        if Config.TyreMarks and Config.TyreMarks.Enable then
+            TriggerClientEvent('vp_chopshop:armTyreMark', src, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+        end
     end
 
     return { ok = true, fake = fakePlate }

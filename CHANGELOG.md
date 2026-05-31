@@ -2,6 +2,37 @@
 
 ---
 
+## [1.12.0] — 2026-05-31 — Marcas de pneu (pista forense de fuga)
+
+### Added
+- **[TYRE]** Nova feature **standalone e 100% interna** ao `vp_chopshop`: **marcas de pneu**
+  como pista forense de FUGA. Após qualquer crime do chopshop, se o criminoso **canta pneu /
+  dá burnout** ao fugir (dentro de `Config.TyreMarks.ArmWindowSeconds`, ~45s), fica uma
+  **marca de pneu** no chão. A polícia examina (ox_target) e descobre **APENAS o MODELO e a
+  CLASSE** do veículo que fugiu (ex.: *"Marcas de pneu de um Sultan RS (Esportivo)"*).
+  **NUNCA revela a placa** — pneu não fala placa. Pista FRACA (aponta o tipo de carro, não a
+  pessoa). **Counterplay:** fugir dirigindo calmo (sem cantar pneu) NÃO deixa marca.
+- **[TYRE]** `client/tyremarks.lua` (novo): handler `vp_chopshop:armTyreMark` arma a janela;
+  detecção de burnout por heurística estável (`GetVehicleWheelSpeed` vs `GetEntitySpeed` —
+  patinação = roda girando bem mais rápido que o deslocamento real), com cooldown anti-spam e
+  limite `MaxMarksPerCrime`. Reporta só `netId`+coords (trust-no-client). Lado polícia: cria
+  ox_target examinável a partir do broadcast e resolve o label do modelo via `GetLabelText`.
+- **[TYRE]** `server/tyremarks.lua` (novo): resolve o **modelo server-side** pelo netId
+  (`GetEntityModel`/`GetDisplayNameFromVehicleModel`/`GetVehicleClass`), guarda a marca em
+  **memória com TTL** (`MarkTTLSeconds`, **sem tabela de DB** — evidência transiente),
+  faz broadcast só para jobs policiais. Callback `vp_chopshop:examineTyreMark` com gate de
+  job + proximidade server-side; retorna `{ modelName, class }`. **Nunca inclui placa**, nem
+  no retorno nem no log do MDT (`VPChopMDT.ReportActivity('', src, 'tyre_marks_model:%s')`).
+- **[TYRE]** Os 5 hooks de crime existentes (`chop_part`, `vin_scratch`, `plate_steal`,
+  `plate_forge`, `plate_apply`) — nos mesmos pontos onde já se chama `VPChopLeaveEvidence` —
+  agora também armam o client do criminoso. Nenhum hook novo criado.
+- **[TYRE]** Bloco `Config.TyreMarks` (Enable, ArmWindowSeconds, MarkTTLSeconds,
+  MaxMarksPerCrime, ExamineDistance, BurnoutCooldownMs, CreateCooldownMs, PoliceJobs,
+  limiares de burnout, mapa pt-BR das classes GTA 0..22).
+- **[TYRE]** Locale em 5 idiomas (en/pt/es/fr/tr): `tyre_target_examine`, `tyre_examine_result_fmt`.
+
+---
+
 ## [1.11.0] — 2026-05-31 — Integração forense (link com `evidences`)
 
 ### Added

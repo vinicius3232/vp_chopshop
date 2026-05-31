@@ -840,3 +840,83 @@ Config.Evidence = {
         plate_apply = { fingerprint = 0.50, dna = 0.08 },
     },
 }
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [TYRE] Marcas de pneu — pista forense de FUGA (100% interna ao vp_chopshop) ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+--- [TYRE] Conceito: após um crime do chopshop, o criminoso fica "armado" por uma
+--- janela curta. Se ele CANTAR PNEU / DAR BURNOUT ao fugir, deixa uma marca no
+--- chão. A polícia examina e descobre APENAS o MODELO/CLASSE do veículo que fugiu
+--- (ex.: "Marcas de pneu de um Sultan RS (Esportivo)"). NUNCA revela a placa —
+--- pneu não fala placa. É pista FRACA (aponta o tipo de carro, não a pessoa).
+--- Counterplay: fugir dirigindo calmo (sem cantar pneu) NÃO deixa marca.
+--- Feature transiente — SEM tabela de DB; marcas vivem em memória com TTL.
+Config.TyreMarks = {
+    --- [TYRE] Liga/desliga a feature inteira (client + server).
+    Enable = true,
+
+    --- [TYRE] Janela (s) após o crime em que o criminoso fica "armado": só nessa
+    --- janela um burnout deixa marca. Depois disso, desarma sozinho no client.
+    ArmWindowSeconds = 45,
+
+    --- [TYRE] Tempo de vida (s) da marca no servidor (evidência transiente). Após
+    --- isso ela é removida da memória e some dos clientes da polícia.
+    MarkTTLSeconds = 600,
+
+    --- [TYRE] Máximo de marcas que UM crime (uma janela armada) pode gerar — evita
+    --- que um burnout prolongado pinte o asfalto inteiro de pistas.
+    MaxMarksPerCrime = 2,
+
+    --- [TYRE] Distância (m) máxima para a polícia conseguir examinar a marca
+    --- (revalidada server-side no callback).
+    ExamineDistance = 3.0,
+
+    --- [TYRE] Cooldown (ms) anti-spam entre detecções de burnout no client.
+    BurnoutCooldownMs = 3000,
+
+    --- [TYRE] Cooldown (ms) por jogador no evento server de criar marca (anti-flood).
+    CreateCooldownMs = 1500,
+
+    --- [TYRE] Jobs policiais que veem/examina as marcas. Reusa a lista de placas
+    --- por padrão; pode-se definir uma lista própria aqui se quiser divergir.
+    PoliceJobs = { 'police', 'bcso', 'sheriff' },
+
+    --- [TYRE] Limiar de detecção de burnout. Burnout = roda girando MUITO mais
+    --- rápido que o deslocamento real do carro (patinação). Comparamos
+    --- |GetVehicleWheelSpeed| (vel. linear das rodas, m/s) com GetEntitySpeed
+    --- (vel. real do chassi, m/s). Se as rodas giram além de (real * Ratio) E
+    --- acima de MinWheelSpeed, é patinação/cantada de pneu.
+    Burnout = {
+        Ratio         = 1.8,   -- rodas precisam girar ≥ 1.8x a vel. real do carro
+        MinWheelSpeed = 6.0,   -- e ≥ 6 m/s de giro de roda (ignora manobras lentas)
+        MaxRealSpeed  = 12.0,  -- e carro a ≤ 12 m/s (burnout real é parado/lento; em alta vel. não conta)
+    },
+
+    --- [TYRE] Mapa classe GTA (0..22) → nome pt-BR exibido no exame.
+    --- Fonte: GetVehicleClass (native CFX). Cobre todas as 0..22 do build atual.
+    ClassNames = {
+        [0]  = 'Compacto',
+        [1]  = 'Sedan',
+        [2]  = 'SUV',
+        [3]  = 'Cupê',
+        [4]  = 'Muscle',
+        [5]  = 'Esportivo Clássico',
+        [6]  = 'Esportivo',
+        [7]  = 'Super',
+        [8]  = 'Motocicleta',
+        [9]  = 'Off-road',
+        [10] = 'Industrial',
+        [11] = 'Utilitário',
+        [12] = 'Van',
+        [13] = 'Bicicleta',
+        [14] = 'Barco',
+        [15] = 'Helicóptero',
+        [16] = 'Avião',
+        [17] = 'Serviço',
+        [18] = 'Emergência',
+        [19] = 'Militar',
+        [20] = 'Comercial',
+        [21] = 'Trem',
+        [22] = 'Animal/Outro',
+    },
+}

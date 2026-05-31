@@ -376,6 +376,10 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
         local evCoords = vehPos or GetEntityCoords(GetPlayerPed(source))
         local realPlate = (plate ~= '' and VPChopMDT.GetRealPlate(plate)) or plate
         VPChopLeaveEvidence(source, evCoords, 'chop_part', realPlate)
+        -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
+        if Config.TyreMarks and Config.TyreMarks.Enable then
+            TriggerClientEvent('vp_chopshop:armTyreMark', source, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+        end
     end
 
     -- Sistema de alarme: rolar chance na primeira peça removida deste veículo.

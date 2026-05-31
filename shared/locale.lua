@@ -300,6 +300,9 @@ local Locales = {
         fake_plate_not_disguised        = 'This vehicle has no fake plate.',
         -- [F4 testemunhas] Risk bonus notify (witnesses nearby during plate theft)
         plate_witness_bonus_fmt         = 'Risky move! Bonus: +%d XP, +$%d',
+        -- [TYRE] Tyre marks (forensic getaway clue — model/class only, never the plate)
+        tyre_target_examine             = 'Examine tyre marks',
+        tyre_examine_result_fmt         = 'Tyre marks of a %s (%s)',
     },
     pt = {
         notify_title = 'Desmanche',
@@ -599,6 +602,9 @@ local Locales = {
         fake_plate_not_disguised        = 'Este veículo não tem placa falsa.',
         -- [F4 testemunhas] Notify de bônus por risco (testemunhas perto no roubo de placa)
         plate_witness_bonus_fmt         = 'Roubo arriscado! Bônus: +%d XP, +$%d',
+        -- [TYRE] Marcas de pneu (pista forense de fuga — só modelo/classe, nunca a placa)
+        tyre_target_examine             = 'Examinar marcas de pneu',
+        tyre_examine_result_fmt         = 'Marcas de pneu de um %s (%s)',
     },
     es = {
         notify_title = 'Desguace',
@@ -769,6 +775,9 @@ local Locales = {
         fake_plate_not_disguised        = 'Este vehículo no tiene placa falsa.',
         -- [F4 testemunhas] Aviso de bono por riesgo (testigos cerca al robar la placa)
         plate_witness_bonus_fmt         = '¡Robo arriesgado! Bono: +%d XP, +$%d',
+        -- [TYRE] Marcas de neumático (pista forense de huida — solo modelo/clase, nunca la placa)
+        tyre_target_examine             = 'Examinar marcas de neumático',
+        tyre_examine_result_fmt         = 'Marcas de neumático de un %s (%s)',
     },
     fr = {
         notify_title = 'Casse auto',
@@ -939,6 +948,9 @@ local Locales = {
         fake_plate_not_disguised        = 'Ce véhicule n\'a pas de fausse plaque.',
         -- [F4 testemunhas] Notif de bonus de risque (témoins proches lors du vol de plaque)
         plate_witness_bonus_fmt         = 'Vol risqué ! Bonus : +%d XP, +$%d',
+        -- [TYRE] Marques de pneu (indice médico-légal de fuite — modèle/classe seulement, jamais la plaque)
+        tyre_target_examine             = 'Examiner les marques de pneu',
+        tyre_examine_result_fmt         = 'Marques de pneu d\'un(e) %s (%s)',
     },
     tr = {
         notify_title = 'Çıkma parça',
@@ -1109,6 +1121,9 @@ local Locales = {
         fake_plate_not_disguised        = 'Bu araçta sahte plaka yok.',
         -- [F4 testemunhas] Riskli hamle bonusu bildirimi (plaka çalarken yakında tanıklar)
         plate_witness_bonus_fmt         = 'Riskli hamle! Bonus: +%d XP, +$%d',
+        -- [TYRE] Lastik izleri (kaçış için adli ipucu — sadece model/sınıf, asla plaka)
+        tyre_target_examine             = 'Lastik izlerini incele',
+        tyre_examine_result_fmt         = '%s lastik izleri (%s)',
     },
 }
 

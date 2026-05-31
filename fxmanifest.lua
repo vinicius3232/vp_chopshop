@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.11.0'
+version '1.12.0'
 
 dependencies {
     'ox_lib',
@@ -33,6 +33,7 @@ client_scripts {
     'client/progression.lua',
     'client/alarm.lua',
     'client/plates.lua',  -- [FASE1 placas] antes de main.lua (usa VPChopTriggerDispatch dele em runtime)
+    'client/tyremarks.lua',  -- [TYRE] marcas de pneu (armar burnout + ox_target da polícia); antes de main.lua
     'client/main.lua',
 }
 
@@ -58,6 +59,9 @@ server_scripts {
     -- [FASE1 placas] depois de heat.lua e progression.lua (usa VPChopMDT, Validate*, Inv*,
     -- VPChopEvt e o listener de PART_CHOPPED da progressão), antes de main.lua.
     'server/plates.lua',
+    -- [TYRE] marcas de pneu: usa BridgeIsPolice, IsValidSource e VPChopMDT.ReportActivity;
+    -- DEPOIS de bridge/mdt.lua e server/plates.lua.
+    'server/tyremarks.lua',
     'server/advanced_chop.lua',
     'server/main.lua',
 }
