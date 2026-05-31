@@ -1,6 +1,6 @@
 # vp_chopshop
 
-FiveM için **Araba Parçalama** (Chop Shop) sistemi: Oyuncu, herhangi bir aracı kaldırmak ve parçaları 4 aşamalı olarak sökmek için **kriko** (`chopshop_jackstand`) kullanır. İşlem sonunda malzeme, NPC'ye lastik satışı ve isteğe bağlı baskın görevleri bulunur. **ox_lib**, **ox_target**, **ox_inventory** ve **oxmysql** ile en iyi uyumluluğu sağlamak için tasarlanmıştır.
+FiveM için **Araba Parçalama** (Chop Shop) sistemi: Oyuncu, herhangi bir aracı kaldırmak ve parçaları 4 aşamalı olarak sökmek için **kriko** (`chopshop_jackstand`) kullanır. İşlem malzeme, dönüşümlü bir alıcı NPC'ye (fence) lastik satışı, isteğe bağlı baskınlar ve **tam bir plaka sistemi** (fiziksel plaka çalma, MDT'yi kandıran sahte plaka, kalıcılık ve tanık bazlı ihbar) sunar. **ox_lib**, **ox_target**, **ox_inventory** ve **oxmysql** ile en iyi uyumluluk için tasarlanmıştır — **QBox / QBCore / ESX** framework'leri.
 
 ---
 
@@ -71,19 +71,108 @@ Belirlenen sayıda parçayı (`Config.Discard.MinPartsToDiscard`) söktükten so
 - **Direkt Satış Aşaması**: Krikoyla lastikleri söktükten sonra → bir araç bagajına ekleyin (kamyonete misal) → alıcı olan NPC karakterine gidin → anında ücret ödensin (`Config.TyreSelling.PricePerTyre`).
 - **Sözleşmeli Lastik Görevleri** (`Config.TyreMission`): NPC ile doğrudan olan ikili diyalog sözleşme başlatır → rastgele spawnlanan aracı bulmanız istenir → cıvata mini-game oynayarak 4 lastiği yürütün → NPC teslimatı sonucunda görev bitirme ücreti tarafınıza bonus ile tahsil edilir.
 
+### 6. Plaka Çalma ve Sahte Plakalar (`Config.Plates`)
+
+Aracı suça bağlayan şey plakadır; bu sistem heat/MDT mekaniğine doğrudan bağlıdır.
+
+- **Fiziksel plaka çalma**: Tornavida (`screwdriver`) ile hedef bir aracı nişanlayın (ox_target "Plakayı sök") → skillcheck → `stolen_plate` eşyasını alırsınız (orijinal plaka eşyanın metadata'sında saklanır). Araç **görünür plakasız** kalır. Bu eşya fence'e satılabilir ya da sahte plaka üretmek için girdi olur.
+  - **Tanık bazlı ihbar**: Plaka çalmak polisi otomatik olarak çağırmaz. İhbar şansı **yakındaki NPC ve oyuncu** sayısıyla orantılıdır (gece çarpanı uygulanır) — gecenin köründe ıssız bir bölgede neredeyse hiç çağırmaz, kalabalık bir bölge daha sık çağırır. **Tanıkların önünde** plaka çalmak ise bir **risk bonusu** kazandırır (XP/para, sunucu tarafında sınırlandırılmıştır).
+- **Sahte plaka üretme**: Tezgâhta (güven **kademe 2**), bir `stolen_plate` + girdiler (`plastic` + `aluminum`) harcanarak `fake_plate` eşyası üretilir (çalınan plakanın değerini devralır).
+- **Sahte plaka uygulama** (`fake_plate` eşyasını kullanmak): Aracın görünür plakasını değiştirir ve **MDT plaka sorgusunu kandırır** — sorgu yapan kişi "temiz" sahte plakayı görür ve geçmiş gizlenmiş olur.
+  - **Heat GERÇEK plakayı takip eder**: Kılık polisi kandırır, ama suç gerçek araç üzerinde birikmeye devam eder. Sahte plaka **heat temizlemez** (bu VIN kazımanın işidir).
+  - **Tam kalıcılık**: Kılık, sunucu yeniden başlatmaya dayanır ve araç yeniden oluştuğunda (spawn) tekrar uygulanır.
+  - **Garaj güvenli**: Kılıklı bir aracı garaja koymak **sahte plakayı asla veritabanına kaydetmez** (kaydetmeden önce gerçek plakaya döndürülür); kılık bir sonraki spawn'da geri gelir. Garaj hook'u gerektirir (bkz. Kurulum).
+- **Sahte plaka kaldırma** (polis): `Config.Plates.PoliceJobs` içindeki meslekler, kılığı bozup gerçek plakayı geri getirmek için bir ox_target'a sahiptir.
+
 ---
 
 ## Kurulum (Installation)
 
-1. **Veritabanı Ayarı**
-   Hemen, `sql/vp_chopshop.sql` uzantısını sunucunuza çalıştırınız. 
+1. **Veritabanı**
+   `sql/vp_chopshop.sql` dosyasını çalıştırın (7 tablonun tamamını oluşturur: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`). Tablolar açılışta (boot) otomatik olarak da oluşturulur/taşınır (idempotent).
 
-2. **Gerekli Envanter (ox_inventory)**
-   `installation/ox_items_snippet.txt` içerisindeki eşyaları `ox_inventory/data/items.lua` yapıştırın. Liste sırasıyla:
-   `chopshop_jackstand`, `chopshop_bench`, `chopshop_welder`, `metal_saw`, `screwdriver` ve `chopshop_tyre` olmalıdır.
+2. **Eşyalar (ox_inventory)**
+   `installation/ox_items_snippet.txt` içerisindeki blokları `ox_inventory/data/items.lua` dosyasına kopyalayın. Gerekli eşyalar:
 
-3. **Sunucu Çekirdeği Ekleme**
-   Kapsayıcı eklentilerden (oxlib, oxtarget vb.) sonraya gelecek şekilde `ensure vp_chopshop` yazısı bırakınız.
+   | Eşya | Kullanım |
+   |------|----------|
+   | `chopshop_jackstand` | Kriko — ana araç |
+   | `chopshop_bench` | Üretim tezgâhı |
+   | `chopshop_welder` | Kaynak makinesi (Aşama 4) |
+   | `metal_saw` | Testere (Aşama 2) |
+   | `screwdriver` | Tornavida (Aşama 3 + plaka çalma) |
+   | `chopshop_tyre` | Çalınan lastik |
+   | `stolen_plate` | Çalınan fiziksel plaka (metadata) |
+   | `fake_plate` | Üretilmiş sahte plaka (kullanılabilir — kılığı uygular) |
 
-4. **Framework**
-   **ESX gereklidir** (`es_extended`). Kodlama, oyuncu hazır kontrolü ve NPC para işlemleri için ESX kullanır.
+3. **Sunucu**
+   `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`'den sonra gelecek şekilde `ensure vp_chopshop` ekleyin.
+
+   **Garaj hook'u (kendi aracında sahte plaka için gerekli):** Garajın sahte plakayı asla kaydetmemesi için, garajın `props`/plakayı kaydetmeden önce yakaladığı yere, save'den ÖNCE şunu ekleyin:
+   ```lua
+   if GetResourceState('vp_chopshop') == 'started' then
+       props = exports.vp_chopshop:GetRealPlateForProps(vehicle, props)
+   end
+   ```
+   - **QBox (qbx_garages):** `server/main.lua` içinde, `qbx_garages:server:parkVehicle` callback'inde, `SaveVehicle`'dan önce (`[vp_chopshop F3 garagem]` etiketli blok). ⚠️ qbx_garages güncellenirse yeniden uygulayın.
+   - **QBCore (qb-garages):** snippet için bkz. `installation/qb-garages-hook.md`.
+
+4. **İzinler (ACE)**
+   Admin komutları (`/choplifts`, `/chopremove`) için şunları ekleyin:
+   ```
+   add_ace group.admin command.choplifts allow
+   add_ace group.admin command.chopremove allow
+   ```
+
+5. **Framework**
+   `bridge/server_framework.lua` içindeki bridge, öncelik sırasına göre **QBox (`qbx_core`)**, **QBCore (`qb-core`)** veya **ESX (`es_extended`)** framework'ünü otomatik olarak algılar. Oyuncu hazır kontrolü (`ServerPlayerIsReady`), meslek (plakaların polis kontrolü), para ve citizenid için kullanılır. *(CANLI sunucu QBox'tır; QBCore taşınabilirlik için desteklenir ama bu ortamda test edilmemiştir.)*
+
+---
+
+## Yapılandırma (`shared/config.lua`)
+
+### Plaka çalma ve sahte plakalar (`Config.Plates`)
+
+| Anahtar | Açıklama |
+|---------|----------|
+| `Enable` | Tüm plaka özelliğini açar/kapatır |
+| `MaxDistance` / `ApplyMaxDistance` | Çalma / uygulama için maks. mesafe (sunucu tarafı) |
+| `StealCooldownSeconds` | Oyuncu başına çalma için anti-farm bekleme süresi |
+| `SkillCheck` | Plaka sökerken oynanan mini-oyun (`lib.skillCheck`'in `{ difficulties, keys }` değeri) |
+| `ToolItem` | Çalmak için gereken eşya (varsayılan `screwdriver`) |
+| `ForgeTier` | Sahte plaka üretmek için fence'te gereken minimum güven (varsayılan 2) |
+| `ForgeInputs` | Üretim girdileri (örn. `{ plastic = 2, aluminum = 1 }`) |
+| `Persist` | Kılığın tam kalıcılığı (spawn'da yeniden uygulanır, yeniden başlatmaya dayanır) |
+| `PoliceJobs` | Sahte plakayı kaldırabilen meslekler (örn. `{ 'police','bcso','sheriff' }`) |
+| `Witness` | Tanık bazlı ihbar: `{ Radius, NpcWeight, PlayerWeight, BaseChance, MaxChance, NightModifier, BonusMinScore, BonusXp, BonusCashMax }` |
+
+> Diğer yapılandırma bölümleri (desmanche, kriko, fence, ilerleme, alarm, baskınlar, lastikler, Discord vb.) için güncel ve eksiksiz referans olarak Portekizce README'ye (`README_pt.md`) bakın.
+
+---
+
+## Framework Uyumluluğu
+
+Betik, ana mantık için **framework'e bağımlı değildir** — envanter yalnızca **ox_inventory**'dir. `bridge/server_framework.lua` içindeki bridge, framework'ü otomatik olarak algılar ve şunlar için kullanır:
+
+- `ServerPlayerIsReady` — oyuncunun yüklenip yüklenmediğini bilmek için.
+- `BridgeGetJob` / `BridgeIsPolice` — sahte plaka kaldırmanın polis kontrolü.
+- `BridgeGetCash` / `BridgeRemoveCash` / `BridgeAddCash` — NPC mağazası ve plaka bonusları.
+
+| Framework | Destek |
+|-----------|--------|
+| QBox (`qbx_core`) | Tam — doğrudan export'lar (`GetPlayer`, `AddMoney`, `job.name`) |
+| QBCore (`qb-core`) | Destekleniyor (taşınabilirlik — `GetCoreObject`/`Functions.GetPlayer`); bu ortamda test edilmedi |
+| ESX Legacy (`es_extended`) | Tam — `GetPlayerFromId`, `GetPlayers`, `xPlayer.job.name` kullanır |
+| Hiçbiri | Çalışır (NPC mağazası ve nakit bonusları devre dışı) |
+
+**Araç anahtarları:** ESX'te anahtar resource'unuzu/export'unuzu işaret etmek için `Config.VehicleKeys` kullanın. Kontrolü kapatmak isterseniz `Config.RequireVehicleKeys = false` ayarlayın.
+
+---
+
+## Sürüm
+
+`1.10.0` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
+
+> **v1.7.0–1.10.0:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
+> ve **tam plaka sistemi** (fiziksel çalma → üretim → MDT'yi kandıran sahte plaka,
+> kalıcı ve garaj geri dönüşümlü; tanık bazlı ihbar; QBox/QBCore/ESX desteği).
