@@ -1,6 +1,6 @@
 # vp_chopshop
 
-Système de **casse automobile** (chop shop) pour FiveM : le joueur utilise un **cric mécanique** (`chopshop_jackstand`) pour soulever n'importe quel véhicule et démonter les pièces en 4 phases progressives, en obtenant des récompenses matérielles, la vente de pneus à un PNJ receleur rotatif, des embuscades optionnelles, un **système complet de plaques** (vol physique, fausse plaque qui trompe le MDT, persistance et dispatch selon les témoins) et une **couche forensique** (indices d'empreinte/ADN que la police collecte). Conçu pour être utilisé avec **ox_lib**, **ox_target**, **ox_inventory** et **oxmysql** — frameworks **QBox / QBCore / ESX**.
+Système de **casse automobile** (chop shop) pour FiveM : le joueur utilise un **cric mécanique** (`chopshop_jackstand`) pour soulever n'importe quel véhicule et démonter les pièces en 4 phases progressives, en obtenant des récompenses matérielles, la vente de pneus à un PNJ receleur rotatif, des embuscades optionnelles, un **système complet de plaques** (vol physique, fausse plaque qui trompe le MDT, persistance et dispatch selon les témoins), une **couche forensique** (indices d'empreinte/ADN que la police collecte), des **traces de pneus** et un **numéro de série sur les pièces** (volée/rayée/forgée/légale, avec expertise de la police). Conçu pour être utilisé avec **ox_lib**, **ox_target**, **ox_inventory** et **oxmysql** — frameworks **QBox / QBCore / ESX**.
 
 > 🇫🇷 Ceci est la version française. Autres langues : [EN](README_en.md) · [PT](README_pt.md) · [ES](README_es.md) · [TR](README_tr.md).
 
@@ -97,12 +97,31 @@ Couche **forensique** reliée à la ressource [`evidences`](https://forum.cfx.re
 - **La police collecte** avec le kit `evidences` et le script **identifie l'auteur** par biométrie — le bandit peut fuir, mais la scène le livre.
 - **Optionnel et sûr :** si la ressource `evidences` ne tourne pas, la fonction **se désactive automatiquement** sans affecter le démontage (`Config.Evidence.Enable` active/désactive aussi).
 
+### 8. Traces de pneus (`Config.TyreMarks`)
+
+Indice de **fuite** — complète l'expertise forensique, mais il pointe le **véhicule**, pas la personne.
+
+- Après un crime, si le criminel **fait crisser les pneus / un burnout** dans une fenêtre courte (~45 s), une **trace reste au sol**, liée au **modèle du véhicule** qui a pris la fuite.
+- La police (métiers configurés) repère le point et l'**examine** → « Traces de pneus d'un **{modèle}** (**{classe}**) ». **Ne révèle jamais la plaque** (un pneu ne dit pas la plaque) — seulement le type de voiture.
+- **Counterplay :** partir au volant calmement (sans faire crisser les pneus) ne laisse aucune trace.
+- Trace **transitoire** (TTL configurable) ; le serveur résout le modèle par le netId (anti-triche), examen soumis à un gate métier + proximité.
+
+### 9. Numéro de série des pièces (`Config.PartSerial`)
+
+Couche **économie + forensique** sur l'objet `car_parts` — RP du marché des pièces pour les mécaniciens, les bandits et la police.
+
+- Chaque `car_parts` porte une **série + un état** dans la metadata. Les pièces issues du démontage naissent **volées** (série « chaude » + modèle d'origine, **sans plaque** ; une série par voiture).
+- **À l'établi** (gate par palier de progression) : **rayer la série** (palier moyen → la pièce paraît visiblement trafiquée) et **forger une nouvelle série** (palier max → la pièce **paraît légale**).
+- **Source légale :** export `exports.vp_chopshop:IssueLegalParts(src, amount)` (pour que les ateliers de mécanique s'intègrent) + vendeur optionnel. Les séries légitimes sont enregistrées en base de données.
+- **Police** (objet `parts_scanner` + cible sur le joueur « Inspecter les pièces ») : le scan normal montre **volée / rayée / enregistrée** ; une pièce **forgée paraît enregistrée** — seule l'**expertise** (avec `forensic_kit`) recoupe la série dans le registre et démasque la **contrefaçon**.
+- La série est une couche forensique : elle **n'affecte pas** la consommation de `car_parts` dans les recettes / la vente au receleur.
+
 ---
 
 ## Installation
 
 1. **Base de données**
-   Exécutez `sql/vp_chopshop.sql` (crée les **7 tables** : `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`). Les tables sont aussi créées/migrées automatiquement au démarrage (idempotent).
+   Exécutez `sql/vp_chopshop.sql` (crée les **8 tables** : `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`, `vp_chop_legit_serials`). Les tables sont aussi créées/migrées automatiquement au démarrage (idempotent).
 
 2. **Objets (ox_inventory)**
    Copiez les blocs de `installation/ox_items_snippet.txt` dans `ox_inventory/data/items.lua`. Objets requis :
@@ -118,6 +137,7 @@ Couche **forensique** reliée à la ressource [`evidences`](https://forum.cfx.re
    | `stolen_plate` | Plaque physique volée (metadata) |
    | `fake_plate` | Fausse plaque forgée (utilisable — applique le déguisement) |
    | `gloves` | Gants — empêchent de laisser des empreintes (système d'indices) |
+   | `parts_scanner` | Scanner de pièces (police) — inspecte la série des `car_parts` |
 
 3. **Serveur**
    Ajoutez `ensure vp_chopshop` à la suite de `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
@@ -175,6 +195,30 @@ Intégration optionnelle avec la ressource `evidences`. Se désactive automatiqu
 | `HeatScaling` / `HeatFactor` | Plus de heat sur la plaque → plus de chance d'indice (`chance × (1 + heat/100 × HeatFactor)`) |
 | `Actions` | Chance de base (0..1) d'**empreinte** et d'**ADN** par action : `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
 
+### Traces de pneus (`Config.TyreMarks`)
+
+| Clé | Description |
+|-------|-----------|
+| `Enable` | Active/désactive les traces de pneus |
+| `ArmWindowSeconds` | Fenêtre après le crime durant laquelle faire crisser les pneus laisse une trace (~45) |
+| `MarkTTLSeconds` | Durée de vie de la trace avant qu'elle ne disparaisse (~600) |
+| `MaxMarksPerCrime` | Nombre max. de traces par fenêtre de crime |
+| `ExamineDistance` | Distance pour que la police examine |
+| `Burnout` | Seuils de détection : `{ Ratio, MinWheelSpeed, MaxRealSpeed, CooldownMs }` (à calibrer en jeu) |
+| `PoliceJobs` | Métiers pouvant examiner |
+| `ClassNames` | Correspondance des classes GTA (0..22) → nom |
+
+### Numéro de série des pièces (`Config.PartSerial`)
+
+| Clé | Description |
+|-------|-----------|
+| `Enable` | Active/désactive le système de série sur `car_parts` |
+| `ScratchTier` / `ForgeTier` | Palier de progression pour rayer (moyen) et forger (max) |
+| `ForgeInputs` | Matériaux consommés à la forge (ex. : `{ plastic = 2, aluminum = 1 }`) |
+| `LegalVendor` | Vendeur de pièces légales : `{ Enable, Coords, Model, Price, Amount }` |
+| `PoliceJobs` | Métiers pouvant inspecter les pièces |
+| `ScannerItem` / `ForensicItem` | Objets : scanner de la police (`parts_scanner`) et kit d'expertise (`forensic_kit`) |
+
 > Le détail complet des autres clés de configuration (désmantèlement, alarme, receleur, progression, etc.) se trouve dans les versions [PT](README_pt.md) / [EN](README_en.md).
 
 ---
@@ -194,10 +238,12 @@ Le script **ne dépend d'aucun framework** pour la logique principale — l'inve
 
 ## Version
 
-`1.11.0` — définie dans `fxmanifest.lua`. Historique complet dans [`CHANGELOG.md`](CHANGELOG.md).
+`1.13.0` — définie dans `fxmanifest.lua`. Historique complet dans [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.11.0 :** audit (nettoyage/sécurité/performance), récompense immédiate + embuscade,
+> **v1.7.0–1.13.0 :** audit (nettoyage/sécurité/performance), récompense immédiate + embuscade,
 > le **système complet de plaques** (vol physique → forge → fausse plaque qui trompe le MDT,
 > persistante et avec réversion en garage ; dispatch selon les témoins ; support QBox/QBCore/ESX),
-> et la **couche forensique** (indices d'empreinte/ADN par action, avec gants et échelle selon le heat,
-> via intégration optionnelle avec la ressource `evidences`).
+> la **couche forensique** (indices d'empreinte/ADN par action, avec gants et échelle selon le heat,
+> via intégration optionnelle avec la ressource `evidences`),
+> les **traces de pneus** (indice de fuite par modèle de véhicule, sans plaque),
+> et la **série des pièces** (`car_parts` volée/rayée/forgée/légale, avec expertise de la police).

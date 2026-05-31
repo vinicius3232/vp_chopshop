@@ -1,6 +1,6 @@
 # vp_chopshop
 
-Sistema de desmanche (chop shop) para FiveM: o jogador usa um **macaco hidráulico** (`chopshop_jackstand`) para levantar qualquer veículo e desmontar peças em 4 fases progressivas, rendendo materiais, venda de pneus a um fence NPC rotativo, emboscadas opcionais, um **sistema completo de placas** (roubo físico, placa falsa que engana o MDT, persistência e dispatch por testemunhas) e uma **camada forense** (vestígios de digital/DNA que a polícia coleta). Feito para stacks com **ox_lib**, **ox_target**, **ox_inventory** e **oxmysql** — frameworks **QBox / QBCore / ESX**.
+Sistema de desmanche (chop shop) para FiveM: macaco hidráulico → desmonte em 4 fases → materiais, pneus e fence rotativo, emboscadas, **sistema completo de placas** (placa falsa que engana o MDT), **camada forense** (digital/DNA via `evidences`), **marcas de pneu** e **número de série nas peças** (roubada/riscada/forjada/legal, com perícia da polícia). Para stacks com **ox_lib / ox_target / ox_inventory / oxmysql** — frameworks **QBox / QBCore / ESX**.
 
 > 🇵🇹 Esta é a versão em português. Outras línguas: [EN](README_en.md) · [ES](README_es.md) · [FR](README_fr.md) · [TR](README_tr.md).
 
@@ -176,12 +176,31 @@ Camada **forense** ligada ao resource [`evidences`](https://forum.cfx.re/t/free-
 - **A polícia coleta** com o kit do `evidences` e o script **identifica o autor** pela biometria — o bandido pode fugir, mas a cena o entrega.
 - **Opcional e seguro:** se o resource `evidences` não estiver rodando, a feature **auto-desativa** sem afetar o desmanche (`Config.Evidence.Enable` também liga/desliga).
 
+### 8. Marcas de pneu (`Config.TyreMarks`)
+
+Pista de **fuga** — complementa a perícia, mas aponta o **veículo**, não a pessoa.
+
+- Após um crime, se o bandido **canta pneu / dá burnout** numa janela curta (~45s), fica uma **marca no chão** ligada ao **modelo do veículo** que fugiu.
+- A polícia (jobs configurados) vê o ponto e **examina** → "Marcas de pneu de um **{modelo}** (**{classe}**)". **Nunca revela a placa** (pneu não fala placa) — só o tipo de carro.
+- **Counterplay:** sair dirigindo calmo (sem cantar pneu) não deixa marca.
+- Marca **transiente** (TTL configurável); servidor resolve o modelo pelo netId (anti-trapaça), exame gated por job + proximidade.
+
+### 9. Número de série das peças (`Config.PartSerial`)
+
+Camada de **economia + forense** no item `car_parts` — RP de mercado de peças para mecânicos, bandidos e polícia.
+
+- Cada `car_parts` carrega **série + estado** na metadata. Peça do desmanche nasce **roubada** (série "quente" + modelo de origem, **sem placa**; uma série por carro).
+- **Na bancada** (skill por tier de progressão): **riscar a série** (tier médio → fica adulterada, óbvio) e **forjar uma série nova** (tier máximo → a peça **parece legal**).
+- **Fonte legal:** export `exports.vp_chopshop:IssueLegalParts(src, amount)` (para mecânicas integrarem) + vendedor opcional. Séries legítimas ficam registradas no banco.
+- **Polícia** (item `parts_scanner` + alvo no jogador "Inspecionar peças"): scan normal mostra **roubada / riscada / registrada**; a peça **forjada parece registrada** — só a **perícia** (com `forensic_kit`) cruza a série no registro e flagra a **forjada**.
+- A série é uma camada forense: **não afeta** o consumo de `car_parts` em receitas/venda no fence.
+
 ---
 
 ## Instalação
 
 1. **Base de dados**
-   Executa `sql/vp_chopshop.sql` (cria todas as 7 tabelas: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`). As tabelas também são criadas/migradas automaticamente no boot (idempotente).
+   Executa `sql/vp_chopshop.sql` (cria todas as 8 tabelas: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`, `vp_chop_legit_serials`). As tabelas também são criadas/migradas automaticamente no boot (idempotente).
 
 2. **Itens (ox_inventory)**
    Copia os blocos de `installation/ox_items_snippet.txt` para `ox_inventory/data/items.lua`. Itens necessários:
@@ -197,6 +216,7 @@ Camada **forense** ligada ao resource [`evidences`](https://forum.cfx.re/t/free-
    | `stolen_plate` | Placa física roubada (metadata) |
    | `fake_plate` | Placa falsa forjada (usável — aplica o disfarce) |
    | `gloves` | Luvas — evitam deixar digitais (sistema de evidências) |
+   | `parts_scanner` | Scanner de peças (polícia) — inspeciona a série das `car_parts` |
 
 3. **Servidor**
    Adiciona `ensure vp_chopshop` após `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
@@ -455,6 +475,30 @@ Integração opcional com o resource `evidences`. Auto-desativa se ele não esti
 | `HeatScaling` / `HeatFactor` | Mais heat na placa → mais chance de vestígio (`chance × (1 + heat/100 × HeatFactor)`) |
 | `Actions` | Chance base (0..1) de **digital** e **DNA** por ação: `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
 
+### Marcas de pneu (`Config.TyreMarks`)
+
+| Chave | Descrição |
+|-------|-----------|
+| `Enable` | Liga/desliga as marcas de pneu |
+| `ArmWindowSeconds` | Janela após o crime em que cantar pneu deixa marca (~45) |
+| `MarkTTLSeconds` | Tempo de vida da marca antes de sumir (~600) |
+| `MaxMarksPerCrime` | Máx. de marcas por janela de crime |
+| `ExamineDistance` | Distância para a polícia examinar |
+| `Burnout` | Limiares de detecção: `{ Ratio, MinWheelSpeed, MaxRealSpeed, CooldownMs }` (calibrar in-game) |
+| `PoliceJobs` | Jobs que podem examinar |
+| `ClassNames` | Mapa das classes GTA (0..22) → nome pt-BR |
+
+### Número de série das peças (`Config.PartSerial`)
+
+| Chave | Descrição |
+|-------|-----------|
+| `Enable` | Liga/desliga o sistema de série em `car_parts` |
+| `ScratchTier` / `ForgeTier` | Tier de progressão para riscar (médio) e forjar (máximo) |
+| `ForgeInputs` | Insumos consumidos ao forjar (ex.: `{ plastic = 2, aluminum = 1 }`) |
+| `LegalVendor` | Vendedor de peças legais: `{ Enable, Coords, Model, Price, Amount }` |
+| `PoliceJobs` | Jobs que podem inspecionar peças |
+| `ScannerItem` / `ForensicItem` | Itens: scanner da polícia (`parts_scanner`) e kit de perícia (`forensic_kit`) |
+
 ---
 
 ## Compatibilidade com frameworks
@@ -497,6 +541,8 @@ O script **não depende de framework** para a lógica principal — inventário 
 | `server/fence.lua` | NPC rotativo, trust, ordens, venda de itens, jackstand server-side |
 | `server/heat.lua` | Heat system (VIN scratch, componentes MDT + peças) |
 | `server/plates.lua` | Roubo de placa, forja/aplicação/remoção de placa falsa, persistência + cache, dispatch por testemunhas, export `GetRealPlateForProps` |
+| `server/tyremarks.lua` | Marcas de pneu (resolve modelo, marca com TTL, exame da polícia) |
+| `server/partserial.lua` | Série das `car_parts` (riscar/forjar, fonte legal, inspeção da polícia) |
 | `server/progression.lua` | XP e tiers (escuta event bus, persiste em `vp_chop_progression`) |
 | `server/discord.lua` | Webhook Discord opcional |
 | `server/main.lua` | Init, callbacks de placement, broadcast do estado |
@@ -507,6 +553,8 @@ O script **não depende de framework** para a lógica principal — inventário 
 | `client/fence.lua` | Blip rotativo, targets NPC, carry de pneu, truck loading |
 | `client/alarm.lua` | Alarme veicular: trigger, skillcheck, dispatch |
 | `client/plates.lua` | ox_target de roubo/remoção de placa, skillcheck, score de testemunhas, export `useFakePlateItem`, sync de placa visível |
+| `client/tyremarks.lua` | Detecção de burnout (armar após crime) + ox_target da polícia |
+| `client/partserial.lua` | Opções de série na bancada, ox_target de inspeção, vendedor legal |
 | `client/progression.lua` | XP float, tier-up notification |
 | `client/main.lua` | Jackstand system, Fases 1-4, sync do mundo, descarte |
 
@@ -553,10 +601,11 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.11.0` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.13.0` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.11.0:** auditoria (limpeza/segurança/performance), recompensa imediata + emboscada,
+> **v1.7.0–1.13.0:** auditoria (limpeza/segurança/performance), recompensa imediata + emboscada,
 > o **sistema completo de placas** (roubo físico → forja → placa falsa que engana o MDT,
 > persistente e com reversão de garagem; dispatch por testemunhas; suporte QBox/QBCore/ESX),
-> e a **camada forense** (vestígios de digital/DNA por ação, com luvas e escala por heat,
-> via integração opcional com o resource `evidences`).
+> a **camada forense** (vestígios de digital/DNA via integração com o resource `evidences`),
+> as **marcas de pneu** (pista de fuga pelo modelo do veículo, sem placa),
+> e a **série das peças** (`car_parts` roubada/riscada/forjada/legal, com perícia da polícia).

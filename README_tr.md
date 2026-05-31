@@ -1,6 +1,6 @@
 # vp_chopshop
 
-FiveM için **Araba Parçalama** (Chop Shop) sistemi: Oyuncu, herhangi bir aracı kaldırmak ve parçaları 4 aşamalı olarak sökmek için **kriko** (`chopshop_jackstand`) kullanır. İşlem malzeme, dönüşümlü bir alıcı NPC'ye (fence) lastik satışı, isteğe bağlı baskınlar, **tam bir plaka sistemi** (fiziksel plaka çalma, MDT'yi kandıran sahte plaka, kalıcılık ve tanık bazlı ihbar) ve bir **adli katman** (polisin topladığı parmak izi/DNA izleri) sunar. **ox_lib**, **ox_target**, **ox_inventory** ve **oxmysql** ile en iyi uyumluluk için tasarlanmıştır — **QBox / QBCore / ESX** framework'leri.
+FiveM için **Araba Parçalama** (Chop Shop) sistemi: Oyuncu, herhangi bir aracı kaldırmak ve parçaları 4 aşamalı olarak sökmek için **kriko** (`chopshop_jackstand`) kullanır. İşlem malzeme, dönüşümlü bir alıcı NPC'ye (fence) lastik satışı, isteğe bağlı baskınlar, **tam bir plaka sistemi** (fiziksel plaka çalma, MDT'yi kandıran sahte plaka, kalıcılık ve tanık bazlı ihbar), bir **adli katman** (polisin topladığı parmak izi/DNA izleri), **lastik izleri** (kişiyi değil aracı işaret eden kaçış izi) ve **parçalarda seri numarası** (car_parts: çalıntı/kazınmış/forge/yasal, polis ekspertizi ile) sunar. **ox_lib**, **ox_target**, **ox_inventory** ve **oxmysql** ile en iyi uyumluluk için tasarlanmıştır — **QBox / QBCore / ESX** framework'leri.
 
 ---
 
@@ -95,12 +95,31 @@ Aracı suça bağlayan şey plakadır; bu sistem heat/MDT mekaniğine doğrudan 
 - **Polis toplar:** `evidences` kiti ile izleri toplar ve script biyometriyle **faili tespit eder** — suçlu kaçabilir, ama olay yeri onu ele verir.
 - **Opsiyonel ve güvenli:** `evidences` kaynağı çalışmıyorsa özellik **otomatik devre dışı** kalır ve sökmeyi etkilemez (`Config.Evidence.Enable` ile de açılıp kapatılır).
 
+### 8. Lastik izleri (`Config.TyreMarks`)
+
+**Kaçış** izi — adli katmanı tamamlar, ama kişiyi değil **aracı** işaret eder.
+
+- Bir suçtan sonra, suçlu kısa bir pencerede (~45 sn) **lastik yakarsa / patinaj yaparsa (burnout)**, yere kaçan aracın **MODELİNE** bağlı bir **iz** kalır.
+- Polis (ayarlı meslekler) izi görür ve **inceler** → "Bir **{model}** (**{sınıf}**) aracının lastik izleri". **Plakayı asla göstermez** (lastik plakayı söylemez) — sadece araç türünü.
+- **Karşı oyun (counterplay):** sakin sürüp gitmek (lastik yakmadan) iz bırakmaz.
+- İz **geçicidir** (ayarlı TTL); sunucu modeli netId ile çözer (anti-hile); inceleme meslek + mesafe ile kısıtlıdır.
+
+### 9. Parça seri numarası (`Config.PartSerial`)
+
+`car_parts` eşyası üzerinde bir **ekonomi + adli** katman — tamirciler, suçlular ve polis için parça pazarı RP'si.
+
+- Her `car_parts` metadata'da **seri + durum** taşır. Sökümden çıkan parça **çalıntı** doğar ("sıcak" seri + köken modeli, **plaka yok**; araç başına bir seri).
+- **Tezgahta** (ilerleme kademesi ile kısıtlı): **seriyi kazıma** (orta kademe → belirgin şekilde tahrif olur) ve **yeni seri üretme/forge** (maks kademe → parça **yasal görünür**).
+- **Yasal kaynak:** export `exports.vp_chopshop:IssueLegalParts(src, amount)` (tamircilerin entegre olması için) + opsiyonel bir satıcı. Meşru seriler veritabanına kaydedilir.
+- **Polis** (eşya `parts_scanner` + oyuncuda hedef "Parçaları incele"): normal tarama **çalıntı / kazınmış / kayıtlı** gösterir; **forge** parça **kayıtlı görünür** — sadece **ekspertiz** (`forensic_kit` ile) seriyi kayıtla karşılaştırıp **forge**'u yakalar.
+- Seri adli bir katmandır: tariflerde/fence satışında **car_parts tüketimini ETKİLEMEZ**.
+
 ---
 
 ## Kurulum (Installation)
 
 1. **Veritabanı**
-   `sql/vp_chopshop.sql` dosyasını çalıştırın (7 tablonun tamamını oluşturur: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`). Tablolar açılışta (boot) otomatik olarak da oluşturulur/taşınır (idempotent).
+   `sql/vp_chopshop.sql` dosyasını çalıştırın (8 tablonun tamamını oluşturur: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`, `vp_chop_legit_serials`). Tablolar açılışta (boot) otomatik olarak da oluşturulur/taşınır (idempotent).
 
 2. **Eşyalar (ox_inventory)**
    `installation/ox_items_snippet.txt` içerisindeki blokları `ox_inventory/data/items.lua` dosyasına kopyalayın. Gerekli eşyalar:
@@ -116,6 +135,7 @@ Aracı suça bağlayan şey plakadır; bu sistem heat/MDT mekaniğine doğrudan 
    | `stolen_plate` | Çalınan fiziksel plaka (metadata) |
    | `fake_plate` | Üretilmiş sahte plaka (kullanılabilir — kılığı uygular) |
    | `gloves` | Eldiven — parmak izi bırakmayı engeller (kanıt sistemi) |
+   | `parts_scanner` | Parça tarayıcı (polis) — `car_parts` serisini inceler |
 
 3. **Sunucu**
    `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`'den sonra gelecek şekilde `ensure vp_chopshop` ekleyin.
@@ -173,6 +193,30 @@ Aracı suça bağlayan şey plakadır; bu sistem heat/MDT mekaniğine doğrudan 
 | `HeatScaling` / `HeatFactor` | Plakada daha çok heat → daha çok iz şansı (`chance × (1 + heat/100 × HeatFactor)`) |
 | `Actions` | Eylem başına **parmak izi** ve **DNA** temel şansı (0..1): `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
 
+### Lastik izleri (`Config.TyreMarks`)
+
+| Anahtar | Açıklama |
+|---------|----------|
+| `Enable` | Lastik izlerini açar/kapatır |
+| `ArmWindowSeconds` | Suçtan sonra lastik yakmanın iz bıraktığı pencere (~45) |
+| `MarkTTLSeconds` | İzin kaybolmadan önceki yaşam süresi (~600) |
+| `MaxMarksPerCrime` | Suç penceresi başına maks. iz sayısı |
+| `ExamineDistance` | Polisin inceleme mesafesi |
+| `Burnout` | Algılama eşikleri: `{ Ratio, MinWheelSpeed, MaxRealSpeed, CooldownMs }` (oyun içi kalibre edin) |
+| `PoliceJobs` | İnceleyebilen meslekler |
+| `ClassNames` | GTA sınıflarının (0..22) → ada eşlemesi |
+
+### Parça seri numarası (`Config.PartSerial`)
+
+| Anahtar | Açıklama |
+|---------|----------|
+| `Enable` | `car_parts` seri sistemini açar/kapatır |
+| `ScratchTier` / `ForgeTier` | Kazıma (orta) ve forge (maks) için ilerleme kademesi |
+| `ForgeInputs` | Forge sırasında tüketilen girdiler (örn. `{ plastic = 2, aluminum = 1 }`) |
+| `LegalVendor` | Yasal parça satıcısı: `{ Enable, Coords, Model, Price, Amount }` |
+| `PoliceJobs` | Parçaları inceleyebilen meslekler |
+| `ScannerItem` / `ForensicItem` | Eşyalar: polis tarayıcısı (`parts_scanner`) ve ekspertiz kiti (`forensic_kit`) |
+
 > Diğer yapılandırma bölümleri (desmanche, kriko, fence, ilerleme, alarm, baskınlar, lastikler, Discord vb.) için güncel ve eksiksiz referans olarak Portekizce README'ye (`README_pt.md`) bakın.
 
 ---
@@ -198,10 +242,12 @@ Betik, ana mantık için **framework'e bağımlı değildir** — envanter yaln�
 
 ## Sürüm
 
-`1.11.0` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
+`1.13.0` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
 
-> **v1.7.0–1.11.0:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
+> **v1.7.0–1.13.0:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
 > **tam plaka sistemi** (fiziksel çalma → üretim → MDT'yi kandıran sahte plaka,
 > kalıcı ve garaj geri dönüşümlü; tanık bazlı ihbar; QBox/QBCore/ESX desteği),
-> ve **adli katman** (eylem başına parmak izi/DNA izleri, eldiven ve heat ölçeklemesi ile,
-> opsiyonel `evidences` kaynağı entegrasyonu üzerinden).
+> **adli katman** (eylem başına parmak izi/DNA izleri, eldiven ve heat ölçeklemesi ile,
+> opsiyonel `evidences` kaynağı entegrasyonu üzerinden),
+> **lastik izleri** (araç modeline bağlı kaçış izi, plaka olmadan),
+> ve **parça serisi** (`car_parts` çalıntı/kazınmış/forge/yasal, polis ekspertizi ile).

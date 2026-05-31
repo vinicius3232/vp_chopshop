@@ -168,12 +168,31 @@ A **forensic** layer tied to the [`evidences`](https://forum.cfx.re/t/free-evide
 - **The police collect** with the `evidences` kit and the script **identifies the offender** by biometrics — the criminal may flee, but the scene gives them away.
 - **Optional & safe:** if the `evidences` resource isn't running, the feature **auto-disables** without affecting chopping (`Config.Evidence.Enable` also toggles it on/off).
 
+### 11. Tyre marks (`Config.TyreMarks`)
+
+A **getaway** lead — it complements forensics, but points at the **vehicle**, not the person.
+
+- After a crime, if the criminal **does a burnout / peels out** within a short window (~45 s), a **mark is left on the ground** tied to the **vehicle MODEL** used to flee.
+- The police (configured jobs) spot the mark and **examine** it → "Tyre marks from a **{model}** (**{class}**)". It **never reveals the plate** (a tyre can't tell the plate) — only the type of car.
+- **Counterplay:** driving away calmly (no burnout) leaves no mark.
+- The mark is **transient** (configurable TTL); the server resolves the model by netId (anti-cheat), and examination is gated by job + proximity.
+
+### 12. Part serial numbers (`Config.PartSerial`)
+
+An **economy + forensic** layer on the `car_parts` item — a parts-market RP for mechanics, criminals, and police.
+
+- Each `car_parts` carries a **serial + state** in its metadata. A chopped part starts **stolen** ("hot" serial + source model, **no plate**; one serial per car).
+- **At the bench** (gated by progression tier): **scratch the serial** (mid tier → visibly tampered, obvious) and **forge a new serial** (max tier → the part **looks legal**).
+- **Legal source:** export `exports.vp_chopshop:IssueLegalParts(src, amount)` (for mechanic resources to integrate) + an optional vendor. Legit serials are registered in the database.
+- **Police** (item `parts_scanner` + a target on the player "Inspect parts"): a normal scan shows **stolen / scratched / registered**; a **forged** part looks registered — only **forensics** (with `forensic_kit`) cross-checks the serial against the registry and flags the **forgery**.
+- The serial is a forensic layer: it **does not affect** `car_parts` consumption in recipes/fence sales.
+
 ---
 
 ## Installation
 
 1. **Database**
-   Execute `sql/vp_chopshop.sql` (creates all 7 tables: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`). The tables are also created/migrated automatically on boot (idempotent).
+   Execute `sql/vp_chopshop.sql` (creates all 8 tables: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`, `vp_chop_legit_serials`). The tables are also created/migrated automatically on boot (idempotent).
 
 2. **Items (ox_inventory)**
    Copy the blocks from `installation/ox_items_snippet.txt` to `ox_inventory/data/items.lua`.
@@ -190,6 +209,7 @@ A **forensic** layer tied to the [`evidences`](https://forum.cfx.re/t/free-evide
    | `fake_plate` | Forged fake plate (usable — applies the disguise) |
    | `fence_referral` | First introduction to the fence NPC |
    | `gloves` | Gloves — prevent leaving fingerprints (evidence system) |
+   | `parts_scanner` | Parts scanner (police) — inspects the `car_parts` serial |
 
 3. **Server**
    Add `ensure vp_chopshop` after `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
@@ -417,6 +437,28 @@ Optional integration with the `evidences` resource. Auto-disables if it isn't ru
 | `HeatScaling` / `HeatFactor` | More heat on the plate → higher trace chance (`chance × (1 + heat/100 × HeatFactor)`) |
 | `Actions` | Base chance (0..1) of **fingerprint** and **DNA** per action: `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
 
+### Tyre marks (`Config.TyreMarks`)
+| Key | Description |
+|-----|-------------|
+| `Enable` | Toggles tyre marks |
+| `ArmWindowSeconds` | Window after the crime during which a burnout leaves a mark (~45) |
+| `MarkTTLSeconds` | Mark lifetime before it disappears (~600) |
+| `MaxMarksPerCrime` | Max marks per crime window |
+| `ExamineDistance` | Distance for the police to examine |
+| `Burnout` | Detection thresholds: `{ Ratio, MinWheelSpeed, MaxRealSpeed, CooldownMs }` (calibrate in-game) |
+| `PoliceJobs` | Jobs that can examine |
+| `ClassNames` | Map of GTA classes (0..22) → display name |
+
+### Part serial numbers (`Config.PartSerial`)
+| Key | Description |
+|-----|-------------|
+| `Enable` | Toggles the serial system on `car_parts` |
+| `ScratchTier` / `ForgeTier` | Progression tier to scratch (mid) and to forge (max) |
+| `ForgeInputs` | Inputs consumed when forging (e.g. `{ plastic = 2, aluminum = 1 }`) |
+| `LegalVendor` | Legal parts vendor: `{ Enable, Coords, Model, Price, Amount }` |
+| `PoliceJobs` | Jobs that can inspect parts |
+| `ScannerItem` / `ForensicItem` | Items: police scanner (`parts_scanner`) and forensic kit (`forensic_kit`) |
+
 ### Discord (`Config.Discord`)
 | Key | Description |
 |-----|-------------|
@@ -475,6 +517,8 @@ The script **does not depend on any framework** for main logic — inventory is 
 | `server/fence.lua` | Rotating fence NPC, trust system, orders, tyre sales, jackstand server-side |
 | `server/heat.lua` | Heat system (VIN scratch, MDT components + parts) |
 | `server/plates.lua` | Plate theft, fake-plate forge/apply/remove, persistence + cache, witness-based dispatch, `GetRealPlateForProps` export |
+| `server/tyremarks.lua` | Tyre marks (resolves model, marks with TTL, police examination) |
+| `server/partserial.lua` | `car_parts` serial (scratch/forge, legal source, police inspection) |
 | `server/progression.lua` | XP and tiers (listens to event bus, persists in `vp_chop_progression`) |
 | `server/discord.lua` | Optional Discord webhook |
 | `server/main.lua` | Init, placement callbacks, world broadcast |
@@ -485,6 +529,8 @@ The script **does not depend on any framework** for main logic — inventory is 
 | `client/fence.lua` | Rotating blip, fence NPC targets, tyre carry, truck loading |
 | `client/alarm.lua` | Vehicle alarm: trigger, skillcheck, dispatch |
 | `client/plates.lua` | Plate theft/removal ox_target, skillcheck, witness scoring, `useFakePlateItem` export, visible-plate sync |
+| `client/tyremarks.lua` | Burnout detection (armed after a crime) + police ox_target |
+| `client/partserial.lua` | Serial options at the bench, inspection ox_target, legal vendor |
 | `client/progression.lua` | XP float text, tier-up notification |
 | `client/main.lua` | Jackstand system, Stages 1–4, world sync, discard |
 
@@ -502,10 +548,12 @@ The script **does not depend on any framework** for main logic — inventory is 
 
 ## Version
 
-`1.11.0` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
+`1.13.0` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.11.0:** audit (cleanup/security/performance), immediate reward + ambush,
+> **v1.7.0–1.13.0:** audit (cleanup/security/performance), immediate reward + ambush,
 > the **full license-plate system** (physical theft → forge → fake plate that fools the MDT,
 > persistent and with garage reversion; witness-based dispatch; QBox/QBCore/ESX support),
-> and the **forensic layer** (fingerprint/DNA traces per action, with gloves and heat scaling,
-> via optional integration with the `evidences` resource).
+> the **forensic layer** (fingerprint/DNA traces per action, with gloves and heat scaling,
+> via optional integration with the `evidences` resource),
+> the **tyre marks** (a getaway lead by vehicle model, no plate),
+> and **part serials** (`car_parts` stolen/scratched/forged/legal, with police forensics).
