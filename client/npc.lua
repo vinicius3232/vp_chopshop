@@ -1,4 +1,0 @@
--- [TOMBSTONE] client/npc.lua
--- Este arquivo foi esvaziado intencionalmente.
--- A lógica do NPC foreman (blip, ox_target, missão, loja) foi migrada para client/fence.lua (fence blip, target, tyre props).
--- Mantido no fxmanifest para não quebrar cargas em ordem — será removido na próxima limpeza de manifesto.

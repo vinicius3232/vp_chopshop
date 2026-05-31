@@ -1,4 +1,0 @@
--- [TOMBSTONE] server/tyres.lua
--- Este arquivo foi esvaziado intencionalmente.
--- A lógica server-side de pneus (missão, venda, jackstand, cooldowns) foi migrada para os eventos em server/main.lua.
--- Mantido no fxmanifest para não quebrar cargas em ordem — será removido na próxima limpeza de manifesto.

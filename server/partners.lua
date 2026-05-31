@@ -1,4 +1,0 @@
--- [REMOVED] Lift-scoped partner system.
--- O sistema de parceiros era vinculado ao elevador (lift). Com a remoção do
--- elevador o arquivo foi esvaziado. O conteúdo original estava em:
--- server/partners.lua (VPChopLiftPartnerSet, VPChopLiftPartnerClear, etc.)

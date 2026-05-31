@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.6.1'
+version '1.10.0'
 
 dependencies {
     'ox_lib',
@@ -25,13 +25,14 @@ shared_scripts {
 client_scripts {
     'bridge/client_notify.lua',
     'client/placement.lua',
-    'client/lifts.lua',
+    'client/carry.lua',  -- [L2 FIX] renomeado de lifts.lua (elevador removido; contém carry system)
     -- [L3 FIX] client/tyres.lua e client/npc.lua removidos — tombstones vazios; carga desnecessária eliminada.
     'client/bench.lua',
     'client/welder.lua',
     'client/fence.lua',
     'client/progression.lua',
     'client/alarm.lua',
+    'client/plates.lua',  -- [FASE1 placas] antes de main.lua (usa VPChopTriggerDispatch dele em runtime)
     'client/main.lua',
 }
 
@@ -50,13 +51,18 @@ server_scripts {
     'server/ambush.lua',
     'server/fence.lua',
     'server/progression.lua',
+    -- [FASE1 placas] depois de heat.lua e progression.lua (usa VPChopMDT, Validate*, Inv*,
+    -- VPChopEvt e o listener de PART_CHOPPED da progressão), antes de main.lua.
+    'server/plates.lua',
     'server/advanced_chop.lua',
     'server/main.lua',
 }
 
 data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'
 data_file 'DLC_ITYP_REQUEST' 'stream/lr_supermod_garage_int.ytyp'
-data_file 'DLC_ITYP_REQUEST' 'stream/wheel_spacer.ytyp'  -- tipo para bolt.ydr (minigame de parafusos)
+-- [H1 FIX] wheel_spacer.ytyp removido — arquivo não existe na pasta stream.
+-- bolt.ydr também ausente; minigame usa lib.skillCheck como fallback.
+-- Adicionar os arquivos em stream/ para habilitar o bolt minigame 3D.
 
 files {
     'installation/ox_items_snippet.txt',

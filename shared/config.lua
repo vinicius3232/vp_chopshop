@@ -27,8 +27,27 @@ Config.Items = {
 -- [L2 FIX] Removidas: Config.UseFuel, Config.FuelMax, Config.FuelPerPartMin/Max, Config.FuelRefillPerItem
 -- — todas eram exclusivas do sistema de combustível do elevador, que foi removido.
 
---- Desmanche: exige chaves do veículo (qbx_vehiclekeys / qb-vehiclekeys)
+--- Desmanche: exige chaves do veículo (ESX-only; configure `Config.VehicleKeys`)
 Config.RequireVehicleKeys = true
+
+--- Integração de chaves (ESX-first friendly).
+--- Se você usa ESX, configure aqui o resource/export do seu sistema de chaves.
+--- - Enable=false: usa apenas integrações best-effort (por exemplo `esx_vehiclelock`).
+--- - Resource: nome do resource que expõe o export.
+--- - Export: nome do export (função) que retorna boolean.
+--- - Mode:
+---    - 'entity' → chama export(vehicle)
+---    - 'plate'  → chama export(plate) com a placa trimada
+--- Observação: não existe “padrão ESX” universal para chaves; por isso é configurável.
+Config.VehicleKeys = {
+    Enable = false,
+    --- Valores sugeridos (exemplos): 'esx_vehiclelock', 'qs-vehiclekeys', etc.
+    Resource = 'esx_vehiclelock',
+    --- Nome do export no resource acima (ex.: 'hasKey', 'HasKeys', etc.)
+    Export = 'hasKey',
+    --- 'entity' | 'plate'
+    Mode = 'plate',
+}
 
 --- Segundos de espera após uma peça desmontada com sucesso (0 = desligado). Inspirado em cooldown de job chop.
 Config.ChopCooldownSeconds = 0
@@ -66,7 +85,7 @@ Config.NPC = {
         Color = 5,
         Scale = 0.75,
     },
-    --- Loja: precisa framework (ESX/QB/QBX) para dinheiro. `Enable = false` só mostra info / parceiro.
+    --- Loja: precisa ESX para dinheiro. `Enable = false` só mostra info / parceiro.
     Shop = {
         Enable = false,
         LiftPrice = 5000,
@@ -88,12 +107,15 @@ Config.NPC = {
 
 --- Emboscada ao **iniciar** desmanche (após skillcheck): missão no NPC e/ou aleatório. `Enable = false` desliga spawns.
 Config.Ambush = {
-    Enable = false,
+    -- [GAMEPLAY] Ligado: emboscada é a ÚNICA fonte de fence_referral (destrava o fence).
+    -- Com Enable=false, jogadores novos não conseguiam acessar o desmanche.
+    Enable = true,
     --- Se `true`, aplica `Chance` + `CooldownSeconds` em cada desmanche (além de missões NPC).
     --- Se `false`, só resolução de **Config.NPC.Mission** na próxima desmontagem (com `Mission.AmbushChance` pode não haver hostil).
-    RandomOnDismantle = false,
+    RandomOnDismantle = true,
     --- Probabilidade 0..1 por tentativa quando `RandomOnDismantle` está ativo (valor alto = mais emboscadas).
-    Chance = 0.07,
+    -- [GAMEPLAY] 0.05 = emboscada incomum (risco sem ser punitivo). Ajuste a gosto.
+    Chance = 0.05,
     --- Pesos relativos do tipo de hostil: `pistol`, `dog`, `bat`. Omite ou tudo zero = equiprovável (1/3 cada).
     KindWeights = { pistol = 40, dog = 25, bat = 35 },
     --- Mínimo de segundos entre emboscadas por jogador.
@@ -107,7 +129,9 @@ Config.Ambush = {
     HumanModels = { `g_m_y_mexgoon_03`, `g_m_y_famfor_01`, `g_m_y_ballasout_01` },
     DogModels = { `a_c_chop`, `a_c_rottweiler` },
     --- Chance (0.0-1.0) de dropar item fence_referral ao matar ped de emboscada.
-    ReferralDropChance = 0.15,
+    -- [GAMEPLAY] 0.5: como emboscada é incomum (Chance 0.05), o referral precisa ser
+    -- provável QUANDO ela acontece, senão o fence fica inacessível na prática.
+    ReferralDropChance = 0.5,
 }
 
 --- Recompensas por peça: [item] = { amount = n, chance = 0..1 }
@@ -190,6 +214,20 @@ Config.BenchRecipes = {
         duration = 10000,
         inputs = { metalscrap = 15, plastic = 10 },
         outputs = { copper = 8 },
+    },
+    -- Integração qs-mechanic-creator: peças furtadas + sucata → kit de reparo para oficinas
+    {
+        labelKey = 'bench_repairkit',
+        duration = 12000,
+        inputs = { car_parts = 5, metalscrap = 10 },
+        outputs = { repairkit = 1 },
+    },
+    -- Integração qs-mechanic-creator: borracha + plástico da carcaça → corda de recuperação
+    {
+        labelKey = 'bench_rope',
+        duration = 8000,
+        inputs = { rubber = 8, plastic = 5 },
+        outputs = { rope = 1 },
     },
 }
 
@@ -300,6 +338,124 @@ Config.Alarm = {
     },
 }
 
+-- [FASE1 placas] Roubo de placa física.
+-- Jogador usa chave de fenda num veículo ALVO (não o próprio), passa o skillcheck e
+-- arranca a placa → recebe item `stolen_plate` com metadata e o carro fica sem placa visível.
+Config.Plates = {
+    --- Liga/desliga a feature inteira (client e server).
+    Enable = true,
+
+    --- Distância máxima (m) jogador↔veículo validada no SERVIDOR (verdade).
+    MaxDistance = 3.0,
+
+    --- Cooldown anti-farm por jogador, em segundos (revalidado no servidor).
+    StealCooldownSeconds = 30,
+
+    --- Se true, só permite arrancar placa de veículos "owned" (reservado p/ Fase 2/3;
+    --- na Fase 1 mantemos false — sem integração de garagem/ownership ainda).
+    OwnedOnly = false,
+
+    --- Minigame antes de arrancar (mesmo formato de Config.Alarm.DisarmSkillCheck →
+    --- lib.skillCheck(difficulties, keys)). `false` desliga o minigame.
+    SkillCheck = {
+        difficulties = { 'easy', 'medium', 'medium' },
+        keys         = { 'e', 'e', 'e' },
+    },
+
+    --- Ferramenta exigida (verificada no client p/ UX e no servidor como verdade).
+    ToolItem = 'screwdriver',
+
+    --- [F4 testemunhas] (LEGADO) Dispatch booleano ao roubar placa. Mantido por compat,
+    --- mas SUBSTITUÍDO pelo sistema de testemunhas (Config.Plates.Witness abaixo): a chamada
+    --- de polícia agora é PROBABILÍSTICA por testemunhas próximas, não um booleano fixo.
+    --- Se Witness.Enable = false, caímos de volta neste booleano (comportamento antigo).
+    DispatchOnSteal = true,
+
+    -- ───────────────────────────────────────────────────────────────────────
+    -- [F4 testemunhas] Dispatch por testemunhas (imersão): roubar placa em lugar
+    -- vazio quase nunca chama a polícia; em lugar movimentado, a chance sobe.
+    -- A contagem de testemunhas é client-side (peds NPC + players próximos); o BÔNUS
+    -- por risco é reportado ao servidor com CAP server-side (low-stakes, ver server/plates.lua).
+    -- ───────────────────────────────────────────────────────────────────────
+    Witness = {
+        --- Liga o sistema de testemunhas. false → usa o DispatchOnSteal booleano legado.
+        Enable = true,
+        --- Raio (m) para contar testemunhas ao redor do veículo/jogador.
+        Radius = 45.0,
+        --- Peso de cada NPC vivo não-player na contagem de "score".
+        NpcWeight = 1.0,
+        --- Peso de cada PLAYER próximo (exceto o autor). Player pesa mais que NPC.
+        PlayerWeight = 3.0,
+        --- Chance PISO de dispatch com 0 testemunhas (0.0–1.0). Lugar deserto = quase nunca.
+        BaseChance = 0.02,
+        --- Chance TETO de dispatch (0.0–1.0), por mais testemunhas que haja.
+        MaxChance = 0.85,
+        --- Quanto cada ponto de score soma à chance (linear, até MaxChance).
+        ChancePerScore = 0.08,
+        --- Modificador noturno (multiplicador da chance final entre StartHour e EndHour).
+        --- < 1.0 reduz a chance de madrugada (menos gente acordada para denunciar).
+        NightModifier = 0.6,
+        NightStartHour = 1,   -- 01h
+        NightEndHour   = 5,   -- 05h
+        --- BÔNUS por risco: roubo BEM-SUCEDIDO com testemunhas perto rende extra.
+        --- XP bônus máximo (server aplica proporcional ao score, com CAP).
+        BonusXp = 10,
+        --- Cash bônus MÁXIMO (server aplica proporcional ao score, com CAP). 0 = sem cash.
+        BonusCashMax = 150,
+        --- Score mínimo (testemunhas) para QUALQUER bônus disparar (evita bônus em deserto).
+        BonusMinScore = 2.0,
+    },
+
+    -- ───────────────────────────────────────────────────────────────────────
+    -- [FASE2 placas] Forja + aplicação de placa falsa (disfarce de consulta MDT).
+    -- ───────────────────────────────────────────────────────────────────────
+
+    --- Tier mínimo de progressão para FORJAR placa falsa na bancada (gate via
+    --- VPChopGetProgression). Fase 2 = tier 2.
+    ForgeTier = 2,
+
+    --- Insumos consumidos na forja, ALÉM da `stolen_plate` específica (que doa a
+    --- placa-fonte). { item = quantidade }. Ajustável.
+    ForgeInputs = {
+        plastic  = 2,
+        aluminum = 1,
+    },
+
+    --- XP concedido ao forjar com sucesso (reason 'fake_plate' na XP_TABLE).
+    ForgeXp = 22,
+
+    --- Cooldown anti-farm da FORJA, por jogador, em segundos (revalidado no servidor).
+    ForgeCooldownSeconds = 15,
+
+    --- Cooldown anti-spam da APLICAÇÃO de placa falsa, por jogador, em segundos.
+    ApplyCooldownSeconds = 5,
+
+    --- Distância máxima (m) jogador↔veículo ao APLICAR placa falsa (verdade server-side).
+    ApplyMaxDistance = 4.0,
+
+    --- Raio (m) do broadcast filtrado de placa visível (aplicar/remover/restaurar).
+    --- Espelha o ~150u do roubo, mas cosmético → mantemos generoso.
+    VisibleSyncRadius = 200.0,
+
+    --- [F3 garagem] DEPRECADO / SEM EFEITO. Antes bloqueava aplicar placa falsa em carro
+    --- owned. Agora a placa falsa é permitida em QUALQUER carro: a proteção contra a garagem
+    --- salvar a falsa é feita pelo hook de garagem (export vp_chopshop:GetRealPlateForProps
+    --- chamado no parkVehicle do qbx_garages, que reverte para a placa REAL antes de salvar).
+    --- Mantido como `false` apenas por compatibilidade de config; o código não o consulta mais.
+    BlockOnOwned = false,
+
+    --- [F2 persist] Persistência total da placa falsa. true → o disfarce sobrevive a restart
+    --- e é re-aplicado quando o veículo (owned) reaparece (entityCreated em server/plates.lua).
+    --- O mapeamento só é removido pela POLÍCIA ou remoção manual — guardar o carro NÃO remove.
+    Persist = true,
+
+    --- Jobs policiais que podem REMOVER a placa falsa (furar o disfarce).
+    PoliceJobs = { 'police', 'bcso', 'sheriff' },
+
+    --- Cooldown anti-spam da REMOÇÃO policial, por jogador, em segundos.
+    RemoveCooldownSeconds = 3,
+}
+
 --- Ferramentas de desmanche niveladas por item.
 --- despatchChance: chance 0..1 de alertar a polícia (1.0 = sempre).
 --- speedMult: multiplicador do tempo da barra de progresso (0.5 = metade do tempo).
@@ -384,7 +540,9 @@ Config.TyreSelling = {
 --- Missões de roubo de pneus: um NPC dá o contrato, o jogador vai ao veículo alvo,
 --- rouba os 4 pneus com minigame de parafusos (lib.skillCheck) e entrega ao NPC vendedor.
 Config.TyreMission = {
-    Enable = true,
+    Enable = false, -- [L1 FIX] TyreMissionStart() é stub não implementado; desabilitado para evitar "Erro." no menu fence.
+
+
 
     --- Cooldown entre contratos (segundos por jogador).
     MissionCooldown = 300,
@@ -615,6 +773,7 @@ Config.Fence = {
         glass         = 90,
         car_parts     = 400,
         chopshop_tyre = 400,
+        stolen_plate  = 250,  -- [FASE1 placas] placa física vendável no fence
     },
 
     --- TrustXpPerLevel[N] = XP acumulado para ATINGIR o nível N.

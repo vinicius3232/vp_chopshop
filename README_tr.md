@@ -86,4 +86,4 @@ Belirlenen sayıda parçayı (`Config.Discard.MinPartsToDiscard`) söktükten so
    Kapsayıcı eklentilerden (oxlib, oxtarget vb.) sonraya gelecek şekilde `ensure vp_chopshop` yazısı bırakınız.
 
 4. **Framework**
-   İsteğe bağlık olmak üzere QBox, ESX vb. tabanlı serverlar zorunlu sayılmazlar. Bunlar ekli değilken kodlama `ServerPlayerIsReady = true` baz almaktadır.
+   **ESX gereklidir** (`es_extended`). Kodlama, oyuncu hazır kontrolü ve NPC para işlemleri için ESX kullanır.

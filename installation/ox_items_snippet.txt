@@ -58,3 +58,28 @@
     stack = true,
     close = true,
 },
+
+-- [FASE1 placas] Placa física arrancada de um veículo alvo com a chave de fenda.
+-- Insumo de venda no fence. Sem client.export — não é "usável", só carregada/vendida.
+-- Metadata definida em runtime pelo servidor: { plate, model, takenAt }.
+-- stack=false porque cada placa é única (metadata distinta por instância).
+['stolen_plate'] = {
+    label = 'Placa Roubada',
+    weight = 800,
+    stack = false,
+    close = true,
+},
+
+-- [FASE2 placas] Placa FALSA forjada na bancada a partir de uma `stolen_plate`.
+-- Item USÁVEL: ao usar, o export client aplica o disfarce no veículo do/à frente do jogador.
+-- consume = 1 → a placa some do inventário quando aplicada (server consome via metadata).
+-- Metadata definida em runtime na forja: { plate } (a placa exibida = a da placa roubada).
+-- stack = false porque cada placa carrega metadata distinta (placa de origem).
+['fake_plate'] = {
+    label = 'Placa Falsa',
+    weight = 600,
+    stack = false,
+    close = true,
+    consume = 1,
+    client = { export = 'vp_chopshop.useFakePlateItem' },
+},

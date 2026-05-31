@@ -98,5 +98,5 @@ Après avoir retiré le nombre de pièces paramétré dans `Config.Discard.MinPa
    add_ace group.admin command.chopremove allow
    ```
 
-5. **Framework (optionnel)**
-   QBCore, QBox et ESX ne sont pas obligatoires.
+5. **Framework**
+   Requiert **ESX** (`es_extended`).

@@ -1,5 +1,5 @@
 -- =============================================================
--- vp_chopshop — install.sql  (v1.6.0)
+-- vp_chopshop — install.sql  (v1.6.4)
 -- Executar UMA vez na base do servidor (fresh install).
 --   HeidiSQL / phpMyAdmin: importar este arquivo
 --   CLI: mysql -u USER -p DBNAME < vp_chopshop.sql
@@ -11,16 +11,18 @@
 --   vp_chop_fence_trust      — economia de confiança com o receptador
 --   vp_chop_fence_orders     — pedidos ativos do receptador (expirados purgados a cada 6h)
 --   vp_chop_progression      — XP e tier do jogador
+--   vp_chop_fake_plates      — [FASE2 placas] mapa placa FALSA → placa REAL (disfarce MDT)
 -- =============================================================
 
 -- ─── Bancadas de desmanche ───────────────────────────────────────────────────
--- position: JSON compacto de vector3 (~50 chars); TEXT é mais que suficiente.
+-- position: JSON compacto de vector3 (~40 chars); VARCHAR(100) mantém inline no
+--           B-tree (evita leitura off-page do InnoDB gerada por TEXT).
 -- heading:  armazenado como inteiro (math.floor); 0-359 cabe em SMALLINT UNSIGNED.
 -- placed_by: VARCHAR(60) cobre license2: (49 chars) com margem.
 
 CREATE TABLE IF NOT EXISTS `vp_chopshop_benches` (
   `id`        INT UNSIGNED      NOT NULL AUTO_INCREMENT,
-  `position`  TEXT              NOT NULL COMMENT 'JSON {x,y,z}',
+  `position`  VARCHAR(100)      NOT NULL COMMENT 'JSON {x,y,z}',
   `heading`   SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   `placed_by` VARCHAR(60)       DEFAULT NULL COMMENT 'license:... do jogador',
   PRIMARY KEY (`id`)
@@ -30,9 +32,9 @@ CREATE TABLE IF NOT EXISTS `vp_chopshop_benches` (
 
 CREATE TABLE IF NOT EXISTS `vp_chopshop_welders` (
   `id`        INT UNSIGNED      NOT NULL AUTO_INCREMENT,
-  `position`  TEXT              NOT NULL COMMENT 'JSON {x,y,z}',
+  `position`  VARCHAR(100)      NOT NULL COMMENT 'JSON {x,y,z}',
   `heading`   SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-  `placed_by` VARCHAR(60)       DEFAULT NULL,
+  `placed_by` VARCHAR(60)       DEFAULT NULL COMMENT 'license:... do jogador',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -90,3 +92,30 @@ CREATE TABLE IF NOT EXISTS `vp_chop_progression` (
                                                   ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`identifier`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── [FASE2 placas] Mapa placa FALSA → placa REAL ─────────────────────────────
+-- Disfarce de consulta MDT: o veículo passa a EXIBIR `fake_plate`; o crime (heat,
+-- VIN scratch, contagem de peças) continua seguindo a `real_plate` via resolver.
+-- fake_plate é PK → garante que duas falsas iguais não coexistem (colisão rejeitada).
+-- [F2 persist] real_plate é UNIQUE → cada placa REAL tem no MÁX 1 disfarce ativo
+--   (evita linhas stale ao reaplicar uma falsa nova sobre uma real já disfarçada).
+-- PERSISTÊNCIA TOTAL: a placa falsa dura até a POLÍCIA remover ou remoção manual.
+--   Sobrevive a restart e é re-aplicada quando o veículo (owned) reaparece (server/plates.lua).
+
+CREATE TABLE IF NOT EXISTS `vp_chop_fake_plates` (
+  `fake_plate` VARCHAR(12) NOT NULL COMMENT 'placa exibida (falsa), max 8 chars',
+  `real_plate` VARCHAR(12) NOT NULL COMMENT 'placa real do veiculo (alvo do crime)',
+  `applied_by` VARCHAR(60) DEFAULT NULL COMMENT 'identifier de quem aplicou',
+  `applied_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`fake_plate`),
+  UNIQUE KEY `uq_real_plate` (`real_plate`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- [F2 persist] MIGRAÇÃO de bases vindas da v1.9.0 (que usavam INDEX idx_fake_real não-único).
+-- Rode APENAS se você já tinha a tabela antes desta versão. O db.lua faz isto automaticamente
+-- no boot (idempotente); este bloco é o equivalente manual:
+-- DELETE t1 FROM `vp_chop_fake_plates` t1
+--   INNER JOIN `vp_chop_fake_plates` t2
+--   ON t1.real_plate = t2.real_plate AND t1.applied_at < t2.applied_at;
+-- ALTER TABLE `vp_chop_fake_plates` DROP INDEX `idx_fake_real`;
+-- ALTER TABLE `vp_chop_fake_plates` ADD UNIQUE KEY `uq_real_plate` (`real_plate`);

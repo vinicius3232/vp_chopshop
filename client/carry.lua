@@ -1,12 +1,12 @@
--- [REMOVED] Sistema de elevador (nacelle prop, zonas de detecção, sistema de parceiros,
--- animação de subida/descida, refuel, targets de desmanche por elevador).
--- O desmanche é feito exclusivamente com o macaco (jackstand) — ver client/main.lua.
+-- client/carry.lua
+-- Estado de peça carregada pelo jogador (prop na mão) e utilitário de drop.
+-- Usado por client/main.lua (jackstand tyre steal, chop part prop, dismantle menu).
 
---- Peça carregada pelo jogador: { partKey, propHandle }
+--- Peça carregada pelo jogador: { partKey, propHandle, isTyre? }
 VPChopCarryingPart = nil
 
 --- Solta e elimina o prop carregado.
---- Se era um pneu do macaco, remove também o target do ped e para a animação carry.
+--- Se era um pneu do macaco, limpa animação carry e esconde TextUI.
 function VPChopDropCarryPart()
     if not VPChopCarryingPart then return end
     local wasTyre = VPChopCarryingPart.isTyre

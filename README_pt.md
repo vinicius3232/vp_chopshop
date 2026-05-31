@@ -1,5 +1,11 @@
 # vp_chopshop
 
+Sistema de desmanche (chop shop) para FiveM: o jogador usa um **macaco hidráulico** (`chopshop_jackstand`) para levantar qualquer veículo e desmontar peças em 4 fases progressivas, rendendo materiais, venda de pneus a um fence NPC rotativo, emboscadas opcionais e um **sistema completo de placas** (roubo físico, placa falsa que engana o MDT, persistência e dispatch por testemunhas). Feito para stacks com **ox_lib**, **ox_target**, **ox_inventory** e **oxmysql** — frameworks **QBox / QBCore / ESX**.
+
+> 🇵🇹 Esta é a versão em português. Outras línguas: [EN](README_en.md) · [ES](README_es.md) · [FR](README_fr.md) · [TR](README_tr.md).
+
+---
+
 ## Security & Compatibility
 
 ### Audit — 2026-04-27 (v1.6.7)

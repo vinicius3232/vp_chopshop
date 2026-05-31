@@ -1,14 +1,6 @@
 -- ============================================================
 -- server/advanced_chop.lua
 -- Sistema de desmanche avançado por fases (requer jackstand levantado).
--- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
-local VPChopEvt = VPChopEvt or {
-    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
-    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
-    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
-    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
-}
---
 -- Fase 2 — Portas / Capô / Porta-malas  → requer serra    → 1× car_parts por peça
 -- Fase 3 — Motor                         → requer chave    → 5× car_parts (capô removido primeiro)
 -- Fase 4 — Carcaça                       → requer solda    → recicláveis
@@ -97,6 +89,13 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
     if advOnCooldown(src) then return { ok = false, err = 'processing' } end
 
+    -- Validar tipos de entrada (rejeita payloads malformados de lua executor)
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return { ok = false, err = 'net' } end
+    if type(partKey) ~= 'string' or #partKey > 32 or #partKey < 3 then
+        return { ok = false, err = 'part' }
+    end
+
     -- Gate: parte já desmontada?
     if isChopped(netId, partKey) then return { ok = false, err = 'done' } end
 
@@ -162,6 +161,9 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
     if advOnCooldown(src) then return { ok = false, err = 'processing' } end
 
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return { ok = false, err = 'net' } end
+
     -- Capô deve estar removido
     if not isChopped(netId, 'bonnet') then return { ok = false, err = 'hood_first' } end
 
@@ -212,6 +214,9 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
     end
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
     if advOnCooldown(src) then return { ok = false, err = 'processing' } end
+
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return { ok = false, err = 'net' } end
 
     -- Motor deve estar desmontado
     if not isChopped(netId, 'adv_engine') then return { ok = false, err = 'engine_first' } end

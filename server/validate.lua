@@ -1,3 +1,18 @@
+-- ─── Validação de coordenadas do mapa GTA V ──────────────────────────────────
+-- Rejeita coords fora dos limites do mapa para prevenir exploits de teleporte.
+local GTA_MAP_X_MIN, GTA_MAP_X_MAX = -4500.0,  4500.0
+local GTA_MAP_Y_MIN, GTA_MAP_Y_MAX = -4500.0,  8500.0
+local GTA_MAP_Z_MIN, GTA_MAP_Z_MAX = -300.0,   2500.0
+
+---@param coords vector3
+---@return boolean
+function ValidateMapCoords(coords)
+    if type(coords) ~= 'vector3' then return false end
+    return coords.x >= GTA_MAP_X_MIN and coords.x <= GTA_MAP_X_MAX
+       and coords.y >= GTA_MAP_Y_MIN and coords.y <= GTA_MAP_Y_MAX
+       and coords.z >= GTA_MAP_Z_MIN and coords.z <= GTA_MAP_Z_MAX
+end
+
 ---@param src number
 ---@param coords vector3
 ---@param maxDist number

@@ -3,14 +3,6 @@
 -- Expõe: VPChopHeatCalc(plate), VPChopHeatGetMultiplier(plate), VPChopHeatGetLabel(plate)
 -- Callback: 'vp_chopshop:vinScratch' — recebe netId, resolve placa server-side.
 
--- Local fallback: garante que VPChopEvt está disponível mesmo se o global não propagou.
-local VPChopEvt = VPChopEvt or {
-    PART_CHOPPED   = 'vp_chopshop:evt:partChopped',
-    CAR_DISCARDED  = 'vp_chopshop:evt:carDiscard',
-    FENCE_DELIVERY = 'vp_chopshop:evt:fenceDelivery',
-    HEAT_CHANGED   = 'vp_chopshop:evt:heatChanged',
-}
-
 --- Cache do nível anterior para emitir HEAT_CHANGED só em transições reais.
 local LastHeatLevel = {} ---@type table<string, string>
 
@@ -24,7 +16,10 @@ AddEventHandler(VPChopEvt.PART_CHOPPED, function(src, netId, partKey, phase)
     -- Resolver placa a partir do netId para manter rastreio server-side
     local veh = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
     if veh and veh ~= 0 and DoesEntityExist(veh) then
-        local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+        -- [FASE2 placas] O crime segue a placa REAL: se houver disfarce ativo,
+        -- VPChopMDT.GetRealPlate converte a visível (falsa) na real antes de contar.
+        local visible = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+        local plate = VPChopMDT.GetRealPlate(visible)
         if plate and plate ~= '' then
             PartCountByPlate[plate] = (PartCountByPlate[plate] or 0) + 1
         end
@@ -96,9 +91,11 @@ function VPChopHeatGetPriceMult(plate)
 end
 
 --- Emite HEAT_CHANGED se o nível mudou desde a última verificação.
+--- Aceita label pré-calculado para evitar dupla chamada a VPChopHeatCalc.
 ---@param plate string
-local function notifyHeatChange(plate)
-    local newLabel = VPChopHeatGetLabel(plate)
+---@param precomputedLabel? string  resultado já calculado de VPChopHeatGetLabel
+local function notifyHeatChange(plate, precomputedLabel)
+    local newLabel = precomputedLabel or VPChopHeatGetLabel(plate)
     if LastHeatLevel[plate] ~= newLabel then
         LastHeatLevel[plate] = newLabel
         TriggerEvent(VPChopEvt.HEAT_CHANGED, plate, newLabel)
@@ -113,10 +110,12 @@ end
 function VPChopHeatCheck(src, netId)
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return 'frio' end
-    local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
-    notifyHeatChange(plate)
+    -- [FASE2 placas] heat segue a placa REAL mesmo com placa falsa exibida.
+    local plate = VPChopMDT.GetRealPlate(GetVehicleNumberPlateText(veh):gsub('%s+', ''))
+    -- [H2 FIX] Calcular label uma vez (1× MySQL.scalar.await) e reutilizar em notifyHeatChange.
+    -- Antes: notifyHeatChange + VPChopHeatGetLabel = 2× VPChopHeatCalc = 2 SQL queries.
     local label = VPChopHeatGetLabel(plate)
-    -- Notificar cliente apenas se morno/quente/queimando
+    notifyHeatChange(plate, label)
     if label ~= 'frio' then
         TriggerClientEvent('vp_chopshop:client:heatWarning', src, label)
     end
@@ -126,7 +125,7 @@ end
 -- ─── Callback: VIN Scratch ────────────────────────────────────────────────────
 
 lib.callback.register('vp_chopshop:vinScratch', function(src, netId)
-    if not GetPlayerName(src) then return { ok=false, err='invalid' } end
+    if not IsValidSource(src) then return { ok=false, err='invalid' } end
 
     -- Rate limit: 3s cooldown entre scratches
     local now = GetGameTimer()
@@ -146,7 +145,8 @@ lib.callback.register('vp_chopshop:vinScratch', function(src, netId)
     end
 
     -- Placa resolvida no servidor (nunca confiamos no cliente)
-    local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+    -- [FASE2 placas] adultera-se o VIN da placa REAL — se houver disfarce, resolve antes.
+    local plate = VPChopMDT.GetRealPlate(GetVehicleNumberPlateText(veh):gsub('%s+', ''))
 
     -- Verificar tier ≥ 3
     local prog = VPChopGetProgression(src)
