@@ -1,6 +1,6 @@
 # vp_chopshop
 
-Sistema de **desguace** (chop shop) para FiveM: el jugador usa un **gato hidráulico** (`chopshop_jackstand`) para levantar cualquier vehículo y desmontar piezas en 4 fases progresivas, obteniendo recompensas en materiales, venta de neumáticos a un NPC comprador rotativo, emboscadas opcionales y un **sistema completo de placas** (robo físico, placa falsa que engaña al MDT, persistencia y despacho por testigos). Diseñado para usarse con **ox_lib**, **ox_target**, **ox_inventory** y **oxmysql** — frameworks **QBox / QBCore / ESX**.
+Sistema de **desguace** (chop shop) para FiveM: el jugador usa un **gato hidráulico** (`chopshop_jackstand`) para levantar cualquier vehículo y desmontar piezas en 4 fases progresivas, obteniendo recompensas en materiales, venta de neumáticos a un NPC comprador rotativo, emboscadas opcionales, un **sistema completo de placas** (robo físico, placa falsa que engaña al MDT, persistencia y despacho por testigos) y una **capa forense** (rastros de huella/ADN que la policía recoge). Diseñado para usarse con **ox_lib**, **ox_target**, **ox_inventory** y **oxmysql** — frameworks **QBox / QBCore / ESX**.
 
 ---
 
@@ -84,6 +84,17 @@ Sistema de identidad vehicular ligado al heat/MDT — la placa es lo que conecta
   - **Garaje seguro**: guardar un coche disfrazado **nunca graba la placa falsa** en la base de datos (se revierte a la real antes de guardar); el disfraz vuelve en el próximo spawn. Requiere el hook de garaje (ver Instalación).
 - **Quitar placa falsa** (policía): los jobs en `Config.Plates.PoliceJobs` tienen un ox_target para descubrir el disfraz y restaurar la placa real.
 
+### 7. Rastros forenses / Evidencias (`Config.Evidence`)
+
+Capa **forense** ligada al resource [`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) — hace que el crimen sea rastreable de verdad, por encima del heat/MDT.
+
+- **Toda acción criminal deja un rastro** vinculado al criminal: desguazar una pieza, VIN scratch, robo de placa, forjar y aplicar placa falsa.
+- **Tipos:** **huella** (fingerprint, mayor probabilidad) + **ADN** (sangre, menor probabilidad — "corte/sudor").
+- **Counterplay — guantes:** tener el ítem **`gloves`** en el inventario **bloquea las huellas**; pero el ADN aún puede caer (nunca estás 100% seguro). Decisión táctica: ir limpio y preparado, o rápido y arriesgado.
+- **Escala con el heat:** un coche más "caliente" (super, recién robado, muchas piezas removidas) deja **más rastros**. Trabajar con prisas = más riesgo.
+- **La policía recoge** con el kit de `evidences` y el script **identifica al autor** por la biometría — el criminal puede huir, pero la escena lo entrega.
+- **Opcional y seguro:** si el resource `evidences` no está corriendo, la función **se auto-desactiva** sin afectar el desguace (`Config.Evidence.Enable` también la activa/desactiva).
+
 ---
 
 ## Instalación
@@ -104,9 +115,12 @@ Sistema de identidad vehicular ligado al heat/MDT — la placa es lo que conecta
    | `chopshop_tyre` | Neumático robado |
    | `stolen_plate` | Placa física robada (metadata) |
    | `fake_plate` | Placa falsa forjada (usable — aplica el disfraz) |
+   | `gloves` | Guantes — evitan dejar huellas (sistema de evidencias) |
 
 3. **Servidor**
    Añade `ensure vp_chopshop` después de `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
+
+   **Evidencias (opcional):** para la capa forense (sección 7), instala el resource [`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) y asegúrate de hacerle `ensure`. vp_chopshop solo **consume** su API (`exports.evidences:syncEvidence`) y **se auto-desactiva** si el resource no está presente — sin dependencia rígida. Se activa/desactiva en `Config.Evidence.Enable`.
 
    **Hook de garaje (necesario para la placa falsa en coche propio):** para que el garaje nunca guarde la placa falsa, añade en el punto donde captura los `props`/placa antes de guardar, ANTES del save:
    ```lua
@@ -263,6 +277,19 @@ Webhook opcional para registro de eventos (logs):
 | `PoliceJobs` | Jobs que pueden quitar la placa falsa (ej.: `{ 'police','bcso','sheriff' }`) |
 | `Witness` | Despacho por testigos: `{ Radius, NpcWeight, PlayerWeight, BaseChance, MaxChance, NightModifier, BonusMinScore, BonusXp, BonusCashMax }` |
 
+### Rastros forenses / Evidencias (`Config.Evidence`)
+
+Integración opcional con el resource `evidences`. Se auto-desactiva si no está corriendo.
+
+| Clave | Descripción |
+|-------|-----------|
+| `Enable` | Activa/desactiva la capa forense |
+| `GlovesItem` | Ítem que bloquea las huellas (por defecto `gloves`) |
+| `GlovesBlocksDna` | Si es `true`, los guantes bloquean también el ADN (por defecto `false` — el ADN aún cae) |
+| `DnaType` | Tipo de ADN dejado: `'blood'` o `'saliva'` |
+| `HeatScaling` / `HeatFactor` | Más heat en la placa → más probabilidad de rastro (`chance × (1 + heat/100 × HeatFactor)`) |
+| `Actions` | Probabilidad base (0..1) de **huella** y **ADN** por acción: `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
+
 ---
 
 ## Compatibilidad con frameworks
@@ -291,6 +318,7 @@ Este script **no depende de framework** para la lógica principal — el inventa
 | `bridge/server_framework.lua` | Detección fw; `ServerPlayerIsReady`; `ServerChopPlayerKey`; dinero NPC |
 | `bridge/server_inventory.lua` | Wrappers de ox_inventory (count/add/remove) |
 | `bridge/client_notify.lua` | Notificaciones `lib.notify` |
+| `bridge/evidence.lua` | Enlace forense con el resource `evidences` (`VPChopLeaveEvidence`) |
 | `shared/config.lua` | Config general global |
 | `shared/locale.lua` | Textos UI (en, pt, es, fr, tr) |
 | `shared/chop_parts.lua` | Piezas desmontables y su orden |
@@ -321,8 +349,10 @@ Este script **no depende de framework** para la lógica principal — el inventa
 
 ## Versión
 
-`1.10.0` — definida en `fxmanifest.lua`. Historial completo en [`CHANGELOG.md`](CHANGELOG.md).
+`1.11.0` — definida en `fxmanifest.lua`. Historial completo en [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.10.0:** auditoría (limpieza/seguridad/rendimiento), recompensa inmediata + emboscada,
-> y el **sistema completo de placas** (robo físico → forja → placa falsa que engaña al MDT,
-> persistente y con reversión de garaje; despacho por testigos; soporte QBox/QBCore/ESX).
+> **v1.7.0–1.11.0:** auditoría (limpieza/seguridad/rendimiento), recompensa inmediata + emboscada,
+> el **sistema completo de placas** (robo físico → forja → placa falsa que engaña al MDT,
+> persistente y con reversión de garaje; despacho por testigos; soporte QBox/QBCore/ESX),
+> y la **capa forense** (rastros de huella/ADN por acción, con guantes y escala por heat,
+> mediante integración opcional con el resource `evidences`).

@@ -1,6 +1,6 @@
 # vp_chopshop
 
-FiveM için **Araba Parçalama** (Chop Shop) sistemi: Oyuncu, herhangi bir aracı kaldırmak ve parçaları 4 aşamalı olarak sökmek için **kriko** (`chopshop_jackstand`) kullanır. İşlem malzeme, dönüşümlü bir alıcı NPC'ye (fence) lastik satışı, isteğe bağlı baskınlar ve **tam bir plaka sistemi** (fiziksel plaka çalma, MDT'yi kandıran sahte plaka, kalıcılık ve tanık bazlı ihbar) sunar. **ox_lib**, **ox_target**, **ox_inventory** ve **oxmysql** ile en iyi uyumluluk için tasarlanmıştır — **QBox / QBCore / ESX** framework'leri.
+FiveM için **Araba Parçalama** (Chop Shop) sistemi: Oyuncu, herhangi bir aracı kaldırmak ve parçaları 4 aşamalı olarak sökmek için **kriko** (`chopshop_jackstand`) kullanır. İşlem malzeme, dönüşümlü bir alıcı NPC'ye (fence) lastik satışı, isteğe bağlı baskınlar, **tam bir plaka sistemi** (fiziksel plaka çalma, MDT'yi kandıran sahte plaka, kalıcılık ve tanık bazlı ihbar) ve bir **adli katman** (polisin topladığı parmak izi/DNA izleri) sunar. **ox_lib**, **ox_target**, **ox_inventory** ve **oxmysql** ile en iyi uyumluluk için tasarlanmıştır — **QBox / QBCore / ESX** framework'leri.
 
 ---
 
@@ -84,6 +84,17 @@ Aracı suça bağlayan şey plakadır; bu sistem heat/MDT mekaniğine doğrudan 
   - **Garaj güvenli**: Kılıklı bir aracı garaja koymak **sahte plakayı asla veritabanına kaydetmez** (kaydetmeden önce gerçek plakaya döndürülür); kılık bir sonraki spawn'da geri gelir. Garaj hook'u gerektirir (bkz. Kurulum).
 - **Sahte plaka kaldırma** (polis): `Config.Plates.PoliceJobs` içindeki meslekler, kılığı bozup gerçek plakayı geri getirmek için bir ox_target'a sahiptir.
 
+### 7. Adli izler / Kanıtlar (`Config.Evidence`)
+
+[`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) kaynağına bağlı bir **adli katman** — heat/MDT'nin üstünde çalışarak suçu gerçekten izlenebilir kılar.
+
+- **Her suç eylemi suçluya bağlı bir iz bırakır**: parça sökme, VIN kazıma, plaka çalma, sahte plaka üretme ve uygulama.
+- **Türler:** **parmak izi** (dijital, yüksek şans) + **DNA** (kan, düşük şans — "kesik/ter").
+- **Karşı oyun (counterplay) — eldiven:** envanterde **`gloves`** (eldiven) eşyasının bulunması **parmak izlerini engeller**; ama DNA yine de düşebilir (asla %100 güvende değilsiniz). Taktiksel karar: temiz ve hazırlıklı mı gitmek, yoksa hızlı ve riskli mi.
+- **Heat ile ölçeklenir:** daha "sıcak" bir araç (super, yeni çalınmış, çok parçası sökülmüş) **daha çok iz** bırakır. Aceleyle çalışmak = daha çok risk.
+- **Polis toplar:** `evidences` kiti ile izleri toplar ve script biyometriyle **faili tespit eder** — suçlu kaçabilir, ama olay yeri onu ele verir.
+- **Opsiyonel ve güvenli:** `evidences` kaynağı çalışmıyorsa özellik **otomatik devre dışı** kalır ve sökmeyi etkilemez (`Config.Evidence.Enable` ile de açılıp kapatılır).
+
 ---
 
 ## Kurulum (Installation)
@@ -104,9 +115,12 @@ Aracı suça bağlayan şey plakadır; bu sistem heat/MDT mekaniğine doğrudan 
    | `chopshop_tyre` | Çalınan lastik |
    | `stolen_plate` | Çalınan fiziksel plaka (metadata) |
    | `fake_plate` | Üretilmiş sahte plaka (kullanılabilir — kılığı uygular) |
+   | `gloves` | Eldiven — parmak izi bırakmayı engeller (kanıt sistemi) |
 
 3. **Sunucu**
    `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`'den sonra gelecek şekilde `ensure vp_chopshop` ekleyin.
+
+   **Kanıtlar (opsiyonel):** adli katman (bölüm 7) için [`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) kaynağını kurun ve onu `ensure` edin. vp_chopshop yalnızca API'sini **kullanır** (`exports.evidences:syncEvidence`) ve kaynak mevcut değilse **otomatik devre dışı** kalır — katı bir bağımlılık yoktur. `Config.Evidence.Enable` ile açıp kapatın.
 
    **Garaj hook'u (kendi aracında sahte plaka için gerekli):** Garajın sahte plakayı asla kaydetmemesi için, garajın `props`/plakayı kaydetmeden önce yakaladığı yere, save'den ÖNCE şunu ekleyin:
    ```lua
@@ -146,6 +160,19 @@ Aracı suça bağlayan şey plakadır; bu sistem heat/MDT mekaniğine doğrudan 
 | `PoliceJobs` | Sahte plakayı kaldırabilen meslekler (örn. `{ 'police','bcso','sheriff' }`) |
 | `Witness` | Tanık bazlı ihbar: `{ Radius, NpcWeight, PlayerWeight, BaseChance, MaxChance, NightModifier, BonusMinScore, BonusXp, BonusCashMax }` |
 
+### Adli izler / Kanıtlar (`Config.Evidence`)
+
+`evidences` kaynağı ile opsiyonel entegrasyon. Kaynak çalışmıyorsa otomatik devre dışı kalır.
+
+| Anahtar | Açıklama |
+|---------|----------|
+| `Enable` | Adli katmanı açar/kapatır |
+| `GlovesItem` | Parmak izlerini engelleyen eşya (varsayılan `gloves`) |
+| `GlovesBlocksDna` | `true` ise eldiven DNA'yı da engeller (varsayılan `false` — DNA yine de düşer) |
+| `DnaType` | Bırakılan DNA türü: `'blood'` (kan) veya `'saliva'` (tükürük) |
+| `HeatScaling` / `HeatFactor` | Plakada daha çok heat → daha çok iz şansı (`chance × (1 + heat/100 × HeatFactor)`) |
+| `Actions` | Eylem başına **parmak izi** ve **DNA** temel şansı (0..1): `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
+
 > Diğer yapılandırma bölümleri (desmanche, kriko, fence, ilerleme, alarm, baskınlar, lastikler, Discord vb.) için güncel ve eksiksiz referans olarak Portekizce README'ye (`README_pt.md`) bakın.
 
 ---
@@ -171,8 +198,10 @@ Betik, ana mantık için **framework'e bağımlı değildir** — envanter yaln�
 
 ## Sürüm
 
-`1.10.0` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
+`1.11.0` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
 
-> **v1.7.0–1.10.0:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
-> ve **tam plaka sistemi** (fiziksel çalma → üretim → MDT'yi kandıran sahte plaka,
-> kalıcı ve garaj geri dönüşümlü; tanık bazlı ihbar; QBox/QBCore/ESX desteği).
+> **v1.7.0–1.11.0:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
+> **tam plaka sistemi** (fiziksel çalma → üretim → MDT'yi kandıran sahte plaka,
+> kalıcı ve garaj geri dönüşümlü; tanık bazlı ihbar; QBox/QBCore/ESX desteği),
+> ve **adli katman** (eylem başına parmak izi/DNA izleri, eldiven ve heat ölçeklemesi ile,
+> opsiyonel `evidences` kaynağı entegrasyonu üzerinden).

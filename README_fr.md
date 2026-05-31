@@ -1,6 +1,6 @@
 # vp_chopshop
 
-Système de **casse automobile** (chop shop) pour FiveM : le joueur utilise un **cric mécanique** (`chopshop_jackstand`) pour soulever n'importe quel véhicule et démonter les pièces en 4 phases progressives, en obtenant des récompenses matérielles, la vente de pneus à un PNJ receleur rotatif, des embuscades optionnelles et un **système complet de plaques** (vol physique, fausse plaque qui trompe le MDT, persistance et dispatch selon les témoins). Conçu pour être utilisé avec **ox_lib**, **ox_target**, **ox_inventory** et **oxmysql** — frameworks **QBox / QBCore / ESX**.
+Système de **casse automobile** (chop shop) pour FiveM : le joueur utilise un **cric mécanique** (`chopshop_jackstand`) pour soulever n'importe quel véhicule et démonter les pièces en 4 phases progressives, en obtenant des récompenses matérielles, la vente de pneus à un PNJ receleur rotatif, des embuscades optionnelles, un **système complet de plaques** (vol physique, fausse plaque qui trompe le MDT, persistance et dispatch selon les témoins) et une **couche forensique** (indices d'empreinte/ADN que la police collecte). Conçu pour être utilisé avec **ox_lib**, **ox_target**, **ox_inventory** et **oxmysql** — frameworks **QBox / QBCore / ESX**.
 
 > 🇫🇷 Ceci est la version française. Autres langues : [EN](README_en.md) · [PT](README_pt.md) · [ES](README_es.md) · [TR](README_tr.md).
 
@@ -86,6 +86,17 @@ Système d'identité du véhicule relié au heat/MDT — c'est la plaque qui rel
   - **Sûr en garage** : ranger un véhicule déguisé **n'enregistre jamais la fausse plaque** en base (rétablie sur la vraie avant la sauvegarde) ; le déguisement revient au spawn suivant. Nécessite le hook de garage (voir Installation).
 - **Retirer une fausse plaque** (police) : les métiers définis dans `Config.Plates.PoliceJobs` disposent d'un ox_target pour percer le déguisement et restaurer la vraie plaque.
 
+### 7. Indices forensiques / Preuves (`Config.Evidence`)
+
+Couche **forensique** reliée à la ressource [`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) — elle rend le crime réellement traçable, par-dessus le heat/MDT.
+
+- **Chaque action criminelle laisse un indice** lié au criminel : démontage de pièce, grattage de VIN, vol de plaque, forge et application d'une fausse plaque.
+- **Types :** **empreinte** (fingerprint, chance plus élevée) + **ADN** (sang, chance plus faible — « coupure/sueur »).
+- **Counterplay — gants :** avoir l'objet **`gloves`** dans l'inventaire **bloque les empreintes** ; mais l'ADN peut quand même tomber (vous n'êtes jamais sûr à 100 %). Choix tactique : partir propre et préparé, ou rapide et risqué.
+- **Échelle avec le heat :** une voiture plus « chaude » (super, fraîchement volée, beaucoup de pièces retirées) laisse **plus d'indices**. Travailler dans la précipitation = plus de risque.
+- **La police collecte** avec le kit `evidences` et le script **identifie l'auteur** par biométrie — le bandit peut fuir, mais la scène le livre.
+- **Optionnel et sûr :** si la ressource `evidences` ne tourne pas, la fonction **se désactive automatiquement** sans affecter le démontage (`Config.Evidence.Enable` active/désactive aussi).
+
 ---
 
 ## Installation
@@ -106,9 +117,12 @@ Système d'identité du véhicule relié au heat/MDT — c'est la plaque qui rel
    | `chopshop_tyre` | Pneu volé |
    | `stolen_plate` | Plaque physique volée (metadata) |
    | `fake_plate` | Fausse plaque forgée (utilisable — applique le déguisement) |
+   | `gloves` | Gants — empêchent de laisser des empreintes (système d'indices) |
 
 3. **Serveur**
    Ajoutez `ensure vp_chopshop` à la suite de `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
+
+   **Preuves (optionnel) :** pour la couche forensique (section 7), installez la ressource [`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) et assurez son `ensure`. vp_chopshop se contente de **consommer** son API (`exports.evidences:syncEvidence`) et **se désactive automatiquement** si la ressource est absente — aucune dépendance dure. Activation/désactivation via `Config.Evidence.Enable`.
 
    **Hook de garage (nécessaire pour la fausse plaque sur un véhicule personnel) :** pour que la garage n'enregistre jamais la fausse plaque, ajoutez à l'endroit où elle capture les `props`/la plaque, AVANT la sauvegarde :
    ```lua
@@ -148,6 +162,19 @@ Système d'identité du véhicule relié au heat/MDT — c'est la plaque qui rel
 | `PoliceJobs` | Métiers pouvant retirer la fausse plaque (ex. : `{ 'police','bcso','sheriff' }`) |
 | `Witness` | Dispatch selon les témoins : `{ Radius, NpcWeight, PlayerWeight, BaseChance, MaxChance, NightModifier, BonusMinScore, BonusXp, BonusCashMax }` |
 
+### Indices forensiques / Preuves (`Config.Evidence`)
+
+Intégration optionnelle avec la ressource `evidences`. Se désactive automatiquement si elle ne tourne pas.
+
+| Clé | Description |
+|-------|-----------|
+| `Enable` | Active/désactive la couche forensique |
+| `GlovesItem` | Objet qui bloque les empreintes (par défaut `gloves`) |
+| `GlovesBlocksDna` | Si `true`, les gants bloquent aussi l'ADN (par défaut `false` — l'ADN tombe quand même) |
+| `DnaType` | Type d'ADN laissé : `'blood'` ou `'saliva'` |
+| `HeatScaling` / `HeatFactor` | Plus de heat sur la plaque → plus de chance d'indice (`chance × (1 + heat/100 × HeatFactor)`) |
+| `Actions` | Chance de base (0..1) d'**empreinte** et d'**ADN** par action : `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
+
 > Le détail complet des autres clés de configuration (désmantèlement, alarme, receleur, progression, etc.) se trouve dans les versions [PT](README_pt.md) / [EN](README_en.md).
 
 ---
@@ -167,8 +194,10 @@ Le script **ne dépend d'aucun framework** pour la logique principale — l'inve
 
 ## Version
 
-`1.10.0` — définie dans `fxmanifest.lua`. Historique complet dans [`CHANGELOG.md`](CHANGELOG.md).
+`1.11.0` — définie dans `fxmanifest.lua`. Historique complet dans [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.10.0 :** audit (nettoyage/sécurité/performance), récompense immédiate + embuscade,
-> et le **système complet de plaques** (vol physique → forge → fausse plaque qui trompe le MDT,
-> persistante et avec réversion en garage ; dispatch selon les témoins ; support QBox/QBCore/ESX).
+> **v1.7.0–1.11.0 :** audit (nettoyage/sécurité/performance), récompense immédiate + embuscade,
+> le **système complet de plaques** (vol physique → forge → fausse plaque qui trompe le MDT,
+> persistante et avec réversion en garage ; dispatch selon les témoins ; support QBox/QBCore/ESX),
+> et la **couche forensique** (indices d'empreinte/ADN par action, avec gants et échelle selon le heat,
+> via intégration optionnelle avec la ressource `evidences`).

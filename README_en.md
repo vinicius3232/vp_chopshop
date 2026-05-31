@@ -157,6 +157,17 @@ A vehicle-identity system tied to heat/MDT — the plate is what links the car t
   - **Garage-safe**: storing a disguised car **never saves the fake plate** to the database (it is reverted to the real one before saving); the disguise returns on the next spawn. Requires the garage hook (see Installation).
 - **Remove the fake plate** (police): jobs in `Config.Plates.PoliceJobs` get an ox_target to break the disguise and restore the real plate.
 
+### 10. Forensic traces / Evidence (`Config.Evidence`)
+
+A **forensic** layer tied to the [`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) resource — it makes crime genuinely traceable, on top of heat/MDT.
+
+- **Every crime action leaves a trace** linked to the criminal: dismantling a part, VIN scratch, plate theft, forging and applying a fake plate.
+- **Types:** **fingerprint** (higher chance) + **DNA** (blood, lower chance — "cut/sweat").
+- **Counterplay — gloves:** carrying the **`gloves`** item in your inventory **blocks fingerprints**; but DNA can still drop (you are never 100% safe). A tactical choice: go in clean and prepared, or fast and risky.
+- **Scales with heat:** a "hotter" car (super, freshly stolen, many parts removed) leaves **more traces**. Working in a hurry = more risk.
+- **The police collect** with the `evidences` kit and the script **identifies the offender** by biometrics — the criminal may flee, but the scene gives them away.
+- **Optional & safe:** if the `evidences` resource isn't running, the feature **auto-disables** without affecting chopping (`Config.Evidence.Enable` also toggles it on/off).
+
 ---
 
 ## Installation
@@ -178,9 +189,12 @@ A vehicle-identity system tied to heat/MDT — the plate is what links the car t
    | `stolen_plate` | Stolen physical plate (metadata) |
    | `fake_plate` | Forged fake plate (usable — applies the disguise) |
    | `fence_referral` | First introduction to the fence NPC |
+   | `gloves` | Gloves — prevent leaving fingerprints (evidence system) |
 
 3. **Server**
    Add `ensure vp_chopshop` after `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
+
+   **Evidence (optional):** for the forensic layer (section 10), install the [`evidences`](https://forum.cfx.re/t/free-evidence-script/5357633) resource and `ensure` it. vp_chopshop only **consumes** its API (`exports.evidences:syncEvidence`) and **auto-disables** if the resource is absent — no hard dependency. Toggle it via `Config.Evidence.Enable`.
 
    **Garage hook (required for fake plates on owned cars):** so the garage never saves the fake plate, add this at the point where it captures the `props`/plate before saving, BEFORE the save:
    ```lua
@@ -390,6 +404,19 @@ Optional static NPC with shop and mission targets (disabled by default).
 | `PoliceJobs` | Jobs that can remove the fake plate (e.g. `{ 'police','bcso','sheriff' }`) |
 | `Witness` | Witness-based dispatch: `{ Radius, NpcWeight, PlayerWeight, BaseChance, MaxChance, NightModifier, BonusMinScore, BonusXp, BonusCashMax }` |
 
+### Forensic traces / Evidence (`Config.Evidence`)
+
+Optional integration with the `evidences` resource. Auto-disables if it isn't running.
+
+| Key | Description |
+|-----|-------------|
+| `Enable` | Toggles the forensic layer |
+| `GlovesItem` | Item that blocks fingerprints (default `gloves`) |
+| `GlovesBlocksDna` | If `true`, gloves also block DNA (default `false` — DNA still drops) |
+| `DnaType` | Type of DNA left: `'blood'` or `'saliva'` |
+| `HeatScaling` / `HeatFactor` | More heat on the plate → higher trace chance (`chance × (1 + heat/100 × HeatFactor)`) |
+| `Actions` | Base chance (0..1) of **fingerprint** and **DNA** per action: `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` |
+
 ### Discord (`Config.Discord`)
 | Key | Description |
 |-----|-------------|
@@ -434,6 +461,7 @@ The script **does not depend on any framework** for main logic — inventory is 
 | `bridge/server_inventory.lua` | ox_inventory wrappers (count/add/remove) |
 | `bridge/client_notify.lua` | `lib.notify` notifications |
 | `bridge/mdt.lua` | `VPChopEvt` global event bus; pluggable MDT bridge |
+| `bridge/evidence.lua` | Forensic link to the `evidences` resource (`VPChopLeaveEvidence`) |
 | `shared/config.lua` | Shared global config |
 | `shared/locale.lua` | UI texts (en, pt, es, fr, tr) |
 | `shared/chop_parts.lua` | Dismantlable parts and menu order |
@@ -474,8 +502,10 @@ The script **does not depend on any framework** for main logic — inventory is 
 
 ## Version
 
-`1.10.0` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
+`1.11.0` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.10.0:** audit (cleanup/security/performance), immediate reward + ambush,
-> and the **full license-plate system** (physical theft → forge → fake plate that fools the MDT,
-> persistent and with garage reversion; witness-based dispatch; QBox/QBCore/ESX support).
+> **v1.7.0–1.11.0:** audit (cleanup/security/performance), immediate reward + ambush,
+> the **full license-plate system** (physical theft → forge → fake plate that fools the MDT,
+> persistent and with garage reversion; witness-based dispatch; QBox/QBCore/ESX support),
+> and the **forensic layer** (fingerprint/DNA traces per action, with gloves and heat scaling,
+> via optional integration with the `evidences` resource).
