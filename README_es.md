@@ -1,6 +1,6 @@
 # vp_chopshop
 
-Sistema de **desguace** (chop shop) para FiveM: el jugador usa un **gato hidráulico** (`chopshop_jackstand`) para levantar cualquier vehículo y desmontar piezas en 4 fases progresivas, obteniendo recompensas en materiales, venta de neumáticos a un NPC y emboscadas opcionales. Diseñado para usarse con **ox_lib**, **ox_target**, **ox_inventory** y **oxmysql**.
+Sistema de **desguace** (chop shop) para FiveM: el jugador usa un **gato hidráulico** (`chopshop_jackstand`) para levantar cualquier vehículo y desmontar piezas en 4 fases progresivas, obteniendo recompensas en materiales, venta de neumáticos a un NPC comprador rotativo, emboscadas opcionales y un **sistema completo de placas** (robo físico, placa falsa que engaña al MDT, persistencia y despacho por testigos). Diseñado para usarse con **ox_lib**, **ox_target**, **ox_inventory** y **oxmysql** — frameworks **QBox / QBCore / ESX**.
 
 ---
 
@@ -71,12 +71,25 @@ Después de quitar `Config.Discard.MinPartsToDiscard` piezas, aparece el objetiv
 - **Venta directa**: quita neumáticos con el gato → cárgalos en una camioneta (pickup) → llévalos al NPC comprador → recibe dinero en efectivo (`Config.TyreSelling.PricePerTyre`).
 - **Misiones de contrato** (`Config.TyreMission`): el NPC entrega un contrato → el vehículo objetivo spawnea → roba 4 neumáticos con el minijuego de tornillos → entrégalos al comprador → recibe un bono.
 
+### 6. Robo de placas y placas falsas (`Config.Plates`)
+
+Sistema de identidad vehicular ligado al heat/MDT — la placa es lo que conecta el coche con el crimen.
+
+- **Robar la placa física**: con el destornillador (`screwdriver`), apunta a un vehículo objetivo (ox_target "Arrancar placa") → skillcheck → recibes el ítem `stolen_plate` (la placa original queda en la metadata). El coche queda sin placa visible. Vendible en el fence o como insumo para forjar.
+  - **Despacho por testigos**: robar no avisa a la policía automáticamente. La probabilidad es proporcional a los **NPCs y jugadores cercanos** (con modificador nocturno) — una zona desierta de madrugada casi nunca avisa, una zona concurrida avisa más. Robar **con testigos cerca** otorga un **bono de riesgo** (XP/dinero, limitado en el servidor).
+- **Forjar placa falsa**: en la mesa de trabajo (confianza **tier 2**), consume una `stolen_plate` + insumos (`plastic` + `aluminum`) → genera el ítem `fake_plate` (hereda la placa de la robada).
+- **Aplicar placa falsa** (usar el ítem `fake_plate`): cambia la placa visible del vehículo y **engaña la consulta de placa del MDT** — quien consulta ve la placa falsa "limpia", ocultando el historial.
+  - **El heat sigue la placa REAL**: el disfraz engaña a la policía, pero el crimen sigue acumulándose en el coche verdadero. La placa falsa **no lava heat** (eso es papel del VIN scratch).
+  - **Persistencia total**: el disfraz sobrevive a un reinicio y se re-aplica cuando el coche reaparece.
+  - **Garaje seguro**: guardar un coche disfrazado **nunca graba la placa falsa** en la base de datos (se revierte a la real antes de guardar); el disfraz vuelve en el próximo spawn. Requiere el hook de garaje (ver Instalación).
+- **Quitar placa falsa** (policía): los jobs en `Config.Plates.PoliceJobs` tienen un ox_target para descubrir el disfraz y restaurar la placa real.
+
 ---
 
 ## Instalación
 
 1. **Base de datos**
-   Ejecuta `sql/vp_chopshop.sql` (crea las 6 tablas: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`).
+   Ejecuta `sql/vp_chopshop.sql` (crea las 7 tablas: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`). Las tablas también se crean/migran automáticamente al iniciar (idempotente).
 
 2. **Ítems (ox_inventory)**
    Copia los bloques de `installation/ox_items_snippet.txt` en `ox_inventory/data/items.lua`. Ítems necesarios:
@@ -87,11 +100,22 @@ Después de quitar `Config.Discard.MinPartsToDiscard` piezas, aparece el objetiv
    | `chopshop_bench` | Mesa de trabajo para crafteo |
    | `chopshop_welder` | Soldadora (Fase 4) |
    | `metal_saw` | Sierra (Fase 2) |
-   | `screwdriver` | Destornillador (Fase 3) |
+   | `screwdriver` | Destornillador (Fase 3 + robo de placa) |
    | `chopshop_tyre` | Neumático robado |
+   | `stolen_plate` | Placa física robada (metadata) |
+   | `fake_plate` | Placa falsa forjada (usable — aplica el disfraz) |
 
 3. **Servidor**
    Añade `ensure vp_chopshop` después de `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
+
+   **Hook de garaje (necesario para la placa falsa en coche propio):** para que el garaje nunca guarde la placa falsa, añade en el punto donde captura los `props`/placa antes de guardar, ANTES del save:
+   ```lua
+   if GetResourceState('vp_chopshop') == 'started' then
+       props = exports.vp_chopshop:GetRealPlateForProps(vehicle, props)
+   end
+   ```
+   - **QBox (qbx_garages):** en `server/main.lua`, en el callback `qbx_garages:server:parkVehicle`, antes del `SaveVehicle` (bloque etiquetado `[vp_chopshop F3 garagem]`). ⚠️ Reaplícalo si actualizas qbx_garages.
+   - **QBCore (qb-garages):** ver snippet en `installation/qb-garages-hook.md`.
 
 4. **Permisos (ACE)**
    Para los comandos de administrador (`/choplifts`, `/chopremove`), añade:
@@ -101,7 +125,7 @@ Después de quitar `Config.Discard.MinPartsToDiscard` piezas, aparece el objetiv
    ```
 
 5. **Framework**
-   Requiere **ESX** (`es_extended`). El bridge en `bridge/server_framework.lua` usa ESX para `ServerPlayerIsReady` y para transacciones de dinero en la tienda del NPC.
+   El bridge en `bridge/server_framework.lua` detecta automáticamente **QBox (`qbx_core`)**, **QBCore (`qb-core`)** o **ESX (`es_extended`)** por orden de prioridad. Se usa para `ServerPlayerIsReady`, job (gate policial de las placas), dinero y citizenid. *(El servidor LIVE es QBox; QBCore está soportado para portabilidad pero no probado en este entorno.)*
 
 ---
 
@@ -124,8 +148,8 @@ Después de quitar `Config.Discard.MinPartsToDiscard` piezas, aparece el objetiv
 | `Config.ChopCooldownSeconds` | Tiempo de espera tras desmontar cada pieza (`0` = apagado) |
 | `Config.ChopSkillCheck` | Skillcheck opcional antes de la barra de progreso |
 | `Config.ChopProgressMs` | Duración de la barra de desguace (ms) |
-| `Config.Tools` | Configura herramientas individuales, su velocidad, durabilidad y probabilidad de avisar a la policía |
-| `Config.AlarmOnChop` | Activa automáticamente la alarma del vehículo al desmontar sin llaves |
+| `Config.Tools` | Configura herramientas individuales, su velocidad, durabilidad y probabilidad de avisar a la policía (`dispatchChance`) |
+| `Config.Alarm` | Sistema de alarma vehicular — ver tabla abajo |
 | `Config.Dispatch` | Despacha informes al departamento de policía vía ps-dispatch, cd-dispatch, o qs-dispatch |
 | `Config.CarPartRewards` | Materiales por pieza en la Fase 1 |
 | `Config.PartProps` | Props visuales devueltos al quitar una pieza |
@@ -223,20 +247,38 @@ Webhook opcional para registro de eventos (logs):
 | `BonusReward` | Bono de efectivo al completar un contrato |
 | `MinigameRounds` | Tornillos por neumático (skillcheck) |
 
+### Robo de placas y placas falsas (`Config.Plates`)
+
+| Clave | Descripción |
+|-------|-----------|
+| `Enable` | Activa/desactiva toda la feature de placas |
+| `MaxDistance` / `ApplyMaxDistance` | Distancia máx. (server-side) para robar / aplicar |
+| `StealCooldownSeconds` | Cooldown anti-farm de robo por jugador |
+| `SkillCheck` | Minijuego al arrancar la placa (`{ difficulties, keys }` de `lib.skillCheck`) |
+| `ToolItem` | Ítem requerido para robar (por defecto `screwdriver`) |
+| `ForgeTier` | Confianza mínima en el fence para forjar placa falsa (por defecto 2) |
+| `ForgeInputs` | Insumos de la forja (ej.: `{ plastic = 2, aluminum = 1 }`) |
+| `Persist` | Persistencia total del disfraz (se re-aplica en el spawn, sobrevive a un reinicio) |
+| `BlockOnOwned` | (heredado, inerte — ahora permite cualquier coche vía hook de garaje) |
+| `PoliceJobs` | Jobs que pueden quitar la placa falsa (ej.: `{ 'police','bcso','sheriff' }`) |
+| `Witness` | Despacho por testigos: `{ Radius, NpcWeight, PlayerWeight, BaseChance, MaxChance, NightModifier, BonusMinScore, BonusXp, BonusCashMax }` |
+
 ---
 
 ## Compatibilidad con frameworks
 
-Este script **no requiere un framework** para la lógica principal; el inventario usado es solo **ox_inventory**. El archivo de carga en `bridge/server_framework.lua` solo utiliza el framework para:
+Este script **no depende de framework** para la lógica principal — el inventario es solo **ox_inventory**. El bridge en `bridge/server_framework.lua` detecta el framework automáticamente y lo usa para:
 
 - `ServerPlayerIsReady` — saber si el jugador ya está cargado.
-- `BridgeGetCash` / `BridgeRemoveCash` / `BridgeAddCash` — tienda NPC (si `NPC.Shop.Enable = true`).
+- `BridgeGetJob` / `BridgeIsPolice` — gate policial de la remoción de placa falsa.
+- `BridgeGetCash` / `BridgeRemoveCash` / `BridgeAddCash` — tienda del NPC y bonos de las placas.
 
 | Framework | Soporte |
 |-----------|---------|
-| ESX (`es_extended`) | Completo |
-| ESX (`es_extended`) | Funcional (sin soporte para `esx_inventory`) |
-| Ninguno | Funcional (la tienda con dinero estará desactivada) |
+| QBox (`qbx_core`) | Completo — exports directos (`GetPlayer`, `AddMoney`, `job.name`) |
+| QBCore (`qb-core`) | Soportado (portabilidad — `GetCoreObject`/`Functions.GetPlayer`); no probado en este entorno |
+| ESX Legacy (`es_extended`) | Completo — usa `GetPlayerFromId`, `GetPlayers`, `xPlayer.job.name` |
+| Ninguno | Funcional (tienda NPC y bonos en efectivo desactivados) |
 
 **Llaves de vehículos:** usa `Config.VehicleKeys` para apuntar tu resource/export de llaves en ESX. Si prefieres desactivar la verificación, define `Config.RequireVehicleKeys = false`.
 
@@ -260,8 +302,9 @@ Este script **no requiere un framework** para la lógica principal; el inventari
 | `server/bench.lua` | Lógica de recetas en la mesa |
 | `server/ambush.lua` | Emboscadas (netId-based): `VPChopAmbushMaybe`, `VPChopNpcMissionAccept` |
 | `server/fence.lua` | Fence NPC rotativo, confianza, pedidos, venta de neumáticos |
-| `server/heat.lua` | Sistema de calor (VIN scratch, componentes MDT) |
-| `server/progression.lua` | XP y tiers (persiste en `vp_chop_progression`) |
+| `server/heat.lua` | Sistema de calor (VIN scratch, componentes MDT + piezas) |
+| `server/plates.lua` | Robo de placa, forja/aplicación/remoción de placa falsa, persistencia + caché, despacho por testigos, export `GetRealPlateForProps` |
+| `server/progression.lua` | XP y tiers (escucha event bus, persiste en `vp_chop_progression`) |
 | `server/discord.lua` | Webhook Discord opcional |
 | `server/main.lua` | Init, colocaciones, sync de mundo |
 | `client/placement.lua` | Vista de modo colocación (raycast + preestreno) |
@@ -270,6 +313,7 @@ Este script **no requiere un framework** para la lógica principal; el inventari
 | `client/welder.lua` | Soldadora (client) |
 | `client/fence.lua` | Blip rotativo, targets NPC fence, carga de neumáticos |
 | `client/alarm.lua` | Alarma vehicular: activación, skillcheck, dispatch |
+| `client/plates.lua` | ox_target de robo/remoción de placa, skillcheck, score de testigos, export `useFakePlateItem`, sync de la placa visible |
 | `client/progression.lua` | Texto flotante XP, notificación de tier |
 | `client/main.lua` | Sistema gato hidr., Fases 1-4, sync, descarte |
 
@@ -277,4 +321,8 @@ Este script **no requiere un framework** para la lógica principal; el inventari
 
 ## Versión
 
-`1.6.7` — definida en `fxmanifest.lua`.
+`1.10.0` — definida en `fxmanifest.lua`. Historial completo en [`CHANGELOG.md`](CHANGELOG.md).
+
+> **v1.7.0–1.10.0:** auditoría (limpieza/seguridad/rendimiento), recompensa inmediata + emboscada,
+> y el **sistema completo de placas** (robo físico → forja → placa falsa que engaña al MDT,
+> persistente y con reversión de garaje; despacho por testigos; soporte QBox/QBCore/ESX).

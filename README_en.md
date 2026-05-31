@@ -1,6 +1,6 @@
 # vp_chopshop
 
-Chop shop system for FiveM: players use a **hydraulic jack** (`chopshop_jackstand`) to lift any vehicle and dismantle parts in 4 progressive stages, yielding material rewards, tyre sales to a rotating fence NPC, and optional ambushes. Built for stacks using **ox_lib**, **ox_target**, **ox_inventory**, and **oxmysql**.
+Chop shop system for FiveM: players use a **hydraulic jack** (`chopshop_jackstand`) to lift any vehicle and dismantle parts in 4 progressive stages, yielding material rewards, tyre sales to a rotating fence NPC, optional ambushes, and a **full license-plate system** (physical theft, fake plates that fool the MDT, persistence, and witness-based dispatch). Built for stacks using **ox_lib**, **ox_target**, **ox_inventory**, and **oxmysql** — frameworks **QBox / QBCore / ESX**.
 
 ---
 
@@ -144,12 +144,25 @@ XP is earned per successful dismantle action and fence delivery.
 | 3 | Specialist | 2 000 | ×1.20 | ×1.10 | ×1.0 | VIN scratch + orders |
 | 4 | Master | 5 000 | ×1.30 | ×1.15 | ×1.10 | Whole-car delivery |
 
+### 9. Plate theft and fake plates (`Config.Plates`)
+
+A vehicle-identity system tied to heat/MDT — the plate is what links the car to the crime.
+
+- **Steal the physical plate**: with the screwdriver (`screwdriver`), aim at a target vehicle (ox_target "Pry off plate") → skillcheck → receive the `stolen_plate` item (the original plate is kept in the metadata). The car is left with no visible plate. Sellable at the fence or used as a forging input.
+  - **Witness-based dispatch**: stealing does not call the police automatically. The chance scales with **nearby NPCs and players** (with a night modifier) — a deserted area in the dead of night almost never calls, a busy area calls more often. Stealing **with witnesses nearby** earns a **risk bonus** (XP/cash, server-capped).
+- **Forge a fake plate**: at the bench (trust **tier 2**), consumes a `stolen_plate` + inputs (`plastic` + `aluminum`) → produces the `fake_plate` item (inherits the stolen plate).
+- **Apply the fake plate** (use the `fake_plate` item): swaps the vehicle's visible plate and **fools the MDT plate lookup** — anyone running the plate sees the fake "clean" plate, hiding the history.
+  - **Heat follows the REAL plate**: the disguise fools the police, but the crime keeps accumulating on the real car. The fake plate **does not launder heat** (that is VIN scratch's job).
+  - **Full persistence**: the disguise survives a restart and is re-applied when the car respawns.
+  - **Garage-safe**: storing a disguised car **never saves the fake plate** to the database (it is reverted to the real one before saving); the disguise returns on the next spawn. Requires the garage hook (see Installation).
+- **Remove the fake plate** (police): jobs in `Config.Plates.PoliceJobs` get an ox_target to break the disguise and restore the real plate.
+
 ---
 
 ## Installation
 
 1. **Database**
-   Execute `sql/vp_chopshop.sql` (creates all 6 tables: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`).
+   Execute `sql/vp_chopshop.sql` (creates all 7 tables: `vp_chopshop_benches`, `vp_chopshop_welders`, `vp_chop_vin_scratched`, `vp_chop_fence_trust`, `vp_chop_fence_orders`, `vp_chop_progression`, `vp_chop_fake_plates`). The tables are also created/migrated automatically on boot (idempotent).
 
 2. **Items (ox_inventory)**
    Copy the blocks from `installation/ox_items_snippet.txt` to `ox_inventory/data/items.lua`.
@@ -160,12 +173,23 @@ XP is earned per successful dismantle action and fence delivery.
    | `chopshop_bench` | Crafting bench |
    | `chopshop_welder` | Welder (Stage 4) |
    | `metal_saw` | Saw (Stage 2) |
-   | `screwdriver` | Screwdriver (Stage 3 + alarm disarm) |
+   | `screwdriver` | Screwdriver (Stage 3 + plate theft) |
    | `chopshop_tyre` | Stolen tyre |
+   | `stolen_plate` | Stolen physical plate (metadata) |
+   | `fake_plate` | Forged fake plate (usable — applies the disguise) |
    | `fence_referral` | First introduction to the fence NPC |
 
 3. **Server**
    Add `ensure vp_chopshop` after `ox_lib`, `ox_inventory`, `ox_target`, `oxmysql`.
+
+   **Garage hook (required for fake plates on owned cars):** so the garage never saves the fake plate, add this at the point where it captures the `props`/plate before saving, BEFORE the save:
+   ```lua
+   if GetResourceState('vp_chopshop') == 'started' then
+       props = exports.vp_chopshop:GetRealPlateForProps(vehicle, props)
+   end
+   ```
+   - **QBox (qbx_garages):** in `server/main.lua`, in the `qbx_garages:server:parkVehicle` callback, before `SaveVehicle` (block tagged `[vp_chopshop F3 garagem]`). ⚠️ Re-apply if qbx_garages is updated.
+   - **QBCore (qb-garages):** see the snippet in `installation/qb-garages-hook.md`.
 
 4. **Permissions (ACE)**
    For admin commands (`/choplifts`, `/chopremove`):
@@ -174,8 +198,8 @@ XP is earned per successful dismantle action and fence delivery.
    add_ace group.admin command.chopremove allow
    ```
 
-5. **Framework (optional)**
-   Requires **ESX** (`es_extended`). The bridge only uses ESX for player-ready checks and NPC shop cash transactions.
+5. **Framework**
+   The bridge in `bridge/server_framework.lua` auto-detects **QBox (`qbx_core`)**, **QBCore (`qb-core`)**, or **ESX (`es_extended`)** by priority order. Used for `ServerPlayerIsReady`, job (police gate for plates), cash, and citizenid. *(The LIVE server is QBox; QBCore is supported for portability but not tested in this environment.)*
 
 ---
 
@@ -351,6 +375,21 @@ Optional static NPC with shop and mission targets (disabled by default).
 | `BonusReward` | Cash bonus per completed mission |
 | `MinigameRounds` | Bolts per tyre (skillcheck rounds) |
 
+### Plate theft and fake plates (`Config.Plates`)
+| Key | Description |
+|-----|-------------|
+| `Enable` | Toggles the entire plate feature |
+| `MaxDistance` / `ApplyMaxDistance` | Max distance (server-side) to steal / apply |
+| `StealCooldownSeconds` | Anti-farm steal cooldown per player |
+| `SkillCheck` | Minigame when prying off the plate (`{ difficulties, keys }` for `lib.skillCheck`) |
+| `ToolItem` | Item required to steal (default `screwdriver`) |
+| `ForgeTier` | Minimum fence trust to forge a fake plate (default 2) |
+| `ForgeInputs` | Forge inputs (e.g. `{ plastic = 2, aluminum = 1 }`) |
+| `Persist` | Full disguise persistence (re-applies on spawn, survives restart) |
+| `BlockOnOwned` | (legacy, inert — now allows any car via the garage hook) |
+| `PoliceJobs` | Jobs that can remove the fake plate (e.g. `{ 'police','bcso','sheriff' }`) |
+| `Witness` | Witness-based dispatch: `{ Radius, NpcWeight, PlayerWeight, BaseChance, MaxChance, NightModifier, BonusMinScore, BonusXp, BonusCashMax }` |
+
 ### Discord (`Config.Discord`)
 | Key | Description |
 |-----|-------------|
@@ -370,18 +409,20 @@ Optional static NPC with shop and mission targets (disabled by default).
 
 ## Framework Compatibility
 
-The script **does not depend on any framework** for main logic — inventory is strictly **ox_inventory**. The bridge in `bridge/server_framework.lua` uses the framework only for:
+The script **does not depend on any framework** for main logic — inventory is strictly **ox_inventory**. The bridge in `bridge/server_framework.lua` auto-detects the framework and uses it for:
 
 - `ServerPlayerIsReady` — checks if the player has fully loaded.
-- `BridgeGetCash` / `BridgeRemoveCash` / `BridgeAddCash` — NPC shop (if `NPC.Shop.Enable = true`).
+- `BridgeGetJob` / `BridgeIsPolice` — police gate for fake-plate removal.
+- `BridgeGetCash` / `BridgeRemoveCash` / `BridgeAddCash` — NPC shop and plate bonuses.
 
 | Framework | Support |
 |-----------|---------|
-| ESX (`es_extended`) | Full |
+| QBox (`qbx_core`) | Full — direct exports (`GetPlayer`, `AddMoney`, `job.name`) |
+| QBCore (`qb-core`) | Supported (portability — `GetCoreObject`/`Functions.GetPlayer`); not tested in this environment |
 | ESX Legacy (`es_extended`) | Full — uses `GetPlayerFromId`, `GetPlayers`, `xPlayer.job.name` |
-| None | Functional (cash NPC shop disabled) |
+| None | Functional (NPC cash shop and cash bonuses disabled) |
 
-**Vehicle keys:** use `Config.VehicleKeys` to point to your ESX keys resource/export. To disable the check, set `Config.RequireVehicleKeys = false`.
+**Vehicle keys:** use `Config.VehicleKeys` to point to your keys resource/export in ESX. To disable the check, set `Config.RequireVehicleKeys = false`.
 
 ---
 
@@ -405,6 +446,7 @@ The script **does not depend on any framework** for main logic — inventory is 
 | `server/ambush.lua` | Ambushes (netId-based): `VPChopAmbushMaybe`, `VPChopNpcMissionAccept` |
 | `server/fence.lua` | Rotating fence NPC, trust system, orders, tyre sales, jackstand server-side |
 | `server/heat.lua` | Heat system (VIN scratch, MDT components + parts) |
+| `server/plates.lua` | Plate theft, fake-plate forge/apply/remove, persistence + cache, witness-based dispatch, `GetRealPlateForProps` export |
 | `server/progression.lua` | XP and tiers (listens to event bus, persists in `vp_chop_progression`) |
 | `server/discord.lua` | Optional Discord webhook |
 | `server/main.lua` | Init, placement callbacks, world broadcast |
@@ -414,6 +456,7 @@ The script **does not depend on any framework** for main logic — inventory is 
 | `client/welder.lua` | Welder (client) |
 | `client/fence.lua` | Rotating blip, fence NPC targets, tyre carry, truck loading |
 | `client/alarm.lua` | Vehicle alarm: trigger, skillcheck, dispatch |
+| `client/plates.lua` | Plate theft/removal ox_target, skillcheck, witness scoring, `useFakePlateItem` export, visible-plate sync |
 | `client/progression.lua` | XP float text, tier-up notification |
 | `client/main.lua` | Jackstand system, Stages 1–4, world sync, discard |
 
@@ -431,4 +474,8 @@ The script **does not depend on any framework** for main logic — inventory is 
 
 ## Version
 
-`1.6.7` — defined in `fxmanifest.lua`.
+`1.10.0` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
+
+> **v1.7.0–1.10.0:** audit (cleanup/security/performance), immediate reward + ambush,
+> and the **full license-plate system** (physical theft → forge → fake plate that fools the MDT,
+> persistent and with garage reversion; witness-based dispatch; QBox/QBCore/ESX support).
