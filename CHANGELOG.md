@@ -2,6 +2,52 @@
 
 ---
 
+## [1.13.1] — 2026-05-31 — Correções de auditoria (críticos + altos + rápidos)
+
+### Fixed
+- **[C1] `server/db.lua` `VPChopDbInsertFakePlate`:** o padrão `pcall(MySQL.query.await, sql, params)`
+  rodava sem wrapper de função → o `await` não executava no contexto correto e a colisão de placa
+  falsa nunca era detectada. Reescrito para `pcall(function() ... end)` com await sequencial
+  (DELETE prévio termina antes do INSERT) e retorno baseado no **sucesso real** do INSERT
+  (`MySQL.insert.await` → `insertId`), devolvendo `false` em colisão de PK.
+- **[C2] `server/advanced_chop.lua`:** as Fases 2/3/4 (portas/motor/carcaça) não deixavam vestígio
+  forense nem armavam marca de pneu — desmanche avançado passava 100% limpo. Adicionado helper
+  `leaveAdvancedTrace` que espelha o padrão da Fase 1: `VPChopLeaveEvidence(src, vehCoords,
+  'chop_part', realPlate)` + arm de marca de pneu (client + server-side), após o `markChopped` de
+  cada fase. `realPlate` resolvida via `VPChopMDT.GetRealPlate` do veículo validado.
+- **[C3] `client/tyremarks.lua`:** detecção de burnout lia uma roda só (`GetVehicleWheelSpeed(veh)`)
+  → burnout RWD não era detectado. Agora lê as 4 rodas (`GetVehicleWheelSpeed(veh, i)`, com fallback
+  defensivo à variante de 1 arg) e usa `math.max(|giro|)`. Removido fallback `PlayerPedId()` no loop
+  (usa `cache.ped`).
+- **[C4] `server/partserial.lua`:** `buyLegal` chamava `exports['vp_chopshop']:IssueLegalParts` (self-export).
+  Lógica extraída para `issueLegalPartsImpl` (função local); export e `buyLegal` chamam a local.
+- **[H1] `server/tyremarks.lua`:** sem gate de janela armada server-side, cheater criava marcas a
+  qualquer hora. Adicionada tabela `ArmWindow` + helper global `VPChopArmTyreWindow(src, ms)` chamado
+  nos pontos de crime (main/heat/plates/advanced_chop); `createTyreMark` rejeita fora da janela.
+  Limpeza no `playerDropped` + thread periódica.
+- **[H2] `client/tyremarks.lua`:** `marksThisArm` era zerado a cada crime → furava `MaxMarksPerCrime`
+  em crimes encadeados. Agora só zera se a janela anterior já expirou; senão estende sem resetar.
+- **[H3] `server/partserial.lua` `inspectParts`:** 1 query por slot (`VPChopDbIsLegitSerial`).
+  Agrupado em UMA query em lote via novo helper `VPChopDbWhichSerialsLegit(serials) -> set`
+  (`WHERE serial IN (...)` com placeholders dinâmicos). Veredito idêntico.
+- **[H4] `server/tyremarks.lua` `requestTyreMarks`:** sem rate limit → dump em bulk. Adicionado
+  cooldown de 10s por src + cap de tamanho do payload (`Config.TyreMarks.MaxSyncItems`, padrão 200).
+- **[M1] `shared/locale.lua`:** `err_adv_only` e `err_no_screwdriver` faltavam em es/fr/tr (caíam em
+  inglês). Traduções adicionadas.
+- **[M2] `server/plates.lua`:** `GetVehicleNumberPlateText(veh):gsub(...)` sem guard de nil em 3
+  pontos. Trocado por `(GetVehicleNumberPlateText(veh) or ''):gsub('%s+','')`.
+- **[M3] `server/partserial.lua`:** `IssueLegalParts` agora limita `amount` a 100 e loga via
+  `VPChopDiscordLog`.
+- **[M4] `server/partserial.lua`:** cooldown de `buyLegal` 2s → 5s.
+- **[M5] `server/plates.lua` `applyWitnessBonus`:** hardcap absoluto em código (cash ≤ 1000, XP ≤ 500)
+  além da config.
+- **[M6] Performance:** loops de lift/lower (`client/main.lua`) `Wait(16)` → `Wait(33)`. O item
+  M6(b) (passar `heat` pré-calculado a `VPChopLeaveEvidence`) foi **deixado de fora**: nenhum hook
+  pré-calcula heat antes da chamada, então o param só relocaria a query (1 por crime) sem reduzir
+  consumo — refator sem ganho líquido.
+
+---
+
 ## [1.13.0] — 2026-05-31 — Número de série da car_parts (economia + forense)
 
 ### Added

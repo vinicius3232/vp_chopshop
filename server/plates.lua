@@ -125,9 +125,13 @@ local function applyWitnessBonus(src, score)
     local frac = math.min(1.0, score / math.max(1.0, capScore))
 
     local bonusXp = math.floor((tonumber(w.BonusXp) or 0) * frac + 0.5)
+    -- [AUDIT-FIX M5] Hardcap absoluto em código (além da config): blinda contra config errada
+    -- ou valores absurdos. XP teto 500, cash teto 1000.
+    bonusXp = math.min(bonusXp, 500)
     if bonusXp > 0 then VPChopAddXp(src, bonusXp, 'plate_witness_bonus') end
 
     local bonusCash = math.floor((tonumber(w.BonusCashMax) or 0) * frac + 0.5)
+    bonusCash = math.min(bonusCash, 1000)  -- [AUDIT-FIX M5] hardcap absoluto
     if bonusCash > 0 then BridgeAddCash(src, bonusCash, 'vp_chopshop:plate_witness_bonus') end
 
     return bonusXp, bonusCash
@@ -230,7 +234,9 @@ lib.callback.register('vp_chopshop:stealPlate', function(src, netId, witnessScor
     VPChopLeaveEvidence(src, vehCoords, 'plate_steal', realPlate)
     -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
     if Config.TyreMarks and Config.TyreMarks.Enable then
-        TriggerClientEvent('vp_chopshop:armTyreMark', src, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+        local armMs = (Config.TyreMarks.ArmWindowSeconds or 45) * 1000
+        VPChopArmTyreWindow(src, armMs)  -- [AUDIT-FIX H1] arma janela server-side
+        TriggerClientEvent('vp_chopshop:armTyreMark', src, armMs)
     end
 
     -- [F4 testemunhas] Devolver o bônus aplicado p/ o client notificar (cosmético).
@@ -375,7 +381,9 @@ lib.callback.register('vp_chopshop:forgeFakePlate', function(src, sourcePlate)
     VPChopLeaveEvidence(src, GetEntityCoords(GetPlayerPed(src)), 'plate_forge')
     -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
     if Config.TyreMarks and Config.TyreMarks.Enable then
-        TriggerClientEvent('vp_chopshop:armTyreMark', src, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+        local armMs = (Config.TyreMarks.ArmWindowSeconds or 45) * 1000
+        VPChopArmTyreWindow(src, armMs)  -- [AUDIT-FIX H1] arma janela server-side
+        TriggerClientEvent('vp_chopshop:armTyreMark', src, armMs)
     end
 
     return { ok = true, plate = chosenPlate }
@@ -452,7 +460,7 @@ lib.callback.register('vp_chopshop:applyFakePlate', function(src, netId, sourceP
 
     -- Placa REAL ATUAL resolvida no servidor. Se já houver disfarce ativo neste carro,
     -- a "real" verdadeira é a resolvida pelo resolver (não empilhar disfarces).
-    local visibleNow = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+    local visibleNow = (GetVehicleNumberPlateText(veh) or ''):gsub('%s+', '')  -- [AUDIT-FIX M2] guard de nil
     local realPlate = VPChopMDT.GetRealPlate(visibleNow)
     if not realPlate or realPlate == '' then return { ok = false, err = 'no_plate' } end
 
@@ -505,7 +513,9 @@ lib.callback.register('vp_chopshop:applyFakePlate', function(src, netId, sourceP
         VPChopLeaveEvidence(src, evCoords, 'plate_apply', realPlate)
         -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
         if Config.TyreMarks and Config.TyreMarks.Enable then
-            TriggerClientEvent('vp_chopshop:armTyreMark', src, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+            local armMs = (Config.TyreMarks.ArmWindowSeconds or 45) * 1000
+            VPChopArmTyreWindow(src, armMs)  -- [AUDIT-FIX H1] arma janela server-side
+            TriggerClientEvent('vp_chopshop:armTyreMark', src, armMs)
         end
     end
 
@@ -535,7 +545,7 @@ lib.callback.register('vp_chopshop:removeFakePlate', function(src, netId)
     if not ValidatePlayerNearVehicle(src, veh, maxDist) then return { ok = false, err = 'range' } end
 
     -- Placa VISÍVEL atual = candidata a falsa. Buscar a real mapeada.
-    local visible = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+    local visible = (GetVehicleNumberPlateText(veh) or ''):gsub('%s+', '')  -- [AUDIT-FIX M2] guard de nil
     local realPlate = VPChopDbGetRealByFake(visible)
     if not realPlate then return { ok = false, err = 'no_fake' } end
 
@@ -563,7 +573,7 @@ lib.callback.register('vp_chopshop:isFakePlated', function(src, netId)
     if not netId or netId <= 0 then return false end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return false end
-    local visible = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+    local visible = (GetVehicleNumberPlateText(veh) or ''):gsub('%s+', '')  -- [AUDIT-FIX M2] guard de nil
     return VPChopDbFakePlateInUse(visible)
 end)
 

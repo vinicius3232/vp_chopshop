@@ -544,7 +544,7 @@ local function doLiftVehicle(veh)
             local step = speed * dt
             local nz  = math.min(targetZ, cur.z + step)
             SetEntityCoordsNoOffset(veh, cur.x, cur.y, nz, true, true, true)
-            Wait(16)  -- [PERF] delta por GetFrameTime: 30-60fps não muda a duração nem a suavidade
+            Wait(33)  -- [AUDIT-FIX M6] 16→33ms: delta por GetFrameTime mantém duração/suavidade a ~30fps
         end
     end)
     return origZ
@@ -566,7 +566,7 @@ local function doLowerVehicle(veh, originalZ)
             local step = speed * dt
             local nz  = math.max(originalZ, cur.z - step)
             SetEntityCoordsNoOffset(veh, cur.x, cur.y, nz, true, true, true)
-            Wait(16)  -- [PERF] idem doLiftVehicle
+            Wait(33)  -- [AUDIT-FIX M6] 16→33ms: idem doLiftVehicle
         end
         done = true
     end)

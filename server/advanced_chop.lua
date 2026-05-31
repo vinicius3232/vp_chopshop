@@ -79,6 +79,37 @@ local function consumeSaw(src)
     return VPChopConsumeTool(src, false)
 end
 
+--- [AUDIT-FIX C2] As fases 2/3/4 não deixavam vestígio forense nem armavam a marca de pneu
+--- (o desmanche avançado por jackstand passava 100% limpo). Este helper espelha o MESMO padrão
+--- da Fase 1 (server/main.lua ~378) e dos hooks de placa (server/plates.lua): planta evidência
+--- com a placa REAL resolvida e arma a janela de marca de pneu (client + server-side via
+--- VPChopArmTyreWindow do server/tyremarks.lua, C2+H1).
+--- Assinatura confirmada em bridge/evidence.lua: VPChopLeaveEvidence(src, coords, actionKey, plate?).
+---@param src number
+---@param netId number
+---@param vehCoords vector3
+local function leaveAdvancedTrace(src, netId, vehCoords)
+    -- Resolver a placa REAL pelo veículo já validado (trust-no-client; mesmo padrão de heat.lua).
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    local realPlate = nil
+    if veh and veh ~= 0 and DoesEntityExist(veh) then
+        local visible = (GetVehicleNumberPlateText(veh) or ''):gsub('%s+', '')
+        if visible ~= '' then
+            realPlate = VPChopMDT.GetRealPlate(visible)
+        end
+    end
+
+    -- Vestígio forense no local do veículo (digital + DNA vinculados ao criminoso).
+    VPChopLeaveEvidence(src, vehCoords, 'chop_part', realPlate)
+
+    -- Armar a janela de marca de pneu (client + gate server-side anti-cheat).
+    if Config.TyreMarks and Config.TyreMarks.Enable then
+        local armMs = (Config.TyreMarks.ArmWindowSeconds or 45) * 1000
+        VPChopArmTyreWindow(src, armMs)  -- [AUDIT-FIX H1]
+        TriggerClientEvent('vp_chopshop:armTyreMark', src, armMs)
+    end
+end
+
 -- ─── Fase 2: Portas / Capô / Porta-malas ─────────────────────────────────────
 
 lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKey)
@@ -133,6 +164,9 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
     markChopped(netId, partKey)
     advMarkCooldown(src)
     unlock(lockKey)
+
+    -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 2). `vehCoords` validado acima.
+    leaveAdvancedTrace(src, netId, vehCoords)
 
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, partKey, 2)
 
@@ -209,6 +243,8 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     markChopped(netId, 'adv_engine')
     advMarkCooldown(src)
     unlock(lockKey)
+    -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 3). `vehCoords` validado acima.
+    leaveAdvancedTrace(src, netId, vehCoords)
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_engine', 3)
     return { ok = true }
 end)
@@ -272,6 +308,8 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
     markChopped(netId, 'adv_carcass')
     advMarkCooldown(src)
     unlock(lockKey)
+    -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 4). `vehCoords` validado acima.
+    leaveAdvancedTrace(src, netId, vehCoords)
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_carcass', 4)
     return { ok = true }
 end)

@@ -284,11 +284,25 @@ end)
 ---@param amount number
 ---@param source string|nil  rótulo de origem para auditoria (default 'legal_supply')
 ---@return boolean ok, string|nil serial
-exports('IssueLegalParts', function(src, amount, source)
+-- [AUDIT-FIX C4] Lógica extraída para uma FUNÇÃO LOCAL compartilhada. Antes, o callback
+-- buyLegal chamava `exports['vp_chopshop']:IssueLegalParts(...)` (self-export) — frágil
+-- (depende do export estar resolvido no mesmo resource). Agora TANTO o export QUANTO o
+-- buyLegal chamam esta função local diretamente.
+---@param src number
+---@param amount number
+---@param source string|nil
+---@return boolean ok, string|nil serial
+local function issueLegalPartsImpl(src, amount, source)
     if not IsValidSource(src) then return false end
     if not ServerPlayerIsReady(src) then return false end
     amount = math.floor(tonumber(amount) or 0)
     if amount < 1 then return false end
+    -- [AUDIT-FIX M3] Cap defensivo de quantidade (evita inventory-flood via export externo).
+    amount = math.min(amount, 100)
+
+    -- [AUDIT-FIX M3] Log de auditoria de toda emissão de peças legais.
+    VPChopDiscordLog('[SERIAL] IssueLegalParts',
+        ('src: %s | amount: %s | source: %s'):format(tostring(src), tostring(amount), tostring(source or 'legal_supply')))
 
     -- Série desligada: degrada para car_parts simples (ainda entrega, sem metadata).
     if not (Config.PartSerial and Config.PartSerial.Enable) then
@@ -306,6 +320,11 @@ exports('IssueLegalParts', function(src, amount, source)
     })
     if not (ok ~= nil and ok ~= false) then return false end
     return true, serial
+end
+
+-- Export público delega para a função local (mesma assinatura/comportamento de antes).
+exports('IssueLegalParts', function(src, amount, source)
+    return issueLegalPartsImpl(src, amount, source)
 end)
 
 -- ─── Callback: compra no VENDEDOR LEGAL (NPC fixo) ───────────────────────────
@@ -344,14 +363,14 @@ lib.callback.register('vp_chopshop:serial:buyLegal', function(src)
         return { ok = false, err = 'money' }
     end
 
-    -- Entregar peça legal (série registrada no DB). Se inventário cheio, reembolsar.
-    local issued = exports['vp_chopshop']:IssueLegalParts(src, amount, 'legal_vendor')
+    -- [AUDIT-FIX C4] Entregar via FUNÇÃO LOCAL (não self-export). Se inventário cheio, reembolsar.
+    local issued = issueLegalPartsImpl(src, amount, 'legal_vendor')
     if not issued then
         if price > 0 then BridgeAddCash(src, price, 'vp_chopshop:legal_parts_refund') end
         return { ok = false, err = 'inventory' }
     end
 
-    _legalBuyCd[src] = now + 2000
+    _legalBuyCd[src] = now + 5000  -- [AUDIT-FIX M4] cooldown 2s → 5s (anti-farm)
     return { ok = true }
 end)
 
@@ -437,6 +456,25 @@ lib.callback.register('vp_chopshop:inspectParts', function(src, targetServerId)
         g.count = g.count + (count or 0)
     end
 
+    -- [AUDIT-FIX H3] Antes: 1 query (VPChopDbIsLegitSerial) POR slot legal/forged → N queries
+    -- por inspeção. Agora, com perícia, coletamos TODAS as séries candidatas e fazemos UMA
+    -- query em lote (VPChopDbWhichSerialsLegit → set serial→true). Veredito idêntico ao antigo.
+    local legitSet = {}
+    if hasForensic then
+        local toCheck = {}
+        for i = 1, #slots do
+            local meta = slots[i] and slots[i].metadata
+            local norm = classifyNormal(meta)
+            if norm == 'legal' or norm == 'forged_hidden' then
+                local serial = meta and meta.serial
+                if type(serial) == 'string' and serial ~= '' then
+                    toCheck[#toCheck + 1] = serial
+                end
+            end
+        end
+        legitSet = VPChopDbWhichSerialsLegit(toCheck)
+    end
+
     for i = 1, #slots do
         local s = slots[i]
         local meta = s and s.metadata
@@ -447,7 +485,7 @@ lib.callback.register('vp_chopshop:inspectParts', function(src, targetServerId)
             -- Ambos APARECEM "Registrada" no scan normal. A perícia separa:
             if hasForensic then
                 local serial = meta and meta.serial
-                local isLegit = type(serial) == 'string' and serial ~= '' and VPChopDbIsLegitSerial(serial)
+                local isLegit = type(serial) == 'string' and serial ~= '' and legitSet[serial] == true
                 if isLegit then
                     push('legal', nil, count)         -- consta no registro → legítima
                 else

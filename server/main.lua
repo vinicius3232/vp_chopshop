@@ -378,7 +378,10 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
         VPChopLeaveEvidence(source, evCoords, 'chop_part', realPlate)
         -- [TYRE] Armar a janela de marca de pneu (mesmo ponto do crime; reusa o hook).
         if Config.TyreMarks and Config.TyreMarks.Enable then
-            TriggerClientEvent('vp_chopshop:armTyreMark', source, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+            local armMs = (Config.TyreMarks.ArmWindowSeconds or 45) * 1000
+            -- [AUDIT-FIX H1] Arma TAMBÉM a janela server-side (gate anti-cheat do createTyreMark).
+            VPChopArmTyreWindow(source, armMs)
+            TriggerClientEvent('vp_chopshop:armTyreMark', source, armMs)
         end
     end
 

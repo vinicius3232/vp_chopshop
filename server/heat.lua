@@ -193,7 +193,9 @@ lib.callback.register('vp_chopshop:vinScratch', function(src, netId)
         -- [TYRE] Armar a janela de marca de pneu: se o criminoso cantar pneu ao fugir
         -- nos próximos ArmWindowSeconds, deixa pista forense do MODELO (nunca a placa).
         if Config.TyreMarks and Config.TyreMarks.Enable then
-            TriggerClientEvent('vp_chopshop:armTyreMark', src, (Config.TyreMarks.ArmWindowSeconds or 45) * 1000)
+            local armMs = (Config.TyreMarks.ArmWindowSeconds or 45) * 1000
+            VPChopArmTyreWindow(src, armMs)  -- [AUDIT-FIX H1] arma janela server-side
+            TriggerClientEvent('vp_chopshop:armTyreMark', src, armMs)
         end
     end
 

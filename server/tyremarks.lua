@@ -20,6 +20,34 @@ local TyreMarks   = {}
 local nextMarkId  = 0
 local createCd    = {}  -- src → GetGameTimer() até quando o jogador pode criar de novo
 
+-- [AUDIT-FIX H1] Janela ARMADA server-side: src → GetGameTimer() de expiração. Sem ela um
+-- cheater podia chamar createTyreMark a qualquer hora (sem ter cometido crime). A janela é
+-- preenchida nos MESMOS pontos onde o servidor dispara `armTyreMark` (main/heat/plates/
+-- advanced_chop), via o helper global VPChopArmTyreWindow abaixo. createTyreMark rejeita
+-- qualquer marca fora da janela.
+local ArmWindow   = {}  -- src → GetGameTimer() até quando o jogador pode CRIAR marca
+
+-- [AUDIT-FIX H4] Rate-limit do sync em bulk (requestTyreMarks): src → próximo permitido.
+local requestCd   = {}
+local REQUEST_CD_MS = 10000  -- 10s entre dumps completos de marcas
+
+--- [AUDIT-FIX H1] Arma a janela server-side de criação de marca para `src` por `ms` ms.
+--- Chamado nos pontos de crime (junto ao TriggerClientEvent 'armTyreMark'). Global de
+--- propósito para os outros arquivos server (main/heat/plates/advanced_chop) reusarem.
+---@param src number
+---@param ms number
+function VPChopArmTyreWindow(src, ms)
+    if not Config.TyreMarks or not Config.TyreMarks.Enable then return end
+    src = tonumber(src)
+    if not src then return end
+    local dur = tonumber(ms) or ((TM.ArmWindowSeconds or 45) * 1000)
+    local until_ = GetGameTimer() + dur
+    -- Estende (crimes encadeados renovam), nunca encurta uma janela ainda aberta.
+    if not ArmWindow[src] or until_ > ArmWindow[src] then
+        ArmWindow[src] = until_
+    end
+end
+
 --- [TYRE] Lista de jobs policiais (reusa Config.TyreMarks.PoliceJobs).
 local function policeJobs()
     return TM.PoliceJobs or (Config.Plates and Config.Plates.PoliceJobs) or { 'police', 'bcso', 'sheriff' }
@@ -53,8 +81,12 @@ RegisterNetEvent('vp_chopshop:createTyreMark', function(netId, coords)
     if not TM.Enable then return end
     if not IsValidSource(src) then return end
 
-    -- Rate limit por jogador (anti-flood).
+    -- [AUDIT-FIX H1] Gate de JANELA ARMADA (server-side): só aceita marca se o jogador está
+    -- dentro da janela aberta por um crime real. Sem janela / expirada → rejeita (anti-cheat).
     local now = GetGameTimer()
+    if not ArmWindow[src] or now > ArmWindow[src] then return end
+
+    -- Rate limit por jogador (anti-flood).
     if createCd[src] and now < createCd[src] then return end
     createCd[src] = now + (TM.CreateCooldownMs or 1500)
 
@@ -105,8 +137,17 @@ RegisterNetEvent('vp_chopshop:requestTyreMarks', function()
     if not TM.Enable or not IsValidSource(src) then return end
     if not BridgeIsPolice(src, policeJobs()) then return end
 
+    -- [AUDIT-FIX H4] Rate-limit (10s) — sem isso um cliente podia spammar o evento e forçar
+    -- o servidor a montar/enviar o dump de TODAS as marcas em loop.
+    local now = GetGameTimer()
+    if requestCd[src] and now < requestCd[src] then return end
+    requestCd[src] = now + REQUEST_CD_MS
+
+    -- [AUDIT-FIX H4] Cap defensivo do tamanho do payload (proteção contra crescimento anômalo).
+    local maxItems = tonumber(TM.MaxSyncItems) or 200
     local payload = {}
     for id, m in pairs(TyreMarks) do
+        if #payload >= maxItems then break end
         payload[#payload + 1] = { id = id, coords = m.coords }
     end
     TriggerClientEvent('vp_chopshop:syncTyreMarks', src, payload)
@@ -163,11 +204,20 @@ CreateThread(function()
         for src in pairs(createCd) do
             if not IsValidSource(src) or now >= createCd[src] then createCd[src] = nil end
         end
+        -- [AUDIT-FIX H1/H4] Mesma higiene para a janela armada e o CD de sync.
+        for src in pairs(ArmWindow) do
+            if not IsValidSource(src) or now > ArmWindow[src] then ArmWindow[src] = nil end
+        end
+        for src in pairs(requestCd) do
+            if not IsValidSource(src) or now >= requestCd[src] then requestCd[src] = nil end
+        end
     end
 end)
 
 -- [TYRE] Limpeza de cooldown ao sair (a marca é por coords, não por player — só o CD sai).
 AddEventHandler('playerDropped', function()
     local src = source
-    createCd[src] = nil
+    createCd[src]   = nil
+    ArmWindow[src]  = nil  -- [AUDIT-FIX H1] limpar a janela armada do jogador que saiu
+    requestCd[src]  = nil  -- [AUDIT-FIX H4]
 end)

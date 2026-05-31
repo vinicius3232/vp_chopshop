@@ -215,15 +215,30 @@ function VPChopDbInsertFakePlate(fakePlate, realPlate, appliedBy)
     -- real_plate impediria o INSERT, então o DELETE prévio é obrigatório, não só limpeza.
     -- A colisão por fake_plate (PK) continua sendo a verdade atômica: se a falsa já está em
     -- uso por OUTRA real, o INSERT falha e o pcall captura → devolve false (in_use).
-    pcall(MySQL.query.await,
-        'DELETE FROM vp_chop_fake_plates WHERE real_plate = ?', { realPlate }
-    )
-    -- INSERT puro (sem ON DUPLICATE): se a fake_plate já existe, a PK viola e o pcall captura.
-    local ok = pcall(MySQL.query.await,
-        'INSERT INTO vp_chop_fake_plates (fake_plate, real_plate, applied_by) VALUES (?, ?, ?)',
-        { fakePlate, realPlate, appliedBy }
-    )
-    return ok == true
+    -- [AUDIT-FIX C1] O padrão antigo `pcall(MySQL.query.await, sql, params)` passava o
+    -- .await como referência SEM um wrapper de função → o yield/await não executava no
+    -- contexto correto e o resultado era descartado (colisão de placa falsa nunca detectada).
+    -- Agora: cada query roda dentro de `pcall(function() ... end)`, await sequencial no mesmo
+    -- contexto de coroutine (o DELETE termina ANTES do INSERT, evitando erro espúrio de UNIQUE),
+    -- e o retorno reflete o SUCESSO REAL do INSERT (affectedRows), não só "não deu exceção".
+
+    -- DELETE prévio do disfarce antigo dessa MESMA real (await completa antes de seguir).
+    pcall(function()
+        MySQL.query.await('DELETE FROM vp_chop_fake_plates WHERE real_plate = ?', { realPlate })
+    end)
+
+    -- INSERT puro (sem ON DUPLICATE): se a fake_plate (PK) já existe por OUTRA real, viola a
+    -- PK → o INSERT falha (insertId nil / affectedRows 0) e capturamos a colisão como false.
+    local insertId
+    local ok = pcall(function()
+        insertId = MySQL.insert.await(
+            'INSERT INTO vp_chop_fake_plates (fake_plate, real_plate, applied_by) VALUES (?, ?, ?)',
+            { fakePlate, realPlate, appliedBy }
+        )
+    end)
+    -- Sucesso real = pcall sem exceção E o INSERT produziu uma linha (insertId numérico válido).
+    -- Em colisão de PK o oxmysql lança/retorna nil → ok=false ou insertId=nil → devolve false.
+    return ok == true and insertId ~= nil and insertId ~= false
 end
 
 --- [F2 persist] Remove o mapeamento a partir da placa REAL (revertendo o disfarce).
@@ -318,4 +333,39 @@ function VPChopDbIsLegitSerial(serial)
         'SELECT EXISTS(SELECT 1 FROM vp_chop_legit_serials WHERE serial = ?)', { serial }
     )
     return exists == 1
+end
+
+--- [AUDIT-FIX H3] Versão em LOTE de VPChopDbIsLegitSerial: recebe uma lista de séries e
+--- devolve um SET (serial→true) só das que constam como legítimas. Substitui o padrão de
+--- 1 query por slot na inspeção da polícia por UMA query com placeholders dinâmicos.
+--- Mantém `?` (nunca concatenação): os placeholders são gerados, mas os valores vão como params.
+---@param serials string[]
+---@return table<string, boolean> set
+function VPChopDbWhichSerialsLegit(serials)
+    local set = {}
+    if type(serials) ~= 'table' or #serials == 0 then return set end
+
+    -- Dedup + filtro de validade (mesma regra dos helpers single: string não-vazia, ≤16).
+    local params, seen = {}, {}
+    for i = 1, #serials do
+        local s = serials[i]
+        if type(s) == 'string' and s ~= '' and #s <= 16 and not seen[s] then
+            seen[s] = true
+            params[#params + 1] = s
+        end
+    end
+    if #params == 0 then return set end
+
+    -- Placeholders dinâmicos: '?,?,?...' — APENAS '?', valores sempre via params (anti-SQLi).
+    local marks = string.rep('?,', #params - 1) .. '?'
+    local rows = MySQL.query.await(
+        'SELECT serial FROM vp_chop_legit_serials WHERE serial IN (' .. marks .. ')', params
+    )
+    if type(rows) == 'table' then
+        for i = 1, #rows do
+            local serial = rows[i] and rows[i].serial
+            if serial then set[serial] = true end
+        end
+    end
+    return set
 end

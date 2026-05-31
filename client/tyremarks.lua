@@ -25,15 +25,43 @@ local detectThread = false -- evita iniciar a thread de detecção em duplicidad
 
 --- [TYRE] Heurística de burnout SEM native especulativa. Não usamos IsVehicleInBurnout
 --- (não está garantido em todo build / é instável). Em vez disso comparamos:
----   - velocidade linear das rodas: GetVehicleWheelSpeed(veh)  (m/s, pode ser negativa em ré)
----   - velocidade real do chassi:   GetEntitySpeed(veh)        (m/s, sempre ≥ 0)
+---   - velocidade linear das rodas: GetVehicleWheelSpeed  (m/s, pode ser negativa em ré)
+---   - velocidade real do chassi:   GetEntitySpeed(veh)   (m/s, sempre ≥ 0)
 --- Burnout/cantada = rodas girando bem mais rápido que o deslocamento real (patinação),
 --- com o carro parado ou lento. Ambas são natives CFX reais e estáveis.
+---
+--- [AUDIT-FIX C3] A leitura antiga `GetVehicleWheelSpeed(veh)` pegava UMA roda só. Em carros
+--- RWD (tração traseira) a roda lida (dianteira) NÃO patina no burnout → não detectava.
+--- Agora lemos as 4 rodas (índices 0..3, native CFX GetVehicleWheelSpeed(veh, wheelIndex)) e
+--- usamos o math.max do |giro| — pega a roda motriz que está patinando, seja FWD/RWD/AWD.
+--- Fallback defensivo: se a variante com índice não estiver disponível no build, cai na
+--- chamada de um argumento (comportamento antigo) — nunca quebra a detecção.
+---@param veh integer
+---@return number  maior |velocidade de roda| em m/s entre as 4 rodas
+local function maxWheelSpeed(veh)
+    local maxv = 0.0
+    local okIndexed = false
+    for i = 0, 3 do
+        local ok, ws = pcall(GetVehicleWheelSpeed, veh, i)
+        if ok and type(ws) == 'number' then
+            okIndexed = true
+            local a = math.abs(ws)
+            if a > maxv then maxv = a end
+        end
+    end
+    -- Se a variante indexada não retornou nada útil, usa a chamada de 1 argumento (legado).
+    if not okIndexed then
+        local ws = GetVehicleWheelSpeed(veh)
+        maxv = math.abs((type(ws) == 'number' and ws or 0.0) + 0.0)
+    end
+    return maxv
+end
+
 ---@param veh integer
 ---@return boolean
 local function isBurningOut(veh)
     local b = TM.Burnout
-    local wheelSpeed = math.abs(GetVehicleWheelSpeed(veh) + 0.0) -- giro linear das rodas
+    local wheelSpeed = maxWheelSpeed(veh) -- [AUDIT-FIX C3] maior giro entre as rodas (motrizes)
     local realSpeed  = GetEntitySpeed(veh) + 0.0                 -- deslocamento real do carro
 
     -- Carro precisa estar parado/lento (burnout de verdade é estático ou arrancada).
@@ -64,8 +92,8 @@ local function startDetectThread()
     CreateThread(function()
         while GetGameTimer() < armedUntil do
             local wait = 1000
-            local ped  = cache.ped or PlayerPedId()
-            local veh  = GetVehiclePedIsIn(ped, false)
+            local ped  = cache.ped  -- [AUDIT-FIX C3] sem fallback PlayerPedId em loop (ox_lib mantém cache.ped)
+            local veh  = ped and GetVehiclePedIsIn(ped, false) or 0
 
             if veh and veh ~= 0 and GetPedInVehicleSeat(veh, -1) == ped then
                 wait = 250 -- só checa burnout quando o jogador é o MOTORISTA
@@ -90,9 +118,15 @@ end
 RegisterNetEvent('vp_chopshop:armTyreMark', function(durationMs)
     if not TM.Enable then return end
     local dur = tonumber(durationMs) or ((TM.ArmWindowSeconds or 45) * 1000)
-    -- Estende a janela (crimes encadeados renovam o tempo) e zera o contador de marcas.
-    armedUntil   = GetGameTimer() + dur
-    marksThisArm = 0
+    local now = GetGameTimer()
+    -- [AUDIT-FIX H2] Só ZERA o contador de marcas se a janela anterior JÁ expirou. Em crimes
+    -- ENCADEADOS (nova janela enquanto a antiga ainda corre) o reset furava o MaxMarksPerCrime:
+    -- o jogador renovava o limite a cada crime. Agora: janela expirada → novo crime, conta zera;
+    -- janela ainda aberta → só ESTENDE o tempo, preservando marksThisArm.
+    if now >= armedUntil then
+        marksThisArm = 0
+    end
+    armedUntil = now + dur
     startDetectThread()
 end)
 
