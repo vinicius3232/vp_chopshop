@@ -104,3 +104,186 @@ RegisterNetEvent('vp_chopshop:client:plateDispatch', function(netId)
         VPChopTriggerDispatch(veh)
     end
 end)
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [FASE2 placas] Aplicar placa falsa + sync visível + remoção policial      ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+
+-- ─── Sync da placa VISÍVEL (cosmético) ────────────────────────────────────────
+-- O servidor manda este evento (broadcast filtrado por proximidade) quando uma placa
+-- falsa é aplicada (texto = falsa) ou removida/restaurada (texto = real). Apenas troca
+-- o texto exibido — a verdade do crime vive no servidor (mapa falsa→real).
+RegisterNetEvent('vp_chopshop:client:setVisiblePlate', function(netId, text)
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return end
+    SetVehicleNumberPlateText(veh, tostring(text or ''))
+end)
+
+-- ─── Re-sync robusto para clientes que entram no scope DEPOIS ──────────────────
+-- O servidor seta um MARCADOR statebag 'vpFakeRealPlate' (a placa REAL) no veículo, REPLICADO.
+-- A placa FALSA em si NÃO vai no statebag (segurança). Para reexibir a falsa a quem entra no
+-- scope, o servidor já reenvia 'setVisiblePlate' no broadcast inicial; aqui tratamos o caso de
+-- um cliente que recebe o statebag e ainda vê a placa antiga: pedimos a falsa ao servidor.
+--
+-- Como a falsa é cosmética, basta exibir o texto correto. Usamos o handler do statebag para
+-- detectar a presença do disfarce e perguntar ao servidor qual texto exibir (placa falsa).
+AddStateBagChangeHandler('vpFakeRealPlate', nil, function(bagName, _key, value)
+    -- Só nos importa quando o disfarce É ativado (value presente). Limpeza (nil) já vem
+    -- acompanhada do broadcast 'setVisiblePlate' com a placa real.
+    if value == nil then return end
+    -- A entidade pode ainda não existir localmente quando o statebag chega; resolvemos
+    -- o handle a partir do nome do bag com retry curto best-effort.
+    CreateThread(function()
+        local entity, tries = 0, 0
+        while (entity == 0 or not DoesEntityExist(entity)) and tries < 20 do
+            entity = GetEntityFromStateBagName(bagName)
+            if entity ~= 0 and DoesEntityExist(entity) then break end
+            Wait(100); tries = tries + 1
+        end
+        if entity == 0 or not DoesEntityExist(entity) then return end
+        local netId = NetworkGetNetworkIdFromEntity(entity)
+        if not netId or netId == 0 then return end
+        -- Perguntar ao servidor o texto da placa falsa a exibir (não vai no statebag por segurança).
+        local cbOk, fake = pcall(lib.callback.await, 'vp_chopshop:getVisibleFakePlate', false, netId)
+        if cbOk and type(fake) == 'string' and fake ~= '' then
+            if DoesEntityExist(entity) then SetVehicleNumberPlateText(entity, fake) end
+        end
+    end)
+end)
+
+-- ─── Export de USO do item `fake_plate` ───────────────────────────────────────
+-- Espelha o padrão exports('useBenchItem', ...) de client/main.lua, registrado no item via
+-- client = { export = 'vp_chopshop.useFakePlateItem' }. `data.metadata.plate` traz a placa-alvo.
+local _applyingFakePlate = false  -- trava reentrância (anti duplo-clique)
+
+exports('useFakePlateItem', function(data)
+    if _applyingFakePlate then return end
+    if not Config.Plates or not Config.Plates.Enable then
+        VPChopNotify(L('notify_generic_error'), 'error'); return
+    end
+
+    -- Placa-alvo vem da metadata do item (definida na forja).
+    local sourcePlate = data and data.metadata and data.metadata.plate
+
+    -- Resolver o veículo: o que o jogador dirige OU o mais próximo (ox_lib).
+    local ped = PlayerPedId()
+    local veh = GetVehiclePedIsIn(ped, false)
+    if veh == 0 then
+        local coords = GetEntityCoords(ped)
+        local maxDist = (tonumber(Config.Plates.ApplyMaxDistance) or 4.0)
+        veh = lib.getClosestVehicle(coords, maxDist, true)
+    end
+    if not veh or veh == 0 or not DoesEntityExist(veh) then
+        VPChopNotify(L('fake_plate_no_vehicle'), 'error'); return
+    end
+
+    local netId = NetworkGetNetworkIdFromEntity(veh)
+    if not netId or netId == 0 then
+        VPChopNotify(L('notify_generic_error'), 'error'); return
+    end
+
+    _applyingFakePlate = true
+
+    -- Barra de progresso (mesmo padrão de craft do resource).
+    local okBar = lib.progressBar({
+        duration = 6000,
+        label = L('fake_plate_progress_apply'),
+        useWhileDead = false,
+        canCancel = true,
+        disable = { move = true, car = true, combat = true },
+        anim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+    })
+    if not okBar then _applyingFakePlate = false; return end
+
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:applyFakePlate', false, netId, sourcePlate)
+    _applyingFakePlate = false
+    if not cbOk or not res then
+        VPChopNotify(L('notify_generic_error'), 'error'); return
+    end
+
+    if res.ok then
+        VPChopNotify(L('fake_plate_applied_success'), 'success')
+    else
+        local errKey = ({
+            owned     = 'fake_plate_owned_blocked',
+            in_use    = 'fake_plate_in_use',
+            range     = 'fake_plate_too_far',
+            no_item   = 'fake_plate_no_item',
+            no_plate  = 'fake_plate_generic_error',
+            same      = 'fake_plate_generic_error',
+            cooldown  = 'fake_plate_cooldown',
+            vehicle   = 'fake_plate_no_vehicle',
+        })[res.err] or 'fake_plate_generic_error'
+        VPChopNotify(L(errKey), 'error')
+    end
+end)
+
+-- ─── ox_target POLICIAL: remover placa falsa ─────────────────────────────────
+-- Opção GLOBAL em veículos, visível só para jobs policiais (Config.Plates.PoliceJobs) e só
+-- quando o carro está disfarçado (callback 'vp_chopshop:isFakePlated'). A verdade (job,
+-- proximidade, disfarce) é revalidada no servidor — o canInteract é apenas UX.
+CreateThread(function()
+    if not Config.Plates or not Config.Plates.Enable then return end
+
+    local tries = 0
+    while GetResourceState('ox_target') ~= 'started' and tries < 120 do
+        Wait(250); tries = tries + 1
+    end
+    if GetResourceState('ox_target') ~= 'started' then return end
+
+    -- Conjunto de jobs policiais para o gate de UX no client.
+    local policeSet = {}
+    for _, j in ipairs(Config.Plates.PoliceJobs or { 'police', 'bcso', 'sheriff' }) do
+        policeSet[j] = true
+    end
+
+    --- Verifica o job atual do jogador via qbx_core (UX; servidor revalida).
+    local function playerIsPolice()
+        if GetResourceState('qbx_core') ~= 'started' then return false end
+        local ok, pdata = pcall(function() return exports.qbx_core:GetPlayerData() end)
+        local job = ok and pdata and pdata.job and pdata.job.name
+        return job ~= nil and policeSet[job] == true
+    end
+
+    exports.ox_target:addGlobalVehicle({
+        {
+            name     = 'vp_chopshop:removeFakePlate',
+            label    = L('fake_plate_target_remove'),
+            icon     = 'fa-solid fa-id-card',
+            distance = 2.5,
+            canInteract = function(entity)
+                -- 1) só policiais (UX — servidor revalida o job)
+                if not playerIsPolice() then return false end
+                if not entity or entity == 0 or not DoesEntityExist(entity) then return false end
+                -- 2) só em carro disfarçado: marcador statebag rápido (replicado pelo server)
+                local okState, marker = pcall(function() return Entity(entity).state.vpFakeRealPlate end)
+                return okState and marker ~= nil
+            end,
+            onSelect = function(odata)
+                local veh = odata and odata.entity
+                if not veh or veh == 0 or not DoesEntityExist(veh) then
+                    VPChopNotify(L('notify_generic_error'), 'error'); return
+                end
+                local netId = NetworkGetNetworkIdFromEntity(veh)
+                if not netId or netId == 0 then
+                    VPChopNotify(L('notify_generic_error'), 'error'); return
+                end
+                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:removeFakePlate', false, netId)
+                if not cbOk or not res then
+                    VPChopNotify(L('notify_generic_error'), 'error'); return
+                end
+                if res.ok then
+                    VPChopNotify(L('fake_plate_removed_success'), 'success')
+                else
+                    local errKey = ({
+                        not_police = 'fake_plate_not_police',
+                        no_fake    = 'fake_plate_not_disguised',
+                        range      = 'fake_plate_too_far',
+                        cooldown   = 'fake_plate_cooldown',
+                    })[res.err] or 'fake_plate_generic_error'
+                    VPChopNotify(L(errKey), 'error')
+                end
+            end,
+        },
+    })
+end)

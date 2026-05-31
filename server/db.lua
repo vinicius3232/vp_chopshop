@@ -77,6 +77,19 @@ function VPChopDbInit()
                     PRIMARY KEY (`identifier`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [FASE2 placas] Mapa placa FALSA → placa REAL (disfarce de consulta MDT).
+            -- fake_plate é PK (colisão de falsas rejeitada); índice em real_plate p/ resolver inverso.
+            -- SEM expires_at: a falsa dura até guardar o carro ou a polícia remover.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_fake_plates` (
+                    `fake_plate` VARCHAR(12) NOT NULL,
+                    `real_plate` VARCHAR(12) NOT NULL,
+                    `applied_by` VARCHAR(60) DEFAULT NULL,
+                    `applied_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`fake_plate`),
+                    INDEX `idx_fake_real` (`real_plate`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
             VPChopDBReady = true
             TriggerEvent('vp_chopshop:server:dbReady')
         end)
@@ -157,4 +170,72 @@ end
 function VPChopDbDeleteWelder(id)
     -- [FIX C-02] Mesmo motivo acima.
     MySQL.query.await('DELETE FROM vp_chopshop_welders WHERE id = ?', { id })
+end
+
+-- ─── [FASE2 placas] Mapa placa falsa → real ──────────────────────────────────
+
+--- Insere o mapeamento falsa→real. Retorna false se a placa falsa já estiver em uso
+--- (colisão de PK) ou em qualquer falha de DB. Atômico: o INSERT é a checagem de colisão.
+---@param fakePlate string
+---@param realPlate string
+---@param appliedBy string|nil
+---@return boolean ok
+function VPChopDbInsertFakePlate(fakePlate, realPlate, appliedBy)
+    -- INSERT puro (sem ON DUPLICATE): se a fake_plate já existe, a PK viola e o pcall captura.
+    local ok = pcall(MySQL.query.await,
+        'INSERT INTO vp_chop_fake_plates (fake_plate, real_plate, applied_by) VALUES (?, ?, ?)',
+        { fakePlate, realPlate, appliedBy }
+    )
+    return ok == true
+end
+
+--- Resolve a placa REAL a partir de uma placa VISÍVEL (que pode ser falsa).
+--- Se a visível não estiver mapeada, devolve a própria visível (era a real).
+---@param visiblePlate string
+---@return string realPlate
+function VPChopDbResolveRealPlate(visiblePlate)
+    if not visiblePlate or visiblePlate == '' then return visiblePlate end
+    local real = MySQL.scalar.await(
+        'SELECT real_plate FROM vp_chop_fake_plates WHERE fake_plate = ?', { visiblePlate }
+    )
+    return real or visiblePlate
+end
+
+--- Busca a placa real mapeada por uma falsa específica. nil se não houver mapeamento.
+---@param fakePlate string
+---@return string|nil realPlate
+function VPChopDbGetRealByFake(fakePlate)
+    if not fakePlate or fakePlate == '' then return nil end
+    return MySQL.scalar.await(
+        'SELECT real_plate FROM vp_chop_fake_plates WHERE fake_plate = ?', { fakePlate }
+    )
+end
+
+--- Busca a placa FALSA exibida a partir da placa REAL (resolução inversa, para re-sync).
+--- nil se não houver disfarce ativo para essa placa real.
+---@param realPlate string
+---@return string|nil fakePlate
+function VPChopDbGetFakeByReal(realPlate)
+    if not realPlate or realPlate == '' then return nil end
+    return MySQL.scalar.await(
+        'SELECT fake_plate FROM vp_chop_fake_plates WHERE real_plate = ? LIMIT 1', { realPlate }
+    )
+end
+
+--- Remove o mapeamento de uma placa falsa (revertendo o disfarce).
+---@param fakePlate string
+function VPChopDbDeleteFakePlate(fakePlate)
+    if not fakePlate or fakePlate == '' then return end
+    MySQL.query.await('DELETE FROM vp_chop_fake_plates WHERE fake_plate = ?', { fakePlate })
+end
+
+--- true se a placa falsa já estiver em uso (colisão potencial antes do INSERT).
+---@param fakePlate string
+---@return boolean
+function VPChopDbFakePlateInUse(fakePlate)
+    if not fakePlate or fakePlate == '' then return false end
+    local exists = MySQL.scalar.await(
+        'SELECT EXISTS(SELECT 1 FROM vp_chop_fake_plates WHERE fake_plate = ?)', { fakePlate }
+    )
+    return exists == 1
 end

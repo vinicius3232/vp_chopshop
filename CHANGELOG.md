@@ -2,6 +2,41 @@
 
 ---
 
+## [1.9.0] — 2026-05-31 — Placas falsas (Fases 2 e 3)
+
+### Added (Feature — placa falsa)
+- **Forjar placa falsa** na bancada (tier 2): consome uma `stolen_plate` específica (match por
+  metadata) + insumos (`plastic`+`aluminum`, configuráveis) com rollback atômico → gera item
+  `fake_plate` com metadata `{ plate }` herdada da placa roubada. Opção no menu da bancada.
+- **Aplicar placa falsa** (`vp_chopshop.useFakePlateItem`): troca a placa visível do veículo e
+  **engana a consulta do MDT** — quem consulta vê a placa falsa "limpa". Persistido em
+  `vp_chop_fake_plates` (mapa falsa→real).
+- **Heat segue a placa REAL** mesmo com a falsa exibida (novo `VPChopMDT.GetRealPlate` +
+  `VPChopDbResolveRealPlate`, roteado em `server/heat.lua`). O crime segue o carro; só a consulta
+  pública é enganada. VIN scratch permanece o caminho permanente/caro (não canibalizado).
+- **Remoção pela polícia**: ox_target gated por job (`Config.Plates.PoliceJobs`) restaura a placa
+  real e apaga o mapeamento.
+- **Tabela nova** `vp_chop_fake_plates` (SQL + auto-criação em `VPChopDbInit`).
+- **Sync robusto** via statebag `vpFakeRealPlate` (re-aplica a placa visível para clientes que
+  entram no scope depois). A placa falsa não vai no statebag (segurança).
+
+### Security / Design
+- **[Garagem] Placa falsa bloqueada em veículo PRÓPRIO** (`Config.Plates.BlockOnOwned=true`):
+  carro owned do qbx tem `state.vehicleid`; guardá-lo com placa falsa gravaria a falsa no
+  `player_vehicles`. Carros criminosos (alvo real) não têm vehicleid → o disfarce funciona neles
+  sem risco. Decisão que NÃO exige editar qbx_garages.
+- Todos os callbacks (`forgeFakePlate`/`applyFakePlate`/`removeFakePlate`) com validação
+  server-side completa: source, cooldown, proximity, posse/metadata do item, colisão de placa por
+  PK, insert atômico com rollback, cleanup em `playerDropped` e `entityRemoved`.
+
+### Notes
+- Item `fake_plate` já existia no `ox_inventory` (órfão); foi **incrementado** (consume + client
+  export + metadata) em vez de duplicado.
+- Requer a tabela `vp_chop_fake_plates` (criada no boot) e o item `fake_plate` atualizado no
+  `ox_inventory`.
+
+---
+
 ## [1.8.0] — 2026-05-31 — Roubo de placa física (Fase 1)
 
 ### Added (Feature — Fase 1 de placas)

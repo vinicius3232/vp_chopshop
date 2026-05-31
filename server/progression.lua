@@ -18,6 +18,7 @@ local XP_TABLE = {
     tyre_mission = 80,
     vin_scratch  = 30,
     plate_theft  = 12,  -- [FASE1 placas] XP de roubo de placa física (progressão tier 1)
+    fake_plate   = 22,  -- [FASE2 placas] XP de forja de placa falsa (gate tier 2; valor real vem do Config)
     material     = 10,
     car          = 150,
 }

@@ -139,6 +139,39 @@ function BridgeRemoveCash(src, amount, reason)
     return false
 end
 
+--- [FASE2 placas] Nome do job atual do jogador (para gate policial na remoção).
+--- Retorna '' se indisponível. Espelha a leitura de job já usada em BridgeCountCops.
+---@param src number
+---@return string jobName
+function BridgeGetJob(src)
+    if _framework == 'qbox' and _QBX then
+        local ok, player = pcall(function() return _QBX:GetPlayer(src) end)
+        if ok and player then
+            local job = player.PlayerData and player.PlayerData.job and player.PlayerData.job.name
+            return job or ''
+        end
+        return ''
+    elseif _framework == 'esx' and _ESX then
+        local x = _ESX.GetPlayerFromId(src)
+        local job = x and x.job and x.job.name
+        return job or ''
+    end
+    return ''
+end
+
+--- [FASE2 placas] true se o job do jogador está na lista de jobs policiais informada.
+---@param src number
+---@param jobs string[]
+---@return boolean
+function BridgeIsPolice(src, jobs)
+    local job = BridgeGetJob(src)
+    if job == '' then return false end
+    for i = 1, #jobs do
+        if jobs[i] == job then return true end
+    end
+    return false
+end
+
 --- Conta jogadores online com jobs de polícia (para bónus de discard).
 ---@return integer
 function BridgeCountCops()

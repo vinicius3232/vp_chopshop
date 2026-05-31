@@ -367,6 +367,53 @@ Config.Plates = {
 
     --- Dispara alerta de polícia (mesmo mecanismo do alarme) ao roubar a placa.
     DispatchOnSteal = true,
+
+    -- ───────────────────────────────────────────────────────────────────────
+    -- [FASE2 placas] Forja + aplicação de placa falsa (disfarce de consulta MDT).
+    -- ───────────────────────────────────────────────────────────────────────
+
+    --- Tier mínimo de progressão para FORJAR placa falsa na bancada (gate via
+    --- VPChopGetProgression). Fase 2 = tier 2.
+    ForgeTier = 2,
+
+    --- Insumos consumidos na forja, ALÉM da `stolen_plate` específica (que doa a
+    --- placa-fonte). { item = quantidade }. Ajustável.
+    ForgeInputs = {
+        plastic  = 2,
+        aluminum = 1,
+    },
+
+    --- XP concedido ao forjar com sucesso (reason 'fake_plate' na XP_TABLE).
+    ForgeXp = 22,
+
+    --- Cooldown anti-farm da FORJA, por jogador, em segundos (revalidado no servidor).
+    ForgeCooldownSeconds = 15,
+
+    --- Cooldown anti-spam da APLICAÇÃO de placa falsa, por jogador, em segundos.
+    ApplyCooldownSeconds = 5,
+
+    --- Distância máxima (m) jogador↔veículo ao APLICAR placa falsa (verdade server-side).
+    ApplyMaxDistance = 4.0,
+
+    --- Raio (m) do broadcast filtrado de placa visível (aplicar/remover/restaurar).
+    --- Espelha o ~150u do roubo, mas cosmético → mantemos generoso.
+    VisibleSyncRadius = 200.0,
+
+    --- [FASE3 garagem] Bloquear APLICAR placa falsa em veículo PRÓPRIO/owned.
+    --- true  → carros com `Entity(veh).state.vehicleid` (ou cuja placa resolve em
+    ---         player_vehicles) NÃO podem receber placa falsa. Elimina o risco de
+    ---         gravar a falsa no player_vehicles ao guardar na garagem, SEM editar
+    ---         qbx_garages. Carros criminosos (alvo real) não têm vehicleid → o
+    ---         disfarce funciona neles, que é o caso de uso pretendido.
+    --- false → permite em qualquer veículo (só ative se você editou qbx_garages
+    ---         para reverter a placa antes do parkVehicle capturar os props).
+    BlockOnOwned = true,
+
+    --- Jobs policiais que podem REMOVER a placa falsa (furar o disfarce).
+    PoliceJobs = { 'police', 'bcso', 'sheriff' },
+
+    --- Cooldown anti-spam da REMOÇÃO policial, por jogador, em segundos.
+    RemoveCooldownSeconds = 3,
 }
 
 --- Ferramentas de desmanche niveladas por item.

@@ -16,7 +16,10 @@ AddEventHandler(VPChopEvt.PART_CHOPPED, function(src, netId, partKey, phase)
     -- Resolver placa a partir do netId para manter rastreio server-side
     local veh = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
     if veh and veh ~= 0 and DoesEntityExist(veh) then
-        local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+        -- [FASE2 placas] O crime segue a placa REAL: se houver disfarce ativo,
+        -- VPChopMDT.GetRealPlate converte a visível (falsa) na real antes de contar.
+        local visible = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+        local plate = VPChopMDT.GetRealPlate(visible)
         if plate and plate ~= '' then
             PartCountByPlate[plate] = (PartCountByPlate[plate] or 0) + 1
         end
@@ -107,7 +110,8 @@ end
 function VPChopHeatCheck(src, netId)
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return 'frio' end
-    local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+    -- [FASE2 placas] heat segue a placa REAL mesmo com placa falsa exibida.
+    local plate = VPChopMDT.GetRealPlate(GetVehicleNumberPlateText(veh):gsub('%s+', ''))
     -- [H2 FIX] Calcular label uma vez (1× MySQL.scalar.await) e reutilizar em notifyHeatChange.
     -- Antes: notifyHeatChange + VPChopHeatGetLabel = 2× VPChopHeatCalc = 2 SQL queries.
     local label = VPChopHeatGetLabel(plate)
@@ -141,7 +145,8 @@ lib.callback.register('vp_chopshop:vinScratch', function(src, netId)
     end
 
     -- Placa resolvida no servidor (nunca confiamos no cliente)
-    local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
+    -- [FASE2 placas] adultera-se o VIN da placa REAL — se houver disfarce, resolve antes.
+    local plate = VPChopMDT.GetRealPlate(GetVehicleNumberPlateText(veh):gsub('%s+', ''))
 
     -- Verificar tier ≥ 3
     local prog = VPChopGetProgression(src)

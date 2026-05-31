@@ -11,6 +11,7 @@
 --   vp_chop_fence_trust      — economia de confiança com o receptador
 --   vp_chop_fence_orders     — pedidos ativos do receptador (expirados purgados a cada 6h)
 --   vp_chop_progression      — XP e tier do jogador
+--   vp_chop_fake_plates      — [FASE2 placas] mapa placa FALSA → placa REAL (disfarce MDT)
 -- =============================================================
 
 -- ─── Bancadas de desmanche ───────────────────────────────────────────────────
@@ -90,4 +91,20 @@ CREATE TABLE IF NOT EXISTS `vp_chop_progression` (
   `updated_at`        TIMESTAMP          NOT NULL DEFAULT CURRENT_TIMESTAMP
                                                   ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`identifier`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── [FASE2 placas] Mapa placa FALSA → placa REAL ─────────────────────────────
+-- Disfarce de consulta MDT: o veículo passa a EXIBIR `fake_plate`; o crime (heat,
+-- VIN scratch, contagem de peças) continua seguindo a `real_plate` via resolver.
+-- fake_plate é PK → garante que duas falsas iguais não coexistem (colisão rejeitada).
+-- Índice em real_plate p/ resolver inverso e limpeza por placa real, se necessário.
+-- SEM expires_at por design: a placa falsa dura até GUARDAR o carro ou a POLÍCIA remover.
+
+CREATE TABLE IF NOT EXISTS `vp_chop_fake_plates` (
+  `fake_plate` VARCHAR(12) NOT NULL COMMENT 'placa exibida (falsa), max 8 chars',
+  `real_plate` VARCHAR(12) NOT NULL COMMENT 'placa real do veiculo (alvo do crime)',
+  `applied_by` VARCHAR(60) DEFAULT NULL COMMENT 'identifier de quem aplicou',
+  `applied_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`fake_plate`),
+  INDEX `idx_fake_real` (`real_plate`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

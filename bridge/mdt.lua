@@ -43,6 +43,27 @@ function VPChopMDT.ReportActivity(plate, src, action)
     -- No-op por padrão.
 end
 
+-- ─── [FASE2 placas] Disfarce de placa: resolver visível → real ────────────────
+-- A consulta normal do MDT continua "enganada" de graça (placa visível = falsa).
+-- O CRIME, porém, segue a placa REAL: server/heat.lua roteia toda leitura de placa
+-- por VPChopMDT.GetRealPlate antes de calcular heat / contar peças / ler VIN scratch.
+--
+-- VPChopDbResolveRealPlate vive em server/db.lua (carregado depois deste arquivo no
+-- fxmanifest), então resolvemos a referência em runtime, não no load.
+
+--- Resolve a placa REAL por trás de uma placa VISÍVEL (que pode ser falsa).
+--- Se não houver disfarce mapeado, devolve a própria visível.
+---@param visiblePlate string
+---@return string realPlate
+function VPChopMDT.GetRealPlate(visiblePlate)
+    if not visiblePlate or visiblePlate == '' then return visiblePlate end
+    -- VPChopDbResolveRealPlate definida em server/db.lua; checagem de existência por segurança.
+    if VPChopDbResolveRealPlate then
+        return VPChopDbResolveRealPlate(visiblePlate)
+    end
+    return visiblePlate
+end
+
 -- Escuta mudanças de heat e reporta ao MDT quando escala para quente/queimando.
 AddEventHandler(VPChopEvt.HEAT_CHANGED, function(plate, newLevel)
     if newLevel == 'quente' or newLevel == 'queimando' then
