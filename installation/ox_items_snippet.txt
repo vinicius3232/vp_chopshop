@@ -84,6 +84,18 @@
     client = { export = 'vp_chopshop.useFakePlateItem' },
 },
 
+-- [SERIAL v1.13.0] Scanner de peças — ferramenta da POLÍCIA para inspecionar as car_parts
+-- de um suspeito (ox_target global em jogadores). Sem client.export: não é "usável", basta
+-- carregar. O scan normal vê roubada/riscada e a forjada parece legal; a PERÍCIA (carregar
+-- também o forensic_kit do resource `evidences`) flagra a forjada cruzando a série no DB.
+['parts_scanner'] = {
+    label = 'Scanner de Peças',
+    weight = 800,
+    stack = false,
+    close = true,
+    description = 'Lê o número de série das peças de carro de um suspeito. Com kit forense, revela séries forjadas.',
+},
+
 -- [EVIDENCE v1.11.0] Luvas — counterplay forense. POSSUIR no inventário bloqueia digitais
 -- nas ações de crime (checado server-side em bridge/evidence.lua via InvCount). NÃO é
 -- consumível: basta carregar. DNA (sangue) ainda pode cair mesmo com luvas (Config.Evidence).

@@ -121,7 +121,11 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
     -- [FIX H-3] Verificar retorno de InvAdd — inventário cheio: peça marcada mas notificar jogador
     local reward = Config.AdvancedChop.DoorReward or { item = 'car_parts', amount = 1 }
     if reward.item and (reward.amount or 0) > 0 then
-        if not InvAdd(src, reward.item, reward.amount) then
+        -- [SERIAL] car_parts nasce ROUBADA com série + modelo de origem (mesma série por carro).
+        local ok = (reward.item == 'car_parts')
+            and VPChopAddStolenCarParts(src, netId, reward.amount)
+            or  InvAdd(src, reward.item, reward.amount)
+        if not ok then
             TriggerClientEvent('ox_lib:notify', src, { type='warning', description='Inventário cheio — item de recompensa perdido.' })
         end
     end
@@ -193,7 +197,11 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     -- [FIX H-3] Verificar retorno de InvAdd — inventário cheio: motor marcado mas notificar jogador
     local reward = Config.AdvancedChop.EngineReward or { item = 'car_parts', amount = 5 }
     if reward.item and (reward.amount or 0) > 0 then
-        if not InvAdd(src, reward.item, reward.amount) then
+        -- [SERIAL] As 5 car_parts do motor herdam a MESMA série/modelo do carro (mesmo netId).
+        local ok = (reward.item == 'car_parts')
+            and VPChopAddStolenCarParts(src, netId, reward.amount)
+            or  InvAdd(src, reward.item, reward.amount)
+        if not ok then
             TriggerClientEvent('ox_lib:notify', src, { type='warning', description='Inventário cheio — item de recompensa perdido.' })
         end
     end
@@ -247,7 +255,11 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
         if reward.item and (reward.amount or 0) > 0 then
             local chance = reward.chance or 1.0
             if math.random() <= chance then
-                if not InvAdd(src, reward.item, reward.amount) then
+                -- [SERIAL] Se a carcaça também der car_parts, herda a série/modelo do carro.
+                local ok = (reward.item == 'car_parts')
+                    and VPChopAddStolenCarParts(src, netId, reward.amount)
+                    or  InvAdd(src, reward.item, reward.amount)
+                if not ok then
                     anyFull = true
                 end
             end

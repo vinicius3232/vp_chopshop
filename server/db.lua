@@ -107,6 +107,17 @@ function VPChopDbInit()
             end)
             pcall(function() MySQL.query.await('ALTER TABLE `vp_chop_fake_plates` DROP INDEX `idx_fake_real`') end)
             pcall(function() MySQL.query.await('ALTER TABLE `vp_chop_fake_plates` ADD UNIQUE KEY `uq_real_plate` (`real_plate`)') end)
+            -- [SERIAL] Registro idempotente de números de série LEGÍTIMOS de car_parts.
+            -- Só séries de procedência legal entram aqui; a perícia (forensic_kit) consulta
+            -- "esta série consta?". Forjadas NÃO constam → caem só na perícia.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_legit_serials` (
+                    `serial`     VARCHAR(16) NOT NULL,
+                    `source`     VARCHAR(40) DEFAULT NULL,
+                    `created_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`serial`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
             VPChopDBReady = true
             TriggerEvent('vp_chopshop:server:dbReady')
         end)
@@ -280,4 +291,31 @@ end
 ---@return table[]
 function VPChopDbLoadAllDisguises()
     return MySQL.query.await('SELECT real_plate, fake_plate FROM vp_chop_fake_plates') or {}
+end
+
+-- ─── [SERIAL] Números de série LEGÍTIMOS de car_parts ─────────────────────────
+-- A perícia da polícia consulta "esta série consta como legítima?". Só fontes legais
+-- registram aqui (IssueLegalParts / vendedor). Forjadas NÃO entram → caem na perícia.
+
+--- [SERIAL] Registra uma série como LEGÍTIMA. INSERT IGNORE: colisão de PK é no-op
+--- (a série já existe = já é legítima). Não usar concatenação — sempre `?`.
+---@param serial string  número de série (A-Z0-9, ≤16)
+---@param source string|nil  origem ('legal_supply', 'legal_vendor', ...)
+function VPChopDbRegisterLegitSerial(serial, source)
+    if type(serial) ~= 'string' or serial == '' or #serial > 16 then return end
+    MySQL.query.await(
+        'INSERT IGNORE INTO vp_chop_legit_serials (serial, source) VALUES (?, ?)',
+        { serial, source or 'legal' }
+    )
+end
+
+--- [SERIAL] true se a série consta no registro de legítimas (consulta da perícia).
+---@param serial string
+---@return boolean
+function VPChopDbIsLegitSerial(serial)
+    if type(serial) ~= 'string' or serial == '' or #serial > 16 then return false end
+    local exists = MySQL.scalar.await(
+        'SELECT EXISTS(SELECT 1 FROM vp_chop_legit_serials WHERE serial = ?)', { serial }
+    )
+    return exists == 1
 end

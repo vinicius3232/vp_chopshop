@@ -162,6 +162,16 @@ function VPChopUpsertBench(bench)
         }
     end
 
+    -- [SERIAL] Opções de série na bancada: "Riscar série" / "Forjar série". Só aparecem
+    -- quando o servidor confirma elegibilidade (peça elegível + tier). A verdade está nos
+    -- callbacks server (vp_chopshop:serial:scratch / :forge). VPChopSerialBenchOptions é
+    -- definida em client/partserial.lua (carregado antes de main.lua → bench).
+    if Config.PartSerial and Config.PartSerial.Enable and VPChopSerialBenchOptions then
+        for _, opt in ipairs(VPChopSerialBenchOptions(bench.id)) do
+            options[#options + 1] = opt
+        end
+    end
+
     -- [GAMEPLAY unificação] Target "entregar peça" REMOVIDO da bancada.
     -- A recompensa agora é imediata no desmanche; a bancada só faz craft (recipes acima)
     -- e pickup (abaixo). O fluxo de pneu→truck→fence NÃO usa a bancada e segue intacto.

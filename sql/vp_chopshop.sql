@@ -12,6 +12,7 @@
 --   vp_chop_fence_orders     — pedidos ativos do receptador (expirados purgados a cada 6h)
 --   vp_chop_progression      — XP e tier do jogador
 --   vp_chop_fake_plates      — [FASE2 placas] mapa placa FALSA → placa REAL (disfarce MDT)
+--   vp_chop_legit_serials    — [SERIAL] registro de números de série LEGÍTIMOS (perícia)
 -- =============================================================
 
 -- ─── Bancadas de desmanche ───────────────────────────────────────────────────
@@ -109,6 +110,21 @@ CREATE TABLE IF NOT EXISTS `vp_chop_fake_plates` (
   `applied_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`fake_plate`),
   UNIQUE KEY `uq_real_plate` (`real_plate`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── [SERIAL] Números de série LEGÍTIMOS de car_parts ─────────────────────────
+-- Camada forense: SÓ entram aqui as séries de peças de procedência LEGAL (fonte legal /
+-- vendedor). A perícia da polícia (forensic_kit) consulta "esta série consta como
+-- legítima?". Uma série FORJADA pelo bandido NÃO é registrada aqui → passa no scan
+-- normal como "Registrada" mas a perícia a flagra como FALSA (não consta).
+--   serial:  PK, ≤16 chars (gerado em runtime; A-Z0-9).
+--   source:  origem ('legal_supply', 'legal_vendor', etc.) — auditoria.
+
+CREATE TABLE IF NOT EXISTS `vp_chop_legit_serials` (
+  `serial`     VARCHAR(16) NOT NULL COMMENT 'numero de serie legitimo (A-Z0-9)',
+  `source`     VARCHAR(40) DEFAULT NULL COMMENT 'origem da peca legal',
+  `created_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`serial`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- [F2 persist] MIGRAÇÃO de bases vindas da v1.9.0 (que usavam INDEX idx_fake_real não-único).

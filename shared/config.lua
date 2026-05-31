@@ -456,6 +456,72 @@ Config.Plates = {
     RemoveCooldownSeconds = 3,
 }
 
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [SERIAL] Número de série da car_parts — economia + forense                 ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+-- Conceito: cada car_parts ganha metadata de série + estado. Peça do desmanche nasce
+-- ROUBADA (revela "roubada de um {Modelo}" — NUNCA placa). O bandido pode RISCAR (apaga
+-- a série) ou FORJAR (cria série falsa que engana o scan normal). A fonte LEGAL gera série
+-- registrada no DB. A polícia inspeciona (item parts_scanner) — o scan normal vê
+-- roubada/riscada e a forjada PARECE legal; só a PERÍCIA (forensic_kit) flagra a forjada.
+Config.PartSerial = {
+    --- Liga/desliga toda a camada de série (server + client). Se false, car_parts volta
+    --- a ser entregue sem metadata (comportamento legado) e nenhum target/inspeção aparece.
+    Enable = true,
+
+    --- Tier mínimo de progressão (VPChopGetProgression(src).tier) para RISCAR a série
+    --- de uma car_parts 'stolen' na bancada (apaga a série visível → estado 'scratched').
+    ScratchTier = 2,
+
+    --- Tier mínimo para FORJAR uma série falsa nova ('stolen'/'scratched' → 'forged').
+    --- A forjada engana o scan normal (parece legal); só a perícia revela.
+    ForgeTier = 4,
+
+    --- Insumos consumidos ao FORJAR (além da própria car_parts, que NÃO é consumida —
+    --- só muda de estado). { item = quantidade }. Deixe {} para forja sem custo.
+    ForgeInputs = {
+        plastic  = 2,
+        aluminum = 1,
+    },
+
+    --- Cooldown anti-farm (segundos) das ações de bancada (riscar/forjar), por jogador.
+    ScratchCooldownSeconds = 3,
+    ForgeCooldownSeconds   = 8,
+
+    --- Cooldown (segundos) da inspeção policial por jogador (anti-spam do scanner).
+    InspectCooldownSeconds = 2,
+
+    --- Distância máxima (m) jogador-polícia ↔ alvo na inspeção (verdade server-side).
+    InspectDistance = 2.5,
+
+    --- Item necessário para a polícia inspecionar peças (registrar no ox_inventory).
+    ScannerItem = 'parts_scanner',
+
+    --- Item de perícia: se o policial o possui, a inspeção CRUZA a série no registro
+    --- legítimo e revela as forjadas. Reutiliza o forensic_kit do resource `evidences`.
+    ForensicItem = 'forensic_kit',
+
+    --- Jobs policiais que podem inspecionar (reusa a lista das placas por padrão).
+    PoliceJobs = Config.Plates and Config.Plates.PoliceJobs or { 'police', 'bcso', 'sheriff' },
+
+    --- Vendedor LEGAL opcional (NPC fixo): vende car_parts 'legal' (série registrada no DB)
+    --- por dinheiro. Cobra via BridgeRemoveCash e chama o export IssueLegalParts.
+    LegalVendor = {
+        Enable = false,                          -- desligado por padrão (ajuste coords antes de ligar)
+        Coords = vector4(2331.0, 3127.0, 47.7, 270.0),  -- TROQUE para o seu mapa
+        Model  = 's_m_y_construct_02',
+        Price  = 600,                            -- cash por compra
+        Amount = 1,                              -- car_parts entregues por compra
+        Blip = {
+            Enable = true,
+            Sprite = 402,
+            Color  = 2,
+            Scale  = 0.7,
+            Label  = 'Peças (legal)',
+        },
+    },
+}
+
 --- Ferramentas de desmanche niveladas por item.
 --- despatchChance: chance 0..1 de alertar a polícia (1.0 = sempre).
 --- speedMult: multiplicador do tempo da barra de progresso (0.5 = metade do tempo).

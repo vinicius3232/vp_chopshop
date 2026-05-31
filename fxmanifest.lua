@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.12.0'
+version '1.13.0'
 
 dependencies {
     'ox_lib',
@@ -27,6 +27,8 @@ client_scripts {
     'client/placement.lua',
     'client/carry.lua',  -- [L2 FIX] renomeado de lifts.lua (elevador removido; contém carry system)
     -- [L3 FIX] client/tyres.lua e client/npc.lua removidos — tombstones vazios; carga desnecessária eliminada.
+    -- [SERIAL] antes de bench.lua (bench usa VPChopSerialBenchOptions) e main.lua.
+    'client/partserial.lua',
     'client/bench.lua',
     'client/welder.lua',
     'client/fence.lua',
@@ -56,6 +58,10 @@ server_scripts {
     'server/ambush.lua',
     'server/fence.lua',
     'server/progression.lua',
+    -- [SERIAL] número de série da car_parts. Depois de db.lua (helpers de série),
+    -- progression.lua (VPChopGetProgression) e bridges (Inv*, Bridge*, IsValidSource);
+    -- ANTES de advanced_chop.lua (que usa VPChopAddStolenCarParts) e main.lua.
+    'server/partserial.lua',
     -- [FASE1 placas] depois de heat.lua e progression.lua (usa VPChopMDT, Validate*, Inv*,
     -- VPChopEvt e o listener de PART_CHOPPED da progressão), antes de main.lua.
     'server/plates.lua',

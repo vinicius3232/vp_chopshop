@@ -2,6 +2,57 @@
 
 ---
 
+## [1.13.0] — 2026-05-31 — Número de série da car_parts (economia + forense)
+
+### Added
+- **[SERIAL]** Cada `car_parts` agora carrega metadata
+  `{ serial, state = 'legal'|'stolen'|'scratched'|'forged', sourceModel }`. Camada de economia
+  + forense: cria RP para bandido e polícia sem alterar consumo/venda da peça.
+- **[SERIAL]** **Origem ROUBADA:** as `car_parts` do desmanche (Fase 2 portas, Fase 3 motor e,
+  se configurado, Fase 4 carcaça) nascem `state='stolen'` com **UMA série por VEÍCULO** — todas
+  as peças do mesmo `netId` compartilham `serial` + `sourceModel` (cache em memória limpo no
+  `entityRemoved`). `sourceModel` é o **display name** resolvido server-side
+  (`GetDisplayNameFromVehicleModel`) — **NUNCA a placa** (regra absoluta, coerente com as
+  marcas de pneu).
+- **[SERIAL]** **Origem LEGAL:** export `exports['vp_chopshop']:IssueLegalParts(src, amount, source?)`
+  → gera série, registra como **legítima** no DB (`vp_chop_legit_serials`) e entrega
+  `car_parts` `state='legal'`. Mecânicas de oficina podem integrar. Legal e roubado **coexistem**.
+- **[SERIAL]** **Bancada — riscar** (`Config.PartSerial.ScratchTier`, padrão 2): apaga a série de
+  uma peça `stolen` → `state='scratched'` (scan normal mostra "Série riscada / adulterada").
+- **[SERIAL]** **Bancada — forjar** (`Config.PartSerial.ForgeTier`, padrão 4): gera série falsa
+  NOVA (NÃO registrada no DB) em peça `stolen`/`scratched` → `state='forged'`. Consome
+  `Config.PartSerial.ForgeInputs` (rollback atômico). A forjada **parece legal** no scan normal.
+- **[SERIAL]** **Inspeção da polícia:** novo item `parts_scanner` + **ox_target global em
+  jogadores** "Inspecionar peças de carro" (gated por job policial). Callback
+  `vp_chopshop:inspectParts` valida polícia + scanner + proximidade server-side, lê as
+  `car_parts` do alvo e agrupa por estado:
+  - Scan **normal**: `legal`→"Registrada", `stolen`→"ROUBADA (de um {modelo})",
+    `scratched`→"Série riscada (adulterada)", `forged`→**aparece "Registrada"** (engana).
+  - **Perícia** (policial com `forensic_kit`): cruza a série dos "Registrada" em
+    `vp_chop_legit_serials` — não consta → **"SÉRIE FORJADA (falsa)"**. Forja só cai na perícia.
+  - **NUNCA expõe placa** (nem no resultado nem no log do MDT).
+- **[SERIAL]** **Vendedor legal opcional** (`Config.PartSerial.LegalVendor`): NPC fixo com
+  ox_target "Comprar peças (legal)"; cobra cash (`BridgeRemoveCash`) e chama `IssueLegalParts`.
+  Desligado por padrão (ajuste coords antes de habilitar).
+- **[SERIAL]** Nova tabela `vp_chop_legit_serials (serial PK, source, created_at)` —
+  auto-criação idempotente no `VPChopDbInit` + bloco em `sql/vp_chopshop.sql`. Helpers
+  `VPChopDbRegisterLegitSerial(serial, source)` e `VPChopDbIsLegitSerial(serial)`.
+- **[SERIAL]** Bloco `Config.PartSerial` (Enable, ScratchTier, ForgeTier, ForgeInputs,
+  cooldowns, InspectDistance, ScannerItem, ForensicItem='forensic_kit', PoliceJobs, LegalVendor).
+- **[SERIAL]** Item `parts_scanner` registrado em `ox_inventory/data/items.lua` e no
+  `installation/ox_items_snippet.txt`. Locale (en/pt/es/fr/tr) para todas as notify/labels novas.
+- **[SERIAL]** Novos arquivos: `server/partserial.lua` (núcleo: geração de série por carro,
+  bancada, fonte legal, inspeção) e `client/partserial.lua` (opções de bancada, target global da
+  polícia, vendedor legal).
+
+### Notes
+- **Stacking:** `car_parts` com metadata distinta NÃO empilha — 1 stack por carro (aceitável).
+- **Economia preservada:** receitas da bancada (`bench_repairkit`, ordens do fence) e a venda no
+  fence consomem `car_parts` via `RemoveItem` **sem metadata** → removem qualquer instância. O
+  estado da série é uma camada FORENSE, não afeta consumo/venda.
+
+---
+
 ## [1.12.0] — 2026-05-31 — Marcas de pneu (pista forense de fuga)
 
 ### Added
