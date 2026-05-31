@@ -2,6 +2,27 @@
 
 ---
 
+## [1.13.2] — 2026-05-31 — Rebalanceamento de economia (curva risco→recompensa)
+
+### Changed (Economia)
+- **Rodas (Fase 1) reduzidas:** eram a ação mais fácil (só macaco) e pagavam ~1110 cada
+  (≈ 4440 por carro só de rodas) — uma "mina de ouro" de baixíssimo risco que invertia a curva.
+  Agora ~465/roda (`aluminum 1×0.5, rubber 2, metalscrap 2`), abaixo de uma peça avançada.
+- **Carcaça (Fase 4) reforçada:** era a fase mais gated (precisa soldadora) e pagava só ~1260.
+  Agora ~2300, incluindo 1× `car_parts`. Mantém o desmanche completo (~8500) competitivo com a
+  entrega do carro inteiro no fence (8000), e recompensa quem chega na fase final.
+- **Efeito líquido:** renda por carro vai de ~10.100 → ~8.500, **redistribuída** do trivial
+  (puxar roda) para o arriscado (desmanche profundo). Curva risco→recompensa corrigida:
+  roda < peça avançada < carcaça < entrega do carro inteiro.
+
+### Notes
+- Tudo configurável em `Config.CarPartRewards` (rodas) e `Config.AdvancedChop.CarcassRewards`.
+- Números escolhidos por equilíbrio interno; **calibrar in-game** conforme a escala da economia
+  do servidor. Itens NÃO alterados: `WholeCarBasePayout` (8000), preços do fence, car_parts (400),
+  descarte (1500), tiers/XP (curva já saudável).
+
+---
+
 ## [1.13.1] — 2026-05-31 — Correções de auditoria (críticos + altos + rápidos)
 
 ### Fixed

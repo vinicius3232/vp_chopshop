@@ -238,9 +238,9 @@ Le script **ne dépend d'aucun framework** pour la logique principale — l'inve
 
 ## Version
 
-`1.13.1` — définie dans `fxmanifest.lua`. Historique complet dans [`CHANGELOG.md`](CHANGELOG.md).
+`1.13.2` — définie dans `fxmanifest.lua`. Historique complet dans [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.13.1 :** audit (nettoyage/sécurité/performance), récompense immédiate + embuscade,
+> **v1.7.0–1.13.2 :** audit (nettoyage/sécurité/performance), récompense immédiate + embuscade,
 > le **système complet de plaques** (vol physique → forge → fausse plaque qui trompe le MDT,
 > persistante et avec réversion en garage ; dispatch selon les témoins ; support QBox/QBCore/ESX),
 > la **couche forensique** (indices d'empreinte/ADN par action, avec gants et échelle selon le heat,

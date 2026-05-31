@@ -150,24 +150,32 @@ Config.CarPartRewards = {
     },
     -- Rodas: aro + borracha + sucata (~2.1 kg por roda)
     wheel_lf = {
-        aluminum   = { amount = 3, chance = 1.0 },
-        rubber     = { amount = 4, chance = 1.0 },
-        metalscrap = { amount = 3, chance = 1.0 },
+        -- [ECON v1.13.2] reduzido: roda era a ação mais fácil (Fase 1) e pagava ~1110 (mina de
+        -- ouro de baixo risco). Agora ~465 — abaixo de uma peça avançada. Ajuste a gosto.
+        aluminum   = { amount = 1, chance = 0.5 },
+        rubber     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 2, chance = 1.0 },
     },
     wheel_rf = {
-        aluminum   = { amount = 3, chance = 1.0 },
-        rubber     = { amount = 4, chance = 1.0 },
-        metalscrap = { amount = 3, chance = 1.0 },
+        -- [ECON v1.13.2] reduzido: roda era a ação mais fácil (Fase 1) e pagava ~1110 (mina de
+        -- ouro de baixo risco). Agora ~465 — abaixo de uma peça avançada. Ajuste a gosto.
+        aluminum   = { amount = 1, chance = 0.5 },
+        rubber     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 2, chance = 1.0 },
     },
     wheel_lr = {
-        aluminum   = { amount = 3, chance = 1.0 },
-        rubber     = { amount = 4, chance = 1.0 },
-        metalscrap = { amount = 3, chance = 1.0 },
+        -- [ECON v1.13.2] reduzido: roda era a ação mais fácil (Fase 1) e pagava ~1110 (mina de
+        -- ouro de baixo risco). Agora ~465 — abaixo de uma peça avançada. Ajuste a gosto.
+        aluminum   = { amount = 1, chance = 0.5 },
+        rubber     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 2, chance = 1.0 },
     },
     wheel_rr = {
-        aluminum   = { amount = 3, chance = 1.0 },
-        rubber     = { amount = 4, chance = 1.0 },
-        metalscrap = { amount = 3, chance = 1.0 },
+        -- [ECON v1.13.2] reduzido: roda era a ação mais fácil (Fase 1) e pagava ~1110 (mina de
+        -- ouro de baixo risco). Agora ~465 — abaixo de uma peça avançada. Ajuste a gosto.
+        aluminum   = { amount = 1, chance = 0.5 },
+        rubber     = { amount = 2, chance = 1.0 },
+        metalscrap = { amount = 2, chance = 1.0 },
     },
     -- Portas: cobre (fiação) + plástico (painel) + vidro + estrutura de aço (~3.2 kg por porta)
     door_pside_r = {
@@ -678,11 +686,16 @@ Config.AdvancedChop = {
     EngineReward = { item = 'car_parts', amount = 5 },
 
     --- Recompensas ao cortar a carcaça (Fase 4). chance: 0.0–1.0
+    -- [ECON v1.13.2] reforçado: a carcaça é a fase mais gated (precisa soldadora) e pagava só
+    -- ~1260. Agora ~2300, com 1× car_parts. Mantém o desmanche completo valendo a pena vs a
+    -- entrega do carro inteiro (8000). Ajuste a gosto.
     CarcassRewards = {
-        { item = 'metalscrap', amount = 8, chance = 1.0 },
-        { item = 'glass',      amount = 2, chance = 0.7 },
-        { item = 'plastic',    amount = 5, chance = 0.8 },
-        { item = 'rubber',     amount = 3, chance = 0.6 },
+        { item = 'metalscrap', amount = 10, chance = 1.0 },
+        { item = 'steel',      amount = 5,  chance = 1.0 },
+        { item = 'glass',      amount = 2,  chance = 0.7 },
+        { item = 'plastic',    amount = 5,  chance = 0.8 },
+        { item = 'rubber',     amount = 3,  chance = 0.6 },
+        { item = 'car_parts',  amount = 1,  chance = 1.0 },
     },
 
     --- Animação e prop da mão para desmanche de portas/capô/porta-malas (Fase 2).
