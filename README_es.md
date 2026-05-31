@@ -397,9 +397,9 @@ Este script **no depende de framework** para la lógica principal — el inventa
 
 ## Versión
 
-`1.13.0` — definida en `fxmanifest.lua`. Historial completo en [`CHANGELOG.md`](CHANGELOG.md).
+`1.13.1` — definida en `fxmanifest.lua`. Historial completo en [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.13.0:** auditoría (limpieza/seguridad/rendimiento), recompensa inmediata + emboscada,
+> **v1.7.0–1.13.1:** auditoría (limpieza/seguridad/rendimiento), recompensa inmediata + emboscada,
 > el **sistema completo de placas** (robo físico → forja → placa falsa que engaña al MDT,
 > persistente y con reversión de garaje; despacho por testigos; soporte QBox/QBCore/ESX),
 > la **capa forense** (rastros de huella/ADN por acción, con guantes y escala por heat,

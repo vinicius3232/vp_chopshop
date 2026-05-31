@@ -242,9 +242,9 @@ Betik, ana mantık için **framework'e bağımlı değildir** — envanter yaln�
 
 ## Sürüm
 
-`1.13.0` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
+`1.13.1` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
 
-> **v1.7.0–1.13.0:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
+> **v1.7.0–1.13.1:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
 > **tam plaka sistemi** (fiziksel çalma → üretim → MDT'yi kandıran sahte plaka,
 > kalıcı ve garaj geri dönüşümlü; tanık bazlı ihbar; QBox/QBCore/ESX desteği),
 > **adli katman** (eylem başına parmak izi/DNA izleri, eldiven ve heat ölçeklemesi ile,

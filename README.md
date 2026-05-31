@@ -595,11 +595,15 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.13.0` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.13.1` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.13.0:** auditoria (limpeza/segurança/performance), recompensa imediata + emboscada,
+> **v1.7.0–1.13.1:** auditoria (limpeza/segurança/performance), recompensa imediata + emboscada,
 > o **sistema completo de placas** (roubo físico → forja → placa falsa que engana o MDT,
 > persistente e com reversão de garagem; dispatch por testemunhas; suporte QBox/QBCore/ESX),
 > a **camada forense** (vestígios de digital/DNA via integração com o resource `evidences`),
 > as **marcas de pneu** (pista de fuga pelo modelo do veículo, sem placa),
 > e a **série das peças** (`car_parts` roubada/riscada/forjada/legal, com perícia da polícia).
+>
+> **v1.13.1** — patch de hardening de auditoria (bug + segurança + performance): correção da
+> detecção de colisão de placa falsa, vestígio/marca também no desmanche avançado, burnout
+> detectado em carros RWD, gate server-side das marcas de pneu, entre outros. Ver CHANGELOG.

@@ -548,9 +548,9 @@ The script **does not depend on any framework** for main logic — inventory is 
 
 ## Version
 
-`1.13.0` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
+`1.13.1` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.7.0–1.13.0:** audit (cleanup/security/performance), immediate reward + ambush,
+> **v1.7.0–1.13.1:** audit (cleanup/security/performance), immediate reward + ambush,
 > the **full license-plate system** (physical theft → forge → fake plate that fools the MDT,
 > persistent and with garage reversion; witness-based dispatch; QBox/QBCore/ESX support),
 > the **forensic layer** (fingerprint/DNA traces per action, with gloves and heat scaling,
