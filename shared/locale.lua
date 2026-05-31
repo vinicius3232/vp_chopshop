@@ -298,6 +298,8 @@ local Locales = {
         fake_plate_removed_success      = 'Fake plate removed — real plate restored.',
         fake_plate_not_police           = 'Only law enforcement can do that.',
         fake_plate_not_disguised        = 'This vehicle has no fake plate.',
+        -- [F4 testemunhas] Risk bonus notify (witnesses nearby during plate theft)
+        plate_witness_bonus_fmt         = 'Risky move! Bonus: +%d XP, +$%d',
     },
     pt = {
         notify_title = 'Desmanche',
@@ -595,6 +597,8 @@ local Locales = {
         fake_plate_removed_success      = 'Placa falsa removida — placa real restaurada.',
         fake_plate_not_police           = 'Apenas a polícia pode fazer isso.',
         fake_plate_not_disguised        = 'Este veículo não tem placa falsa.',
+        -- [F4 testemunhas] Notify de bônus por risco (testemunhas perto no roubo de placa)
+        plate_witness_bonus_fmt         = 'Roubo arriscado! Bônus: +%d XP, +$%d',
     },
     es = {
         notify_title = 'Desguace',
@@ -763,6 +767,8 @@ local Locales = {
         fake_plate_removed_success      = 'Placa falsa quitada — placa real restaurada.',
         fake_plate_not_police           = 'Solo la policía puede hacer eso.',
         fake_plate_not_disguised        = 'Este vehículo no tiene placa falsa.',
+        -- [F4 testemunhas] Aviso de bono por riesgo (testigos cerca al robar la placa)
+        plate_witness_bonus_fmt         = '¡Robo arriesgado! Bono: +%d XP, +$%d',
     },
     fr = {
         notify_title = 'Casse auto',
@@ -931,6 +937,8 @@ local Locales = {
         fake_plate_removed_success      = 'Fausse plaque retirée — vraie plaque restaurée.',
         fake_plate_not_police           = 'Seule la police peut faire cela.',
         fake_plate_not_disguised        = 'Ce véhicule n\'a pas de fausse plaque.',
+        -- [F4 testemunhas] Notif de bonus de risque (témoins proches lors du vol de plaque)
+        plate_witness_bonus_fmt         = 'Vol risqué ! Bonus : +%d XP, +$%d',
     },
     tr = {
         notify_title = 'Çıkma parça',
@@ -1099,6 +1107,8 @@ local Locales = {
         fake_plate_removed_success      = 'Sahte plaka söküldü — gerçek plaka geri yüklendi.',
         fake_plate_not_police           = 'Bunu yalnızca polis yapabilir.',
         fake_plate_not_disguised        = 'Bu araçta sahte plaka yok.',
+        -- [F4 testemunhas] Riskli hamle bonusu bildirimi (plaka çalarken yakında tanıklar)
+        plate_witness_bonus_fmt         = 'Riskli hamle! Bonus: +%d XP, +$%d',
     },
 }
 

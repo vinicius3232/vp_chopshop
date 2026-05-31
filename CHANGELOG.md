@@ -2,6 +2,40 @@
 
 ---
 
+## [1.10.0] — 2026-05-31 — Placas: QBCore, persistência total, garagem, testemunhas
+
+### Added
+- **[F1 qbcore]** Bridge multi-framework agora detecta e suporta **QBCore (`qb-core`)** além de
+  QBox e ESX (`bridge/server_framework.lua`). Detecção por prioridade; QBox continua LIVE.
+  QBCore é PORTABILIDADE não-testada (qb-core não está neste servidor).
+- **[F2 persist]** **Persistência total da placa falsa**: o disfarce sobrevive a restart e é
+  **re-aplicado no spawn** do veículo owned (`AddEventHandler('entityCreated')` server-side).
+  `Config.Plates.Persist`. `real_plate` virou **UNIQUE** (corrige bug de linha stale ao reaplicar).
+- **[F3 garagem]** Placa falsa agora permitida em **qualquer carro** (`BlockOnOwned` neutralizado).
+  Novo export **`vp_chopshop:GetRealPlateForProps(veh, props)`** + patch de 1 linha no
+  `qbx_garages` parkVehicle: a garagem **nunca salva a placa falsa** (reverte p/ real antes do
+  `SaveVehicle`), mas o disfarce NÃO é apagado — volta no próximo spawn.
+  Doc de portabilidade qb-garages em `installation/qb-garages-hook.md`.
+- **[F4 testemunhas]** Dispatch do roubo de placa virou **probabilístico por testemunhas**
+  (NPCs + players próximos), com modificador noturno e **bônus por risco** (XP/cash capados
+  server-side). `Config.Plates.Witness`. Helper client `VPChopWitnessScore(veh)`.
+
+### Changed
+- `entityRemoved` de placas: deixa de apagar o mapeamento de carros **owned** ao guardar
+  (preserva persistência); só limpa **transientes** (sem `state.vehicleid`).
+
+### Performance
+- **[F2 persist] Cache em memória dos disfarces** (`DisguiseByReal`, carregado do DB no boot e
+  sincronizado em apply/remove). O `entityCreated` (re-aplicação no spawn) consulta o cache O(1)
+  em vez de 1 query no DB por veículo — sem isto, todo carro de trânsito NPC dispararia um SELECT.
+  Gate extra: se não há **nenhum** disfarce no servidor, o handler sai sem nem criar thread.
+
+### Migration
+- Rode a migração de `vp_chop_fake_plates` (UNIQUE em `real_plate`) — o `db.lua` faz no boot
+  automaticamente (idempotente); equivalente manual em `sql/vp_chopshop.sql`.
+
+---
+
 ## [1.9.0] — 2026-05-31 — Placas falsas (Fases 2 e 3)
 
 ### Added (Feature — placa falsa)

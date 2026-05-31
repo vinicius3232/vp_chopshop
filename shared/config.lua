@@ -365,8 +365,46 @@ Config.Plates = {
     --- Ferramenta exigida (verificada no client p/ UX e no servidor como verdade).
     ToolItem = 'screwdriver',
 
-    --- Dispara alerta de polícia (mesmo mecanismo do alarme) ao roubar a placa.
+    --- [F4 testemunhas] (LEGADO) Dispatch booleano ao roubar placa. Mantido por compat,
+    --- mas SUBSTITUÍDO pelo sistema de testemunhas (Config.Plates.Witness abaixo): a chamada
+    --- de polícia agora é PROBABILÍSTICA por testemunhas próximas, não um booleano fixo.
+    --- Se Witness.Enable = false, caímos de volta neste booleano (comportamento antigo).
     DispatchOnSteal = true,
+
+    -- ───────────────────────────────────────────────────────────────────────
+    -- [F4 testemunhas] Dispatch por testemunhas (imersão): roubar placa em lugar
+    -- vazio quase nunca chama a polícia; em lugar movimentado, a chance sobe.
+    -- A contagem de testemunhas é client-side (peds NPC + players próximos); o BÔNUS
+    -- por risco é reportado ao servidor com CAP server-side (low-stakes, ver server/plates.lua).
+    -- ───────────────────────────────────────────────────────────────────────
+    Witness = {
+        --- Liga o sistema de testemunhas. false → usa o DispatchOnSteal booleano legado.
+        Enable = true,
+        --- Raio (m) para contar testemunhas ao redor do veículo/jogador.
+        Radius = 45.0,
+        --- Peso de cada NPC vivo não-player na contagem de "score".
+        NpcWeight = 1.0,
+        --- Peso de cada PLAYER próximo (exceto o autor). Player pesa mais que NPC.
+        PlayerWeight = 3.0,
+        --- Chance PISO de dispatch com 0 testemunhas (0.0–1.0). Lugar deserto = quase nunca.
+        BaseChance = 0.02,
+        --- Chance TETO de dispatch (0.0–1.0), por mais testemunhas que haja.
+        MaxChance = 0.85,
+        --- Quanto cada ponto de score soma à chance (linear, até MaxChance).
+        ChancePerScore = 0.08,
+        --- Modificador noturno (multiplicador da chance final entre StartHour e EndHour).
+        --- < 1.0 reduz a chance de madrugada (menos gente acordada para denunciar).
+        NightModifier = 0.6,
+        NightStartHour = 1,   -- 01h
+        NightEndHour   = 5,   -- 05h
+        --- BÔNUS por risco: roubo BEM-SUCEDIDO com testemunhas perto rende extra.
+        --- XP bônus máximo (server aplica proporcional ao score, com CAP).
+        BonusXp = 10,
+        --- Cash bônus MÁXIMO (server aplica proporcional ao score, com CAP). 0 = sem cash.
+        BonusCashMax = 150,
+        --- Score mínimo (testemunhas) para QUALQUER bônus disparar (evita bônus em deserto).
+        BonusMinScore = 2.0,
+    },
 
     -- ───────────────────────────────────────────────────────────────────────
     -- [FASE2 placas] Forja + aplicação de placa falsa (disfarce de consulta MDT).
@@ -399,15 +437,17 @@ Config.Plates = {
     --- Espelha o ~150u do roubo, mas cosmético → mantemos generoso.
     VisibleSyncRadius = 200.0,
 
-    --- [FASE3 garagem] Bloquear APLICAR placa falsa em veículo PRÓPRIO/owned.
-    --- true  → carros com `Entity(veh).state.vehicleid` (ou cuja placa resolve em
-    ---         player_vehicles) NÃO podem receber placa falsa. Elimina o risco de
-    ---         gravar a falsa no player_vehicles ao guardar na garagem, SEM editar
-    ---         qbx_garages. Carros criminosos (alvo real) não têm vehicleid → o
-    ---         disfarce funciona neles, que é o caso de uso pretendido.
-    --- false → permite em qualquer veículo (só ative se você editou qbx_garages
-    ---         para reverter a placa antes do parkVehicle capturar os props).
-    BlockOnOwned = true,
+    --- [F3 garagem] DEPRECADO / SEM EFEITO. Antes bloqueava aplicar placa falsa em carro
+    --- owned. Agora a placa falsa é permitida em QUALQUER carro: a proteção contra a garagem
+    --- salvar a falsa é feita pelo hook de garagem (export vp_chopshop:GetRealPlateForProps
+    --- chamado no parkVehicle do qbx_garages, que reverte para a placa REAL antes de salvar).
+    --- Mantido como `false` apenas por compatibilidade de config; o código não o consulta mais.
+    BlockOnOwned = false,
+
+    --- [F2 persist] Persistência total da placa falsa. true → o disfarce sobrevive a restart
+    --- e é re-aplicado quando o veículo (owned) reaparece (entityCreated em server/plates.lua).
+    --- O mapeamento só é removido pela POLÍCIA ou remoção manual — guardar o carro NÃO remove.
+    Persist = true,
 
     --- Jobs policiais que podem REMOVER a placa falsa (furar o disfarce).
     PoliceJobs = { 'police', 'bcso', 'sheriff' },

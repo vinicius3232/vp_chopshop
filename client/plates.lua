@@ -6,6 +6,60 @@
 -- A VERDADE (distância, placa real, item, cooldown) é toda validada no servidor (server/plates.lua).
 -- Também escuta os eventos de broadcast para apagar a placa visível e disparar dispatch.
 
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [F4 testemunhas] Score de testemunhas ao redor (imersão de dispatch)       ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+-- Conta NPCs vivos não-player + players próximos (exceto o autor) num raio configurável,
+-- centrado no veículo. Player pesa mais que NPC. O score é reportado ao servidor, que decide
+-- a chance de dispatch e o bônus (com CAP server-side). Client-side é low-stakes (imersão),
+-- nunca a verdade do crime. Usa GetGamePool sob demanda (1× no clique), não por frame.
+---@param veh integer  handle do veículo alvo
+---@return number score
+function VPChopWitnessScore(veh)
+    local w = Config.Plates and Config.Plates.Witness
+    if not w then return 0.0 end
+    local center = (veh and veh ~= 0 and DoesEntityExist(veh)) and GetEntityCoords(veh)
+        or GetEntityCoords(PlayerPedId())
+    local radius = tonumber(w.Radius) or 45.0
+    local r2 = radius * radius
+    local myPed = PlayerPedId()
+
+    local score = 0.0
+
+    -- NPCs (peds não-player, vivos) dentro do raio.
+    local npcWeight = tonumber(w.NpcWeight) or 1.0
+    if npcWeight > 0 then
+        for _, ped in ipairs(GetGamePool('CPed')) do
+            if ped ~= myPed
+                and not IsPedAPlayer(ped)
+                and not IsPedDeadOrDying(ped, true)
+                and DoesEntityExist(ped)
+            then
+                local d = GetEntityCoords(ped) - center
+                if (d.x * d.x + d.y * d.y + d.z * d.z) <= r2 then
+                    score = score + npcWeight
+                end
+            end
+        end
+    end
+
+    -- Players próximos (exceto o autor) — peso maior.
+    local playerWeight = tonumber(w.PlayerWeight) or 3.0
+    if playerWeight > 0 then
+        for _, pid in ipairs(GetActivePlayers()) do
+            local pPed = GetPlayerPed(pid)
+            if pPed ~= 0 and pPed ~= myPed and DoesEntityExist(pPed) then
+                local d = GetEntityCoords(pPed) - center
+                if (d.x * d.x + d.y * d.y + d.z * d.z) <= r2 then
+                    score = score + playerWeight
+                end
+            end
+        end
+    end
+
+    return score
+end
+
 CreateThread(function()
     -- Respeitar o toggle da feature e a presença do ox_target.
     if not Config.Plates or not Config.Plates.Enable then return end
@@ -62,7 +116,11 @@ CreateThread(function()
                     return
                 end
 
-                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:stealPlate', false, netId)
+                -- [F4 testemunhas] Score de testemunhas calculado AGORA (no momento do roubo),
+                -- centrado no veículo. Low-stakes: server decide dispatch/bônus com CAP.
+                local witnessScore = VPChopWitnessScore(veh)
+
+                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:stealPlate', false, netId, witnessScore)
                 if not cbOk or not res then
                     VPChopNotify(L('notify_generic_error'), 'error')
                     return
@@ -70,6 +128,10 @@ CreateThread(function()
 
                 if res.ok then
                     VPChopNotify(L('plate_stolen_success'), 'success')
+                    -- [F4 testemunhas] Bônus por risco (XP/cash) aplicado server-side com CAP.
+                    if (res.bonusXp and res.bonusXp > 0) or (res.bonusCash and res.bonusCash > 0) then
+                        VPChopNotify(L('plate_witness_bonus_fmt', res.bonusXp or 0, res.bonusCash or 0), 'inform')
+                    end
                 else
                     -- Mapear erros do servidor para mensagens amigáveis (pt-BR via locale).
                     local errKey = ({

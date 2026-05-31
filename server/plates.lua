@@ -15,6 +15,36 @@
 local PlateStealCooldown = {} ---@type table<number, number>  src → expiry (GetGameTimer)
 local PlateStolen        = {} ---@type table<number, boolean>  netId → já roubada (anti-duplo)
 
+-- [F2 persist][PERF] Cache em memória das placas disfarçadas (real → falsa). O entityCreated
+-- consulta ISTO (O(1), sem DB) para cada veículo que spawna — senão seria 1 query por carro de
+-- trânsito. O conjunto de disfarces é pequeno; mantemos o cache sincronizado em apply/remove e
+-- carregamos do DB no boot. Verdade continua sendo o DB; o cache é só um filtro rápido.
+local DisguiseByReal = {} ---@type table<string, string>  real_plate → fake_plate
+local DisguiseCacheReady = false
+
+--- Atualiza o cache ao aplicar/remover um disfarce.
+local function cacheSetDisguise(realPlate, fakePlate)
+    if realPlate and realPlate ~= '' then DisguiseByReal[realPlate] = fakePlate or nil end
+end
+
+-- Carrega o cache do DB no boot (após oxmysql pronto). Idempotente.
+CreateThread(function()
+    while not DisguiseCacheReady do
+        if VPChopDbLoadAllDisguises then
+            local rows = VPChopDbLoadAllDisguises()
+            if type(rows) == 'table' then
+                for i = 1, #rows do
+                    local r = rows[i]
+                    if r and r.real_plate then DisguiseByReal[r.real_plate] = r.fake_plate end
+                end
+                DisguiseCacheReady = true
+                break
+            end
+        end
+        Wait(500)
+    end
+end)
+
 --- Cooldown configurável (segundos → ms). Fallback 30s.
 local function plateCooldownMs()
     return (tonumber(Config.Plates and Config.Plates.StealCooldownSeconds) or 30) * 1000
@@ -55,8 +85,58 @@ local function broadcastPlateCleared(netId, vehCoords)
     end
 end
 
+-- ─── [F4 testemunhas] Helpers de dispatch/bônus por testemunhas ───────────────
+--- Calcula a chance de dispatch (0..1) a partir do score de testemunhas (client-reportado).
+--- Aplica BaseChance + ChancePerScore*score (saturado em MaxChance) e o NightModifier.
+---@param score number  score de testemunhas (>=0); client-side, tratado como low-stakes
+---@return number chance 0..1
+local function witnessDispatchChance(score)
+    local w = Config.Plates and Config.Plates.Witness
+    if not w then return 0.0 end
+    score = math.max(0.0, tonumber(score) or 0.0)
+    local chance = (tonumber(w.BaseChance) or 0.0) + (tonumber(w.ChancePerScore) or 0.0) * score
+    local maxC = tonumber(w.MaxChance) or 1.0
+    if chance > maxC then chance = maxC end
+    -- Modificador noturno (servidor é a verdade da hora: os.date local do host).
+    local hour = tonumber(os.date('%H')) or 12
+    local s, e = tonumber(w.NightStartHour) or 0, tonumber(w.NightEndHour) or 0
+    local isNight = (s <= e) and (hour >= s and hour < e) or (s > e and (hour >= s or hour < e))
+    if isNight then chance = chance * (tonumber(w.NightModifier) or 1.0) end
+    if chance < 0 then chance = 0 end
+    return chance
+end
+
+--- Aplica o bônus por risco (XP + cash) proporcional ao score, com CAP server-side.
+--- O score é CLIENT-SIDE → low-stakes: limitamos o bônus para não ser exploitável.
+--- Trade-off de confiança: um cliente malicioso pode inflar o score, mas o ganho máximo
+--- é pequeno (BonusXp / BonusCashMax) e o cash bônus é cosmético frente ao valor da placa.
+---@param src number
+---@param score number
+---@return integer bonusXp, integer bonusCash  (0,0 se nenhum bônus)
+local function applyWitnessBonus(src, score)
+    local w = Config.Plates and Config.Plates.Witness
+    if not w then return 0, 0 end
+    score = math.max(0.0, tonumber(score) or 0.0)
+    if score < (tonumber(w.BonusMinScore) or math.huge) then return 0, 0 end  -- sem testemunhas reais → sem bônus
+
+    -- Fração 0..1 do score relativo ao "teto" implícito (MaxChance/ChancePerScore).
+    -- CAP duro: a fração nunca passa de 1.0, então o bônus nunca passa dos máximos da config.
+    local capScore = (tonumber(w.MaxChance) or 1.0) / math.max(0.001, tonumber(w.ChancePerScore) or 1.0)
+    local frac = math.min(1.0, score / math.max(1.0, capScore))
+
+    local bonusXp = math.floor((tonumber(w.BonusXp) or 0) * frac + 0.5)
+    if bonusXp > 0 then VPChopAddXp(src, bonusXp, 'plate_witness_bonus') end
+
+    local bonusCash = math.floor((tonumber(w.BonusCashMax) or 0) * frac + 0.5)
+    if bonusCash > 0 then BridgeAddCash(src, bonusCash, 'vp_chopshop:plate_witness_bonus') end
+
+    return bonusXp, bonusCash
+end
+
 -- ─── Callback: roubar placa ───────────────────────────────────────────────────
-lib.callback.register('vp_chopshop:stealPlate', function(src, netId)
+-- [F4 testemunhas] 2º arg `witnessScore` vem do client (peds+players próximos). É low-stakes:
+-- usado só para chance de dispatch e bônus capado — toda a verdade do roubo segue revalidada.
+lib.callback.register('vp_chopshop:stealPlate', function(src, netId, witnessScore)
     -- Feature desligada
     if not Config.Plates or not Config.Plates.Enable then
         return { ok = false, err = 'disabled' }
@@ -125,8 +205,19 @@ lib.callback.register('vp_chopshop:stealPlate', function(src, netId)
     local vehCoords = GetEntityCoords(veh)
     broadcastPlateCleared(netId, vehCoords)
 
-    -- Dispatch (mesmo mecanismo do alarme: servidor manda o client chamar VPChopTriggerDispatch)
-    if Config.Plates.DispatchOnSteal then
+    -- [F4 testemunhas] Dispatch PROBABILÍSTICO por testemunhas (substitui o booleano fixo).
+    -- Lugar vazio → quase nunca chama polícia; movimentado → chance sobe até MaxChance.
+    -- Fallback ao comportamento legado se Witness.Enable = false.
+    local witnessOn = Config.Plates.Witness and Config.Plates.Witness.Enable
+    local bonusXp, bonusCash = 0, 0
+    if witnessOn then
+        local chance = witnessDispatchChance(witnessScore)
+        if math.random() < chance then
+            TriggerClientEvent('vp_chopshop:client:plateDispatch', src, netId)
+        end
+        -- Bônus por risco: roubo concluído COM testemunhas perto (XP + cash capados).
+        bonusXp, bonusCash = applyWitnessBonus(src, witnessScore)
+    elseif Config.Plates.DispatchOnSteal then
         TriggerClientEvent('vp_chopshop:client:plateDispatch', src, netId)
     end
 
@@ -134,7 +225,8 @@ lib.callback.register('vp_chopshop:stealPlate', function(src, netId)
     VPChopMDT.ReportActivity(realPlate, src, 'plate_stolen')
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'plate_theft', 1)
 
-    return { ok = true }
+    -- [F4 testemunhas] Devolver o bônus aplicado p/ o client notificar (cosmético).
+    return { ok = true, bonusXp = bonusXp, bonusCash = bonusCash }
 end)
 
 -- ╔══════════════════════════════════════════════════════════════════════════╗
@@ -315,17 +407,12 @@ lib.callback.register('vp_chopshop:applyFakePlate', function(src, netId, sourceP
     local maxDist = tonumber(Config.Plates.ApplyMaxDistance) or 4.0
     if not ValidatePlayerNearVehicle(src, veh, maxDist) then return { ok = false, err = 'range' } end
 
-    -- [FASE3 garagem] Bloquear em veículo PRÓPRIO/owned (decisão de design — ver item 8).
-    -- Carro owned do qbx tem `Entity(veh).state.vehicleid` setado no spawn. Se aplicássemos a
-    -- falsa e o jogador guardasse, qbx_garages gravaria a placa FALSA em player_vehicles.
-    -- Bloquear aqui elimina o risco SEM editar qbx_garages. Carros criminosos (alvo real) não
-    -- têm vehicleid → o disfarce funciona neles, que é o caso de uso pretendido.
-    if Config.Plates.BlockOnOwned ~= false then
-        local okState, vehId = pcall(function() return Entity(veh).state.vehicleid end)
-        if okState and vehId ~= nil then
-            return { ok = false, err = 'owned' }
-        end
-    end
+    -- [F3 garagem] BlockOnOwned REMOVIDO: agora a placa falsa pode ser aplicada em QUALQUER
+    -- carro, inclusive owned. O risco de a garagem gravar a placa FALSA em player_vehicles é
+    -- eliminado de outra forma: o hook de garagem (qbx_garages parkVehicle) chama o export
+    -- vp_chopshop:GetRealPlateForProps ANTES do SaveVehicle, revertendo props.plate para a REAL.
+    -- Assim a garagem NUNCA salva a falsa, e no próximo spawn o disfarce é re-aplicado (Frente 2).
+    -- Config.Plates.BlockOnOwned permanece na config como `false` (sem efeito) por compatibilidade.
 
     -- Ler a metadata da `fake_plate` que o jogador possui (placa-alvo do disfarce).
     -- O client manda a placa escolhida; confirmamos posse + formato (trust-no-client).
@@ -371,6 +458,9 @@ lib.callback.register('vp_chopshop:applyFakePlate', function(src, netId, sourceP
         VPChopDbDeleteFakePlate(fakePlate)
         return { ok = false, err = 'remove' }
     end
+
+    -- [PERF] Atualizar o cache em memória (real → falsa) para o entityCreated re-aplicar no spawn.
+    cacheSetDisguise(realPlate, fakePlate)
 
     -- Statebag: MARCADOR de que há disfarce ativo + a placa REAL (replicado p/ re-sync robusto).
     -- A placa FALSA NÃO vai no statebag (segurança); a visível é setada via broadcast cosmético.
@@ -425,6 +515,7 @@ lib.callback.register('vp_chopshop:removeFakePlate', function(src, netId)
 
     -- Apagar mapeamento + limpar statebag + restaurar placa REAL visível.
     VPChopDbDeleteFakePlate(visible)
+    cacheSetDisguise(realPlate, nil)  -- [PERF] sincroniza o cache em memória
     pcall(function() Entity(veh).state:set('vpFakeRealPlate', nil, true) end)
     broadcastPlateText(netId, realPlate, GetEntityCoords(veh))
 
@@ -464,24 +555,130 @@ lib.callback.register('vp_chopshop:getVisibleFakePlate', function(src, netId)
     return VPChopDbGetFakeByReal(realPlate)
 end)
 
--- ─── [FASE3 garagem] Limpeza ao a entidade sumir ──────────────────────────────
--- Quando o veículo deixa de existir (despawn / delete / guardado), o mapeamento da
--- placa falsa deixa de fazer sentido — limpamos a entrada de vp_chop_fake_plates para
--- não acumular lixo nem reservar uma placa falsa para sempre. Usamos o statebag
--- 'vpFakeRealPlate' como marcador rápido: só consultamos/deletamos se houver disfarce.
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [F2 persist] PERSISTÊNCIA TOTAL + re-aplicação no spawn                    ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+
+-- ─── [F2 persist] Limpeza ao a entidade sumir (SÓ carros NÃO-owned/transientes) ─
+-- ANTES: este handler deletava o mapeamento de QUALQUER carro disfarçado ao despawnar,
+-- o que QUEBRAVA a persistência (ao guardar um carro owned, o disfarce sumia para sempre).
+--
+-- AGORA: o disfarce (mapeamento DB) só é removido pela POLÍCIA (removeFakePlate) ou por
+-- remoção manual/admin — NUNCA por despawn de carro owned. Para carros NÃO-owned
+-- (transientes, que não voltam após restart), limpamos no despawn para não acumular lixo
+-- nem reservar uma falsa para sempre.
+--
+-- Distinção owned vs transiente: carros owned do qbx têm `Entity(veh).state.vehicleid`
+-- (setado no spawn da garagem/qbx_vehicles). Presença de vehicleid → owned → NÃO deletar.
 AddEventHandler('entityRemoved', function(entity)
     if not entity or entity == 0 then return end
-    -- Só veículos interessam; pcall pois state pode não existir em algumas entidades.
+    if GetEntityType(entity) ~= 2 then return end  -- 2 = veículo (guarda de performance)
+    -- Marcador rápido: só nos importa se há disfarce ativo neste carro.
     local okState, marker = pcall(function() return Entity(entity).state.vpFakeRealPlate end)
     if not okState or marker == nil then return end
-    -- A placa VISÍVEL no momento do despawn é a falsa registrada → deletar por ela.
+
+    -- [F2 persist] Carro owned? Então PRESERVAR o mapeamento (persistência total) —
+    -- ele será re-aplicado no próximo spawn (entityCreated abaixo).
+    local okOwned, vehicleId = pcall(function() return Entity(entity).state.vehicleid end)
+    if okOwned and vehicleId ~= nil then
+        return  -- owned → não deletar; o disfarce sobrevive ao guardar / restart
+    end
+
+    -- Carro transiente (sem vehicleid): limpar para não acumular lixo.
+    -- O marcador `marker` É a placa REAL (statebag vpFakeRealPlate) → limpar o cache por ela.
+    -- A placa VISÍVEL no momento do despawn é a falsa registrada → deletar a linha do DB por ela.
+    if type(marker) == 'string' and marker ~= '' then
+        cacheSetDisguise(marker, nil)  -- [PERF] sincroniza o cache em memória
+    end
     local okPlate, visible = pcall(function()
         return (GetVehicleNumberPlateText(entity) or ''):gsub('%s+', '')
     end)
     if okPlate and visible and visible ~= '' then
-        -- Deletar em thread para não bloquear o handler (await fora de contexto seguro).
-        CreateThread(function()
+        CreateThread(function()  -- thread: await fora de contexto seguro do handler
             VPChopDbDeleteFakePlate(visible)
         end)
     end
+end)
+
+-- ─── [F2 persist] Re-aplicação do disfarce ao o veículo aparecer ──────────────
+-- Quando um veículo spawna, sua placa é a REAL (garantimos isso no hook de garagem da
+-- Frente 3: a garagem nunca grava a falsa). Resolvemos a placa real e, se houver disfarce
+-- mapeado no DB, re-aplicamos: placa falsa VISÍVEL nos clientes próximos + statebag
+-- 'vpFakeRealPlate'. Sobrevive a restart porque o mapeamento vive no DB.
+--
+-- Guardas de performance: filtramos a veículos (GetEntityType==2) e damos um pequeno Wait
+-- para a placa estar pronta. Só batemos no DB se a placa real tiver disfarce — 1 SELECT
+-- escalar por spawn de veículo COM disfarce (a esmagadora maioria não tem → 1 SELECT barato).
+AddEventHandler('entityCreated', function(entity)
+    if not entity or entity == 0 then return end
+    if GetEntityType(entity) ~= 2 then return end  -- só veículos
+    if not (Config.Plates and Config.Plates.Enable and Config.Plates.Persist ~= false) then return end
+    -- [PERF] Se NÃO há nenhum disfarce ativo no servidor inteiro, sair imediatamente —
+    -- sem criar thread nem Wait. A esmagadora maioria do tempo o cache está vazio.
+    if next(DisguiseByReal) == nil then return end
+
+    CreateThread(function()
+        -- Pequena espera: a placa pode não estar pronta no exato tick do entityCreated.
+        Wait(250)
+        if not DoesEntityExist(entity) then return end
+
+        -- Se já há marcador de disfarce ativo, nada a fazer (evita reprocesso).
+        local okMarker, marker = pcall(function() return Entity(entity).state.vpFakeRealPlate end)
+        if okMarker and marker ~= nil then return end
+
+        -- Placa atual = REAL (garantido pela garagem). [PERF] Checa o CACHE em memória primeiro
+        -- (O(1), sem DB) — a esmagadora maioria dos veículos (trânsito NPC) não tem disfarce e sai
+        -- aqui sem tocar no banco. Só carros realmente disfarçados seguem adiante.
+        local real = (GetVehicleNumberPlateText(entity) or ''):gsub('%s+', '')
+        if real == '' then return end
+        local fake = DisguiseByReal[real]
+        if not fake or fake == '' or fake == real then return end
+
+        local netId = NetworkGetNetworkIdFromEntity(entity)
+        if not netId or netId == 0 then return end
+
+        -- Re-aplicar: statebag (marcador + real replicada) + broadcast cosmético da falsa.
+        pcall(function() Entity(entity).state:set('vpFakeRealPlate', real, true) end)
+        broadcastPlateText(netId, fake, GetEntityCoords(entity))
+    end)
+end)
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [F3 garagem] Export para o hook de garagem (qbx_garages / qb-garages)      ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+-- O patch do garages chama isto ANTES de SaveVehicle. Se o veículo tiver disfarce ativo,
+-- devolvemos uma cópia de `props` com `props.plate` revertida para a placa REAL — assim a
+-- garagem NUNCA grava a placa falsa em player_vehicles. O mapeamento DB NÃO é apagado:
+-- no próximo spawn (entityCreated acima) o disfarce volta. Acoplamento defensivo de 1 linha
+-- no garages. Resolução da real: statebag 'vpFakeRealPlate' (rápido) com fallback ao DB.
+---@param veh integer  handle do veículo (server-side)
+---@param props table  ox_lib vehicle props (contém props.plate = placa visível atual)
+---@return table props  mesma table com plate corrigida para a REAL (se houver disfarce)
+exports('GetRealPlateForProps', function(veh, props)
+    if type(props) ~= 'table' then return props end
+    if not (veh and veh ~= 0 and DoesEntityExist(veh)) then return props end
+
+    -- 1) Tentar pelo statebag (replicado, sem custo de DB).
+    local real
+    local okState, marker = pcall(function() return Entity(veh).state.vpFakeRealPlate end)
+    if okState and type(marker) == 'string' and marker ~= '' then
+        real = marker
+    end
+
+    -- 2) Fallback: a placa visível (que pode ser a falsa) → resolver real pelo DB.
+    if not real then
+        local visible = (GetVehicleNumberPlateText(veh) or ''):gsub('%s+', '')
+        if visible ~= '' then
+            local mapped = VPChopDbGetRealByFake(visible)
+            if mapped and mapped ~= '' then real = mapped end
+        end
+    end
+
+    if not real or real == '' then return props end  -- sem disfarce → props inalterada
+
+    -- Reverter SÓ a placa nos props (mantém todo o resto). Opcional: refletir na entidade
+    -- antes do DeleteVehicle do garages, para qualquer leitura intermediária ver a real.
+    props.plate = real
+    pcall(function() SetVehicleNumberPlateText(veh, real) end)
+    return props
 end)

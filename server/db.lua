@@ -78,8 +78,12 @@ function VPChopDbInit()
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
             -- [FASE2 placas] Mapa placa FALSA → placa REAL (disfarce de consulta MDT).
-            -- fake_plate é PK (colisão de falsas rejeitada); índice em real_plate p/ resolver inverso.
-            -- SEM expires_at: a falsa dura até guardar o carro ou a polícia remover.
+            -- fake_plate é PK (colisão de falsas rejeitada).
+            -- [F2 persist] real_plate é UNIQUE: cada placa REAL tem no MÁXIMO 1 disfarce ativo.
+            -- A UNIQUE evita linhas stale (bug: reaplicar falsa sobre uma real já disfarçada
+            -- deixava o mapeamento antigo órfão). O INSERT da aplicação agora deleta o antigo
+            -- por real_plate antes de inserir (ver VPChopDbInsertFakePlate).
+            -- SEM expires_at: a falsa dura até a polícia remover (persistência total).
             MySQL.query.await([[
                 CREATE TABLE IF NOT EXISTS `vp_chop_fake_plates` (
                     `fake_plate` VARCHAR(12) NOT NULL,
@@ -87,9 +91,22 @@ function VPChopDbInit()
                     `applied_by` VARCHAR(60) DEFAULT NULL,
                     `applied_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (`fake_plate`),
-                    INDEX `idx_fake_real` (`real_plate`)
+                    UNIQUE KEY `uq_real_plate` (`real_plate`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [F2 persist] Migração de bases existentes (v1.9.0): substituir o índice não-único
+            -- idx_fake_real por UNIQUE em real_plate. Purga duplicatas stale antes (mantém a mais
+            -- recente por real_plate) para a UNIQUE poder ser criada sem erro. Idempotente via pcall.
+            pcall(function()
+                MySQL.query.await([[
+                    DELETE t1 FROM `vp_chop_fake_plates` t1
+                    INNER JOIN `vp_chop_fake_plates` t2
+                      ON t1.real_plate = t2.real_plate
+                     AND t1.applied_at < t2.applied_at
+                ]])
+            end)
+            pcall(function() MySQL.query.await('ALTER TABLE `vp_chop_fake_plates` DROP INDEX `idx_fake_real`') end)
+            pcall(function() MySQL.query.await('ALTER TABLE `vp_chop_fake_plates` ADD UNIQUE KEY `uq_real_plate` (`real_plate`)') end)
             VPChopDBReady = true
             TriggerEvent('vp_chopshop:server:dbReady')
         end)
@@ -181,12 +198,30 @@ end
 ---@param appliedBy string|nil
 ---@return boolean ok
 function VPChopDbInsertFakePlate(fakePlate, realPlate, appliedBy)
+    -- [F2 persist] CORREÇÃO DO BUG DE LINHA STALE: ao aplicar uma nova falsa sobre uma placa
+    -- REAL que já tinha disfarce, removemos PRIMEIRO o mapeamento antigo dessa real. Sem isso,
+    -- a tabela acumulava (real, falsaAntiga) órfã + (real, falsaNova) — agora a UNIQUE em
+    -- real_plate impediria o INSERT, então o DELETE prévio é obrigatório, não só limpeza.
+    -- A colisão por fake_plate (PK) continua sendo a verdade atômica: se a falsa já está em
+    -- uso por OUTRA real, o INSERT falha e o pcall captura → devolve false (in_use).
+    pcall(MySQL.query.await,
+        'DELETE FROM vp_chop_fake_plates WHERE real_plate = ?', { realPlate }
+    )
     -- INSERT puro (sem ON DUPLICATE): se a fake_plate já existe, a PK viola e o pcall captura.
     local ok = pcall(MySQL.query.await,
         'INSERT INTO vp_chop_fake_plates (fake_plate, real_plate, applied_by) VALUES (?, ?, ?)',
         { fakePlate, realPlate, appliedBy }
     )
     return ok == true
+end
+
+--- [F2 persist] Remove o mapeamento a partir da placa REAL (revertendo o disfarce).
+--- Usado pelo hook de garagem (Frente 3) NÃO apaga — só a polícia/remoção manual.
+--- Mantido como helper utilitário para administração e limpeza por real.
+---@param realPlate string
+function VPChopDbDeleteFakeByReal(realPlate)
+    if not realPlate or realPlate == '' then return end
+    MySQL.query.await('DELETE FROM vp_chop_fake_plates WHERE real_plate = ?', { realPlate })
 end
 
 --- Resolve a placa REAL a partir de uma placa VISÍVEL (que pode ser falsa).
@@ -238,4 +273,11 @@ function VPChopDbFakePlateInUse(fakePlate)
         'SELECT EXISTS(SELECT 1 FROM vp_chop_fake_plates WHERE fake_plate = ?)', { fakePlate }
     )
     return exists == 1
+end
+
+--- [F2 persist][PERF] Carrega TODOS os disfarces (para o cache em memória do server/plates.lua,
+--- evitando 1 query por spawn de veículo). Retorna lista de { real_plate, fake_plate }.
+---@return table[]
+function VPChopDbLoadAllDisguises()
+    return MySQL.query.await('SELECT real_plate, fake_plate FROM vp_chop_fake_plates') or {}
 end

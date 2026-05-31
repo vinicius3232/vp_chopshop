@@ -97,8 +97,10 @@ CREATE TABLE IF NOT EXISTS `vp_chop_progression` (
 -- Disfarce de consulta MDT: o veículo passa a EXIBIR `fake_plate`; o crime (heat,
 -- VIN scratch, contagem de peças) continua seguindo a `real_plate` via resolver.
 -- fake_plate é PK → garante que duas falsas iguais não coexistem (colisão rejeitada).
--- Índice em real_plate p/ resolver inverso e limpeza por placa real, se necessário.
--- SEM expires_at por design: a placa falsa dura até GUARDAR o carro ou a POLÍCIA remover.
+-- [F2 persist] real_plate é UNIQUE → cada placa REAL tem no MÁX 1 disfarce ativo
+--   (evita linhas stale ao reaplicar uma falsa nova sobre uma real já disfarçada).
+-- PERSISTÊNCIA TOTAL: a placa falsa dura até a POLÍCIA remover ou remoção manual.
+--   Sobrevive a restart e é re-aplicada quando o veículo (owned) reaparece (server/plates.lua).
 
 CREATE TABLE IF NOT EXISTS `vp_chop_fake_plates` (
   `fake_plate` VARCHAR(12) NOT NULL COMMENT 'placa exibida (falsa), max 8 chars',
@@ -106,5 +108,14 @@ CREATE TABLE IF NOT EXISTS `vp_chop_fake_plates` (
   `applied_by` VARCHAR(60) DEFAULT NULL COMMENT 'identifier de quem aplicou',
   `applied_at` TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`fake_plate`),
-  INDEX `idx_fake_real` (`real_plate`)
+  UNIQUE KEY `uq_real_plate` (`real_plate`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- [F2 persist] MIGRAÇÃO de bases vindas da v1.9.0 (que usavam INDEX idx_fake_real não-único).
+-- Rode APENAS se você já tinha a tabela antes desta versão. O db.lua faz isto automaticamente
+-- no boot (idempotente); este bloco é o equivalente manual:
+-- DELETE t1 FROM `vp_chop_fake_plates` t1
+--   INNER JOIN `vp_chop_fake_plates` t2
+--   ON t1.real_plate = t2.real_plate AND t1.applied_at < t2.applied_at;
+-- ALTER TABLE `vp_chop_fake_plates` DROP INDEX `idx_fake_real`;
+-- ALTER TABLE `vp_chop_fake_plates` ADD UNIQUE KEY `uq_real_plate` (`real_plate`);

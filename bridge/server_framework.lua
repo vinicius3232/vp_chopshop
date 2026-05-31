@@ -1,19 +1,34 @@
--- Framework bridge: suporta QBox (qbx_core) e ESX Legacy.
+-- Framework bridge: suporta QBox (qbx_core), QBCore (qb-core) e ESX Legacy.
 -- Detecção automática na inicialização; fallback seguro se nenhum estiver disponível.
 
-local _framework = nil  -- 'qbox' | 'esx' | nil
+local _framework = nil  -- 'qbox' | 'qbcore' | 'esx' | nil
 
 -- ─── QBox (qbx_core) ─────────────────────────────────────────────────────────
 local _QBX = nil
+
+-- ─── [F1 qbcore] QBCore (qb-core) ────────────────────────────────────────────
+-- PORTABILIDADE não-testada neste servidor (qb-core NÃO está instalado aqui —
+-- servidor LIVE é QBox). Assinaturas baseadas no qb-core padrão:
+--   _QB.Functions.GetPlayer(src) → Player (nil se não carregado)
+--   Player.PlayerData.job.name, Player.PlayerData.money.cash, Player.PlayerData.citizenid
+--   Player.Functions.AddMoney('cash', n) / RemoveMoney('cash', n)
+--   _QB.Functions.GetQBPlayers() → table de Players online
+local _QB = nil
 
 -- ─── ESX ─────────────────────────────────────────────────────────────────────
 local _ESX = nil
 
 CreateThread(function()
+    -- Detecção por ordem de prioridade (QBox primeiro: é o framework LIVE deste servidor).
     if GetResourceState('qbx_core') == 'started' then
         -- qbx_core expõe exports diretos; não usa SharedObject.
         _framework = 'qbox'
         _QBX = exports.qbx_core
+    elseif GetResourceState('qb-core') == 'started' then
+        -- [F1 qbcore] qb-core usa GetCoreObject (SharedObject clássico).
+        _framework = 'qbcore'
+        local ok, core = pcall(function() return exports['qb-core']:GetCoreObject() end)
+        if ok then _QB = core else _framework = nil end  -- fallback seguro se export falhar
     elseif GetResourceState('es_extended') == 'started' then
         _framework = 'esx'
         _ESX = exports['es_extended']:getSharedObject()
@@ -65,6 +80,10 @@ function ServerPlayerIsReady(src)
         -- qbx_core: GetPlayer retorna nil se jogador não estiver carregado
         local ok, player = pcall(function() return _QBX:GetPlayer(src) end)
         return ok and player ~= nil
+    elseif _framework == 'qbcore' and _QB then
+        -- [F1 qbcore] qb-core: GetPlayer retorna nil se não carregado (PORTABILIDADE não-testada)
+        local ok, player = pcall(function() return _QB.Functions.GetPlayer(src) end)
+        return ok and player ~= nil
     elseif _framework == 'esx' and _ESX then
         return _ESX.GetPlayerFromId(src) ~= nil
     end
@@ -84,6 +103,13 @@ function ServerChopPlayerKey(src)
             local cid = player.citizenid or player.PlayerData and player.PlayerData.citizenid
             if cid then return 'qbx:' .. tostring(cid) end
         end
+    elseif _framework == 'qbcore' and _QB then
+        -- [F1 qbcore] citizenid em PlayerData.citizenid (PORTABILIDADE não-testada)
+        local ok, player = pcall(function() return _QB.Functions.GetPlayer(src) end)
+        if ok and player then
+            local cid = player.PlayerData and player.PlayerData.citizenid
+            if cid then return 'qbx:' .. tostring(cid) end  -- prefixo 'qbx:' p/ compat de keys já gravadas
+        end
     elseif _framework == 'esx' and _ESX then
         local x = _ESX.GetPlayerFromId(src)
         if x and x.identifier then
@@ -100,6 +126,14 @@ end
 function BridgeGetCash(src)
     if _framework == 'qbox' and _QBX then
         local ok, player = pcall(function() return _QBX:GetPlayer(src) end)
+        if ok and player then
+            local money = player.PlayerData and player.PlayerData.money and player.PlayerData.money.cash
+            return math.floor(tonumber(money) or 0)
+        end
+        return 0
+    elseif _framework == 'qbcore' and _QB then
+        -- [F1 qbcore] cash em PlayerData.money.cash (mesma estrutura do qbx) — PORTABILIDADE
+        local ok, player = pcall(function() return _QB.Functions.GetPlayer(src) end)
         if ok and player then
             local money = player.PlayerData and player.PlayerData.money and player.PlayerData.money.cash
             return math.floor(tonumber(money) or 0)
@@ -126,6 +160,14 @@ function BridgeRemoveCash(src, amount, reason)
             return _QBX:RemoveMoney(src, 'cash', amount, reason or 'vp_chopshop')
         end)
         return ok and result == true
+    elseif _framework == 'qbcore' and _QB then
+        -- [F1 qbcore] Player.Functions.RemoveMoney('cash', n[, reason]) → boolean (PORTABILIDADE)
+        local ok, result = pcall(function()
+            local player = _QB.Functions.GetPlayer(src)
+            if not player then return false end
+            return player.Functions.RemoveMoney('cash', amount, reason or 'vp_chopshop')
+        end)
+        return ok and result == true
     elseif _framework == 'esx' and _ESX then
         local x = _ESX.GetPlayerFromId(src)
         if not x then return false end
@@ -146,6 +188,14 @@ end
 function BridgeGetJob(src)
     if _framework == 'qbox' and _QBX then
         local ok, player = pcall(function() return _QBX:GetPlayer(src) end)
+        if ok and player then
+            local job = player.PlayerData and player.PlayerData.job and player.PlayerData.job.name
+            return job or ''
+        end
+        return ''
+    elseif _framework == 'qbcore' and _QB then
+        -- [F1 qbcore] job em PlayerData.job.name (PORTABILIDADE não-testada)
+        local ok, player = pcall(function() return _QB.Functions.GetPlayer(src) end)
         if ok and player then
             local job = player.PlayerData and player.PlayerData.job and player.PlayerData.job.name
             return job or ''
@@ -188,6 +238,15 @@ function BridgeCountCops()
                 if job and jobSet[job] then count = count + 1 end
             end
         end
+    elseif _framework == 'qbcore' and _QB then
+        -- [F1 qbcore] GetQBPlayers() → table de Players online (PORTABILIDADE não-testada)
+        local ok, players = pcall(function() return _QB.Functions.GetQBPlayers() end)
+        if ok and players then
+            for _, player in pairs(players) do
+                local job = player.PlayerData and player.PlayerData.job and player.PlayerData.job.name
+                if job and jobSet[job] then count = count + 1 end
+            end
+        end
     elseif _framework == 'esx' and _ESX then
         for _, pid in ipairs(_ESX.GetPlayers()) do
             local xPlayer = _ESX.GetPlayerFromId(pid)
@@ -208,6 +267,14 @@ function BridgeAddCash(src, amount, reason)
     if _framework == 'qbox' and _QBX then
         local ok, result = pcall(function()
             return _QBX:AddMoney(src, 'cash', amount, reason or 'vp_chopshop')
+        end)
+        return ok and result ~= false
+    elseif _framework == 'qbcore' and _QB then
+        -- [F1 qbcore] Player.Functions.AddMoney('cash', n[, reason]) (PORTABILIDADE não-testada)
+        local ok, result = pcall(function()
+            local player = _QB.Functions.GetPlayer(src)
+            if not player then return false end
+            return player.Functions.AddMoney('cash', amount, reason or 'vp_chopshop')
         end)
         return ok and result ~= false
     elseif _framework == 'esx' and _ESX then
