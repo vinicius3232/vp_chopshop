@@ -368,6 +368,16 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
         end
     end
 
+    -- [EVIDENCE] Deixar vestígio forense no local do veículo (digital + DNA vinculados ao
+    -- criminoso). Reutiliza vehEnt/vehPos já resolvidos server-side acima (trust-no-client).
+    -- `plate` (visível, resolvido acima) → placa REAL via VPChopMDT para o heat scaling.
+    -- Fallback de coords: ped do jogador se o veículo não pôde ser resolvido.
+    do
+        local evCoords = vehPos or GetEntityCoords(GetPlayerPed(source))
+        local realPlate = (plate ~= '' and VPChopMDT.GetRealPlate(plate)) or plate
+        VPChopLeaveEvidence(source, evCoords, 'chop_part', realPlate)
+    end
+
     -- Sistema de alarme: rolar chance na primeira peça removida deste veículo.
     local alarmCfg = Config.Alarm
     if alarmCfg and alarmCfg.Enable and not AlarmActive[netId] then

@@ -2,6 +2,32 @@
 
 ---
 
+## [1.11.0] — 2026-05-31 — Integração forense (link com `evidences`)
+
+### Added
+- **[EVIDENCE]** Integração server-side com o resource **`evidences`** (Advanced FiveM evidence
+  script). **Toda ação de crime** do chopshop agora pode deixar **vestígio forense coletável**
+  no local — **digital** (`fingerprint`) e **DNA** (`blood`/`saliva`) — vinculado
+  biometricamente ao criminoso. A polícia coleta e identifica via o próprio `evidences`.
+  Ações cobertas: `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply`.
+- **[EVIDENCE]** Nova ponte `bridge/evidence.lua` expondo `VPChopLeaveEvidence(src, coords, actionKey)`.
+  Consome `exports.evidences:syncEvidence('fingerprint'|'blood'|'saliva', serverId, 'atCoords', coords, meta)`.
+  **Auto-desativa** (sem crashar) se `evidences` não estiver `started` ou se `Config.Evidence.Enable=false`.
+  Toda chamada ao export é defensiva (`pcall`) — falha do `evidences` nunca quebra o crime.
+- **[EVIDENCE]** Counterplay: item **`gloves`** (Luvas). Possuí-lo no inventário **bloqueia digitais**
+  (checado server-side via `InvCount`). **DNA ainda cai** mesmo com luvas (corte/suor),
+  configurável por `Config.Evidence.GlovesBlocksDna`.
+- **[EVIDENCE]** Bloco `Config.Evidence` (chances base por ação para digital/DNA, tipo de DNA,
+  scaling por heat da placa — `HeatScaling`/`HeatFactor` reusam `VPChopHeatCalc`).
+- **[EVIDENCE]** Item `gloves` adicionado em `installation/ox_items_snippet.txt` e registrado em
+  `ox_inventory/data/items.lua` (label 'Luvas', weight 100, não consumível).
+
+### Notes
+- Feature **100% server-side**: nenhum arquivo client foi adicionado; o `evidences` cuida do
+  client (coleta/identificação). O `vp_chopshop` apenas **consome** a API dele.
+
+---
+
 ## [1.10.0] — 2026-05-31 — Placas: QBCore, persistência total, garagem, testemunhas
 
 ### Added

@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.10.0'
+version '1.11.0'
 
 dependencies {
     'ox_lib',
@@ -41,6 +41,10 @@ server_scripts {
     'bridge/server_framework.lua',
     'bridge/server_inventory.lua',
     'bridge/mdt.lua',
+    -- [EVIDENCE] ponte forense: usa InvCount (server_inventory) e VPChopMDT (mdt);
+    -- expõe VPChopLeaveEvidence para os arquivos de crime abaixo. DEPOIS das bridges,
+    -- ANTES de db.lua/heat.lua/plates.lua/main.lua.
+    'bridge/evidence.lua',
     'server/db.lua',
     'server/validate.lua',
     'server/cooldown.lua',

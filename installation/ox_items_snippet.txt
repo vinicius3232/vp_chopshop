@@ -83,3 +83,14 @@
     consume = 1,
     client = { export = 'vp_chopshop.useFakePlateItem' },
 },
+
+-- [EVIDENCE v1.11.0] Luvas — counterplay forense. POSSUIR no inventário bloqueia digitais
+-- nas ações de crime (checado server-side em bridge/evidence.lua via InvCount). NÃO é
+-- consumível: basta carregar. DNA (sangue) ainda pode cair mesmo com luvas (Config.Evidence).
+['gloves'] = {
+    label = 'Luvas',
+    weight = 100,
+    stack = true,
+    close = true,
+    description = 'Luvas — evitam deixar digitais em cena de crime.',
+},

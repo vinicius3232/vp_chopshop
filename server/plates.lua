@@ -225,6 +225,10 @@ lib.callback.register('vp_chopshop:stealPlate', function(src, netId, witnessScor
     VPChopMDT.ReportActivity(realPlate, src, 'plate_stolen')
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'plate_theft', 1)
 
+    -- [EVIDENCE] Arrancar a placa deixa vestígio no veículo. `vehCoords` e `realPlate` (REAL,
+    -- resolvida server-side acima) já em escopo → coords + heat scaling.
+    VPChopLeaveEvidence(src, vehCoords, 'plate_steal', realPlate)
+
     -- [F4 testemunhas] Devolver o bônus aplicado p/ o client notificar (cosmético).
     return { ok = true, bonusXp = bonusXp, bonusCash = bonusCash }
 end)
@@ -362,6 +366,10 @@ lib.callback.register('vp_chopshop:forgeFakePlate', function(src, sourcePlate)
     VPChopDiscordLog('[FASE2 placas] Forja de placa falsa',
         ('Placa-fonte: %s | src: %s'):format(chosenPlate, tostring(src)))
 
+    -- [EVIDENCE] A forja não envolve veículo: vestígio fica no local do jogador (junto à
+    -- bancada, já validado por isPlayerNearAnyBench). Coords do ped server-side.
+    VPChopLeaveEvidence(src, GetEntityCoords(GetPlayerPed(src)), 'plate_forge')
+
     return { ok = true, plate = chosenPlate }
 end)
 
@@ -480,6 +488,14 @@ lib.callback.register('vp_chopshop:applyFakePlate', function(src, netId, sourceP
     VPChopMDT.ReportActivity(realPlate, src, 'fake_plate_applied')
     VPChopDiscordLog('[FASE2 placas] Placa falsa aplicada',
         ('Falsa: %s → Real: %s | src: %s'):format(fakePlate, realPlate, tostring(src)))
+
+    -- [EVIDENCE] Aplicar a placa falsa no veículo deixa vestígio no local. `veh` validado acima;
+    -- `realPlate` (REAL, resolvida via VPChopMDT.GetRealPlate) já em escopo → heat scaling.
+    do
+        local evCoords = (veh and veh ~= 0 and DoesEntityExist(veh))
+            and GetEntityCoords(veh) or GetEntityCoords(GetPlayerPed(src))
+        VPChopLeaveEvidence(src, evCoords, 'plate_apply', realPlate)
+    end
 
     return { ok = true, fake = fakePlate }
 end)

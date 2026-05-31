@@ -183,6 +183,15 @@ lib.callback.register('vp_chopshop:vinScratch', function(src, netId)
     -- Atualizar cache de nível
     LastHeatLevel[plate] = nil  -- forçar recálculo na próxima ação
 
+    -- [EVIDENCE] Adulterar o VIN é crime: deixa vestígio no local do veículo. `veh` já foi
+    -- validado e está em escopo (proximidade conferida acima). `plate` já é a REAL (resolvida
+    -- via VPChopMDT.GetRealPlate acima) → habilita heat scaling. Fallback de coords: ped.
+    do
+        local evCoords = (veh and veh ~= 0 and DoesEntityExist(veh))
+            and GetEntityCoords(veh) or GetEntityCoords(GetPlayerPed(src))
+        VPChopLeaveEvidence(src, evCoords, 'vin_scratch', plate)
+    end
+
     return { ok=true }
 end)
 
