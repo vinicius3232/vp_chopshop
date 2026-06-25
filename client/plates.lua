@@ -100,13 +100,21 @@ CreateThread(function()
                     return
                 end
 
-                -- Minigame (mesmo formato de Config.Alarm.DisarmSkillCheck → lib.skillCheck)
-                local sc = Config.Plates.SkillCheck
-                if sc then
-                    local passed = lib.skillCheck(sc.difficulties, sc.keys)
-                    if not passed then
-                        VPChopNotify(L('notify_skill_fail'), 'error')
-                        return
+                -- Minigame de parafusos 3D (estilo filo) ancorado na placa traseira.
+                -- UX no client; a verdade (item/distância/cooldown) é validada no server abaixo.
+                -- Fallback automático para lib.skillCheck (Config.Plates.SkillCheck) está
+                -- embutido em VPChopPlateBoltMinigame caso o modelo `bolt` não carregue.
+                local b3 = Config.Plates.Bolt3D
+                if b3 and b3.Enable then
+                    if not VPChopPlateBoltMinigame(veh) then return end
+                else
+                    local sc = Config.Plates.SkillCheck
+                    if sc then
+                        local passed = lib.skillCheck(sc.difficulties, sc.keys)
+                        if not passed then
+                            VPChopNotify(L('notify_skill_fail'), 'error')
+                            return
+                        end
                     end
                 end
 

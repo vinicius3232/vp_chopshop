@@ -2,6 +2,31 @@
 
 ---
 
+## [1.14.0] — 2026-06-25 — Minigame de parafusos 3D (estilo "filo") no roubo de pneu e placa
+
+### Added
+- **Minigame de parafusos 3D interativo** (`client/main.lua`): câmera dedicada na superfície,
+  cursor do mouse mira cada parafuso e o jogador **segura o botão esquerdo + gira o mouse** para
+  desrosquear até soltar (o parafuso "pula" para fora com som). Usa o modelo `bolt.ydr` (já no
+  `stream/`). Núcleo genérico `runBoltSurface(opts)` reaproveitado por duas pontas:
+  - **Roda** (`VPChopBoltMinigame`): 5 parafusos em círculo na face da roda — agora conectado ao
+    roubo de pneu via macaco (`doJackstandTyreSteal`), que antes só tinha barra de progresso.
+  - **Placa** (`VPChopPlateBoltMinigame`): 2 ou 4 parafusos nos cantos da placa traseira —
+    substitui o `lib.skillCheck` no roubo de placa (`client/plates.lua`).
+- **Config nova:**
+  - `Config.Jackstand.Minigame.Bolt3D` (Enable, Bolts, TurnsToLoosen, Sensitivity, HoverRadius, Timeout).
+  - `Config.Plates.Bolt3D` (idem + geometria da placa: PlateZFrac / PlateYOffset / PlateHalfWidth / PlateHalfHeight).
+- Locale `bolt_minigame_help` (EN + PT).
+
+### Notes
+- **Server-side intacto:** o minigame é apenas UX no client; a validação/recompensa continua nos
+  callbacks `vp_chopshop:chopPart` (pneu) e `vp_chopshop:stealPlate` (placa).
+- **Fallback automático** para `lib.skillCheck` se o modelo `bolt` ou o bone da roda não carregarem.
+- **Geometria da placa é placeholder** — calibrar in-game (`PlateZFrac`, `PlateHalfWidth/Height`).
+- As funções de minigame antes órfãs agora estão no fluxo vivo.
+
+---
+
 ## [1.13.2] — 2026-05-31 — Rebalanceamento de economia (curva risco→recompensa)
 
 ### Changed (Economia)

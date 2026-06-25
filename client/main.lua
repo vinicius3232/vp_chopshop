@@ -602,29 +602,18 @@ end
 -- Spawna parafusos 3D (bolt.ydr) na face da roda; jogador segura [E] para girar.
 -- Fallback: lib.skillCheck se o modelo não carregar.
 do
-    local BOLT_MODEL  = 'bolt'
-    local BOLT_COUNT  = 5
-    local BOLT_RADIUS = 0.13
-    local TURNS_DEG   = 720.0
-    local TURN_SPEED  = 5.5
-    local TIMEOUT_MS  = 30000
-    local ANIM_DICT   = 'mini@repair'
-    local ANIM_CLIP   = 'fixing_a_player'
+    local BOLT_MODEL = 'bolt'
 
-    local function boltWorldPos(vehicle, wheelPos, boltIndex)
-        local vRot  = GetEntityRotation(vehicle, 5)
-        local yaw   = math.rad(vRot.z)
-        local pitch = math.rad(vRot.x)
-        local fX = -math.sin(yaw) * math.cos(pitch)
-        local fY =  math.cos(yaw) * math.cos(pitch)
-        local fZ =  math.sin(pitch)
-        local a  = (2 * math.pi / BOLT_COUNT) * boltIndex
-        local ca, sa = math.cos(a), math.sin(a)
-        return vector3(
-            wheelPos.x + BOLT_RADIUS * (ca * 0 + sa * fX),
-            wheelPos.y + BOLT_RADIUS * (ca * 0 + sa * fY),
-            wheelPos.z + BOLT_RADIUS * (ca * 1 + sa * fZ)
-        )
+    local function boltCfg()
+        local m = Config.Jackstand and Config.Jackstand.Minigame
+        return (m and m.Bolt3D) or {}
+    end
+
+    -- Converte coords do mundo para coords de tela (0..1). Usa a native do CFX;
+    -- se indisponível, o pcall em volta do loop cai no fallback skillCheck.
+    local function world2screen(x, y, z)
+        local on, sx, sy = GetScreenCoordFromWorldCoord(x, y, z)
+        return on, sx or 0.0, sy or 0.0
     end
 
     function VPChopBoltMinigameFallback()
@@ -636,94 +625,280 @@ do
         return passed
     end
 
+    -- ─── Núcleo genérico do minigame de parafusos ────────────────────────────
+    -- Recebe os pontos (world) onde spawnar cada parafuso + parâmetros de câmera e
+    -- giro. Serve tanto para a RODA (parafusos em círculo) quanto para a PLACA
+    -- (parafusos nos cantos). Retorna: true = concluído · false = cancelar/timeout
+    -- · 'fallback' = não conseguiu spawnar (modelo/pontos) → caller usa skillCheck.
+    -- o = { points={vec3...}, outward=vec3, camPos=vec3, lookAt=vec3,
+    --       baseRot={x,y,z}, needed, sens, hoverR, timeout, fov }
+    local function runBoltSurface(o)
+        local boltHash = GetHashKey(BOLT_MODEL)
+        RequestModel(boltHash)
+        local t0 = GetGameTimer()
+        while not HasModelLoaded(boltHash) do
+            if GetGameTimer() - t0 > 4000 then return 'fallback' end
+            Wait(50)
+        end
+
+        local cam = CreateCamWithParams('DEFAULT_SCRIPTED_CAMERA',
+            o.camPos.x, o.camPos.y, o.camPos.z, 0.0, 0.0, 0.0, o.fov or 45.0, false, 0)
+        PointCamAtCoord(cam, o.lookAt.x, o.lookAt.y, o.lookAt.z)
+        SetCamActive(cam, true)
+        RenderScriptCams(true, true, 600, true, true)
+
+        local br    = o.baseRot or { x = 0.0, y = 0.0, z = 0.0 }
+        local bolts = {}
+        for i = 1, #o.points do
+            local p   = o.points[i]
+            local obj = CreateObject(boltHash, p.x, p.y, p.z, true, true, false)
+            if obj and obj ~= 0 then
+                SetEntityCollision(obj, false, false)
+                SetEntityRotation(obj, br.x, br.y, br.z, 5, true)
+                FreezeEntityPosition(obj, true)
+                bolts[#bolts + 1] = { ent = obj, pos = p, deg = 0.0, done = false }
+            end
+        end
+        SetModelAsNoLongerNeeded(boltHash)
+
+        if #bolts == 0 then
+            RenderScriptCams(false, false, 0, true, true)
+            DestroyCam(cam, false)
+            return 'fallback'
+        end
+
+        local needed  = o.needed  or 720.0
+        local sens    = o.sens    or 900.0
+        local hoverR  = o.hoverR  or 0.06
+        local timeout = o.timeout or 30000
+        local outward = o.outward or vector3(0.0, 0.0, 1.0)
+
+        local ped = PlayerPedId()
+        RequestAnimDict('mini@repair')
+        t0 = GetGameTimer()
+        while not HasAnimDictLoaded('mini@repair') do
+            if GetGameTimer() - t0 > 2000 then break end
+            Wait(10)
+        end
+        if HasAnimDictLoaded('mini@repair') then
+            TaskPlayAnim(ped, 'mini@repair', 'fixing_a_player', 8.0, -1.0, -1, 49, 0.0, false, false, false)
+        end
+
+        lib.showTextUI(L('bolt_minigame_help'), { position = 'top-center', icon = 'wrench' })
+
+        local remaining      = #bolts
+        local startMs        = GetGameTimer()
+        local prevCx, prevCy = GetControlNormal(0, 239), GetControlNormal(0, 240)
+        local result         = nil  -- nil = a correr; true = concluído; false = cancelar/timeout
+
+        local function cleanup()
+            lib.hideTextUI()
+            for _, b in ipairs(bolts) do
+                if b.ent and DoesEntityExist(b.ent) then DeleteEntity(b.ent) end
+            end
+            ClearPedTasks(ped)
+            RenderScriptCams(false, true, 400, true, true)
+            DestroyCam(cam, false)
+        end
+
+        local ok = pcall(function()
+            while result == nil do
+                Wait(0)
+
+                if GetGameTimer() - startMs > timeout then result = false; break end
+                -- Cancelar: ESC (322) ou BACKSPACE (177)
+                if IsControlJustReleased(0, 322) or IsControlJustReleased(0, 177) then
+                    result = false; break
+                end
+
+                -- Cursor do mouse ativo; bloquear tiro/mira/câmera/movimento
+                SetMouseCursorActiveThisFrame()
+                DisableControlAction(0, 24, true)   -- attack (clique esquerdo)
+                DisableControlAction(0, 25, true)   -- aim
+                DisableControlAction(0, 1,  true)   -- look LR
+                DisableControlAction(0, 2,  true)   -- look UD
+                DisableControlAction(0, 30, true)   -- move LR
+                DisableControlAction(0, 31, true)   -- move UD
+                DisableControlAction(0, 22, true)   -- jump
+                DisablePlayerFiring(ped, true)
+
+                local cx      = GetControlNormal(0, 239)
+                local cy      = GetControlNormal(0, 240)
+                local holding = IsDisabledControlPressed(0, 24)
+
+                -- 1ª passada: localizar o parafuso sob o cursor
+                local hovered, bestDist = nil, hoverR
+                for _, b in ipairs(bolts) do
+                    if not b.done then
+                        local on, sx, sy = world2screen(b.pos.x, b.pos.y, b.pos.z)
+                        if on then
+                            local dx, dy = sx - cx, sy - cy
+                            local d = math.sqrt(dx * dx + dy * dy)
+                            if d < bestDist then bestDist = d; hovered = b end
+                        end
+                    end
+                end
+
+                -- 2ª passada: marcador (verde = sob o cursor; vermelho = pendente)
+                for _, b in ipairs(bolts) do
+                    if not b.done then
+                        local mg = (b == hovered) and 220 or 40
+                        local mr = (b == hovered) and 90  or 230
+                        DrawMarker(28, b.pos.x, b.pos.y, b.pos.z, 0.0,0.0,0.0, 0.0,0.0,0.0,
+                            0.028, 0.028, 0.028, mr, mg, 60, 140,
+                            false, false, 2, false, nil, nil, false)
+                    end
+                end
+
+                if hovered and holding then
+                    local dcx, dcy = cx - prevCx, cy - prevCy
+                    local move = math.sqrt(dcx * dcx + dcy * dcy)
+                    if move > 0.0 then
+                        local turn = move * sens
+                        hovered.deg = hovered.deg + turn
+                        local r = GetEntityRotation(hovered.ent, 5)
+                        SetEntityRotation(hovered.ent, r.x, r.y, r.z + turn, 5, true)
+                        if hovered.deg >= needed then
+                            hovered.done = true
+                            remaining = remaining - 1
+                            FreezeEntityPosition(hovered.ent, false)
+                            SetEntityCollision(hovered.ent, true, true)
+                            SetEntityVelocity(hovered.ent,
+                                outward.x * 0.6, outward.y * 0.6, math.random() * 0.3 + 0.2)
+                            SetEntityAsNoLongerNeeded(hovered.ent)
+                            hovered.ent = nil
+                            PlaySoundFrontend(-1, 'Pin_Good', 'DLC_HEIST_FLEECA_SOUNDSET', true)
+                            if remaining <= 0 then result = true end
+                        end
+                    end
+                end
+
+                prevCx, prevCy = cx, cy
+            end
+        end)
+
+        cleanup()
+        if not ok then return 'fallback' end
+        return result == true
+    end
+
+    -- ─── Ponta RODA: parafusos em círculo na face da roda ─────────────────────
     function VPChopBoltMinigame(vehicle, wheelIndex)
         local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
         local boneKey   = boneNames[wheelIndex + 1]
         if not boneKey then return false end
         local boneId = GetEntityBoneIndexByName(vehicle, boneKey)
         if not boneId or boneId == -1 then return VPChopBoltMinigameFallback() end
-        local wheelPos = GetWorldPositionOfEntityBone(vehicle, boneId)
 
-        local boltHash = GetHashKey(BOLT_MODEL)
-        RequestModel(boltHash)
-        local t0 = GetGameTimer()
-        while not HasModelLoaded(boltHash) do
-            if GetGameTimer() - t0 > 4000 then return VPChopBoltMinigameFallback() end
-            Wait(50)
+        local c          = boltCfg()
+        local boltCount  = math.max(3, math.floor(tonumber(c.Bolts) or 5))
+        local isLeft     = (boneKey == 'wheel_lf' or boneKey == 'wheel_lr')
+        local sideSign   = isLeft and -1.0 or 1.0
+        local wheelPos   = GetWorldPositionOfEntityBone(vehicle, boneId)
+        local fwd        = GetEntityForwardVector(vehicle)
+        local up         = vector3(0.0, 0.0, 1.0)
+        local rightV     = vector3(fwd.y, -fwd.x, 0.0)
+        local rlen       = #rightV
+        if rlen > 0.0 then rightV = rightV / rlen end
+        local sideDir    = rightV * sideSign
+        local vehHeading = GetEntityHeading(vehicle)
+
+        local radius = 0.135
+        local outOff = 0.04
+        local points = {}
+        for i = 0, boltCount - 1 do
+            local a      = (2.0 * math.pi / boltCount) * i
+            local ca, sa = math.cos(a), math.sin(a)
+            points[#points + 1] = wheelPos + (up * (ca * radius)) + (fwd * (sa * radius)) + (sideDir * outOff)
         end
 
-        RequestAnimDict(ANIM_DICT)
-        t0 = GetGameTimer()
-        while not HasAnimDictLoaded(ANIM_DICT) do
-            if GetGameTimer() - t0 > 3000 then break end
-            Wait(50)
+        local r = runBoltSurface({
+            points  = points,
+            outward = sideDir,
+            camPos  = GetOffsetFromEntityInWorldCoords(vehicle, sideSign * 1.6, 0.0, 0.35),
+            lookAt  = wheelPos,
+            baseRot = { x = 90.0, y = 0.0, z = vehHeading + (sideSign * 90.0) },
+            needed  = (tonumber(c.TurnsToLoosen) or 2.0) * 360.0,
+            sens    = tonumber(c.Sensitivity) or 900.0,
+            hoverR  = tonumber(c.HoverRadius)  or 0.06,
+            timeout = tonumber(c.Timeout)      or 30000,
+        })
+
+        if r == 'fallback' then return VPChopBoltMinigameFallback() end
+        if not r then VPChopNotify(L('tyremission_minigame_fail'), 'error'); return false end
+        return true
+    end
+
+    -- ─── Ponta PLACA: parafusos nos cantos da placa traseira ──────────────────
+    local function plateCfg()
+        local p = Config.Plates
+        return (p and p.Bolt3D) or {}
+    end
+
+    local function VPChopPlateBoltFallback()
+        local sc = Config.Plates and Config.Plates.SkillCheck
+        if not sc then return true end
+        local passed = lib.skillCheck(sc.difficulties, sc.keys)
+        if not passed then VPChopNotify(L('notify_skill_fail'), 'error') end
+        return passed
+    end
+
+    function VPChopPlateBoltMinigame(vehicle)
+        if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then return false end
+        local c = plateCfg()
+
+        local vmin, vmax = GetModelDimensions(GetEntityModel(vehicle))
+        local fwd        = GetEntityForwardVector(vehicle)
+        local up         = vector3(0.0, 0.0, 1.0)
+        local rightV     = vector3(fwd.y, -fwd.x, 0.0)
+        local rlen       = #rightV
+        if rlen > 0.0 then rightV = rightV / rlen end
+        local vehHeading = GetEntityHeading(vehicle)
+
+        -- Centro aproximado da placa TRASEIRA (placeholder: calibrar in-game via ZFrac/YOffset)
+        local zFrac  = tonumber(c.PlateZFrac)  or 0.30
+        local zPlate = vmin.z + (vmax.z - vmin.z) * zFrac
+        local yRear  = vmin.y - (tonumber(c.PlateYOffset) or 0.02)
+        local center = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, yRear, zPlate)
+
+        -- Normal da face traseira (aponta para trás = lado da câmera)
+        local outward = vector3(-fwd.x, -fwd.y, 0.0)
+        local olen = #outward
+        if olen > 0.0 then outward = outward / olen end
+
+        -- Disposição: 2 parafusos (topo) ou 4 (cantos do retângulo da placa)
+        local hw     = tonumber(c.PlateHalfWidth)  or 0.20
+        local hh     = tonumber(c.PlateHalfHeight) or 0.07
+        local outOff = 0.03
+        local nbolts = math.floor(tonumber(c.Bolts) or 4)
+        local layout
+        if nbolts <= 2 then
+            layout = { { -1.0, 1.0 }, { 1.0, 1.0 } }
+        else
+            layout = { { -1.0, 1.0 }, { 1.0, 1.0 }, { -1.0, -1.0 }, { 1.0, -1.0 } }
         end
 
-        local bolts = {}
-        for i = 0, BOLT_COUNT - 1 do
-            local wp  = boltWorldPos(vehicle, wheelPos, i)
-            local obj = CreateObject(boltHash, wp.x, wp.y, wp.z, true, true, false)
-            if obj and obj ~= 0 then
-                SetEntityCollision(obj, false, false)
-                local off = GetOffsetFromEntityGivenWorldCoords(vehicle, wp.x, wp.y, wp.z)
-                AttachEntityToEntity(obj, vehicle, 0,
-                    off.x, off.y, off.z, 0.0, 0.0, 0.0,
-                    false, false, false, false, 0, true)
-                bolts[#bolts + 1] = { ent = obj, deg = 0.0 }
-            end
-        end
-        SetModelAsNoLongerNeeded(boltHash)
-
-        if #bolts == 0 then return VPChopBoltMinigameFallback() end
-
-        local ped = PlayerPedId()
-        if HasAnimDictLoaded(ANIM_DICT) then
-            TaskPlayAnim(ped, ANIM_DICT, ANIM_CLIP, 8.0, -1.0, -1, 49, 0.0, false, false, false)
+        local points = {}
+        for i = 1, #layout do
+            local u, v = layout[i][1], layout[i][2]
+            points[#points + 1] = center + (rightV * (u * hw)) + (up * (v * hh)) + (outward * outOff)
         end
 
-        local cancelled, timedOut = false, false
-        local startTime = GetGameTimer()
-        local remaining = #bolts
+        local r = runBoltSurface({
+            points  = points,
+            outward = outward,
+            camPos  = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, yRear - 1.2, zPlate + 0.25),
+            lookAt  = center,
+            baseRot = { x = 90.0, y = 0.0, z = vehHeading + 180.0 },
+            needed  = (tonumber(c.TurnsToLoosen) or 1.5) * 360.0,
+            sens    = tonumber(c.Sensitivity) or 900.0,
+            hoverR  = tonumber(c.HoverRadius)  or 0.06,
+            timeout = tonumber(c.Timeout)      or 25000,
+        })
 
-        for idx = 1, #bolts do
-            local bolt = bolts[idx]
-            lib.showTextUI(('[E] ' .. L('bolt_minigame_bolt_fmt')):format(idx, #bolts),
-                { position = 'right-center', icon = 'wrench' })
-            while bolt.deg < TURNS_DEG do
-                if GetGameTimer() - startTime > TIMEOUT_MS then timedOut = true; break end
-                if IsControlJustReleased(0, 307) then cancelled = true; break end
-                if IsControlPressed(0, 38) then
-                    bolt.deg = bolt.deg + TURN_SPEED
-                    local r = GetEntityRotation(bolt.ent, 5)
-                    SetEntityRotation(bolt.ent, r.x, r.y, r.z + TURN_SPEED, 5, true)
-                end
-                Wait(0)
-            end
-            lib.hideTextUI()
-            if cancelled or timedOut then break end
-            DetachEntity(bolt.ent, true, true)
-            FreezeEntityPosition(bolt.ent, false)
-            SetEntityVelocity(bolt.ent,
-                (math.random() - 0.5) * 0.8,
-                (math.random() - 0.5) * 0.8,
-                math.random() * 0.4 + 0.15)
-            SetEntityAsNoLongerNeeded(bolt.ent)
-            bolts[idx].ent = nil
-            remaining = remaining - 1
-            Wait(120)
-        end
-
-        for _, b in ipairs(bolts) do
-            if b.ent and DoesEntityExist(b.ent) then DeleteEntity(b.ent) end
-        end
-        ClearPedTasksImmediately(ped)
-        if HasAnimDictLoaded(ANIM_DICT) then RemoveAnimDict(ANIM_DICT) end
-
-        if cancelled or timedOut then
-            VPChopNotify(L('tyremission_minigame_fail'), 'error')
-            return false
-        end
-        return remaining == 0
+        if r == 'fallback' then return VPChopPlateBoltFallback() end
+        if not r then VPChopNotify(L('notify_skill_fail'), 'error'); return false end
+        return true
     end
 end
 
@@ -782,6 +957,15 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
     if JackstandBusy then return end
     JackstandBusy = true
     CreateThread(function()
+        -- Minigame de parafusos 3D (estilo filo): gate antes de puxar o pneu.
+        -- Server-side continua sendo a fonte de verdade — isto é só UX no client;
+        -- a validação/recompensa só ocorre no callback vp_chopshop:chopPart abaixo.
+        local mg = Config.Jackstand and Config.Jackstand.Minigame and Config.Jackstand.Minigame.Bolt3D
+        if mg and mg.Enable then
+            local passed = VPChopBoltMinigame(veh, wheelIdx)
+            if not passed then JackstandBusy = false; return end
+        end
+
         -- Progress bar: puxando o pneu
         local okp = lib.progressBar({
             duration     = 4000,

@@ -595,8 +595,13 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.13.2` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.14.0` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
+> **v1.14.0** — **minigame de parafusos 3D (estilo "filo")**: câmera dedicada + cursor do mouse,
+> segura o botão esquerdo e gira para desrosquear. Conectado ao **roubo de pneu** (via macaco) e ao
+> **roubo de placa** (substitui o skillcheck), com fallback automático para `lib.skillCheck`.
+> Configurável em `Config.Jackstand.Minigame.Bolt3D` e `Config.Plates.Bolt3D`. Ver CHANGELOG.
+>
 > **v1.7.0–1.13.2:** auditoria (limpeza/segurança/performance), recompensa imediata + emboscada,
 > o **sistema completo de placas** (roubo físico → forja → placa falsa que engana o MDT,
 > persistente e com reversão de garagem; dispatch por testemunhas; suporte QBox/QBCore/ESX),

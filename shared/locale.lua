@@ -256,6 +256,7 @@ local Locales = {
         tier_unlock_4               = '+30% speed \194\183 +15% materials \194\183 Whole car delivery \194\183 +10% fence',
         -- Bolt minigame
         bolt_minigame_bolt_fmt          = 'Bolt %d/%d',
+        bolt_minigame_help              = 'Hold [Left Click] on each bolt and move the mouse to unscrew  \194\183  [ESC] cancel',
         -- Heat warnings (L4 fix)
         heat_warn_morno                 = 'This car is warm. Watch out.',
         heat_warn_quente                = 'This car is hot. Fence pays less.',
@@ -588,6 +589,7 @@ local Locales = {
         tier_unlock_4               = '+30% velocidade \194\183 +15% materiais \194\183 Entrega de carro inteiro \194\183 +10% fence',
         -- Bolt minigame
         bolt_minigame_bolt_fmt          = 'Parafuso %d/%d',
+        bolt_minigame_help              = 'Segure [Bot\195\163o Esquerdo] em cada parafuso e mexa o mouse para soltar  \194\183  [ESC] cancela',
         -- Avisos de heat (L4 fix)
         heat_warn_morno                 = 'Este carro está morno. Cuidado.',
         heat_warn_quente                = 'Este carro está quente. O fence paga menos.',

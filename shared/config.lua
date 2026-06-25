@@ -370,6 +370,31 @@ Config.Plates = {
         keys         = { 'e', 'e', 'e' },
     },
 
+    --- Minigame de parafusos 3D autoral (estilo "filo") ancorado na PLACA TRASEIRA:
+    --- câmera dedicada atrás do carro + cursor do mouse + girar segurando o botão
+    --- esquerdo. Tem prioridade sobre o SkillCheck acima quando Enable = true.
+    --- Fallback automático para o SkillCheck se o modelo `bolt` não carregar.
+    --- As medidas da placa são placeholders geométricos — calibrar in-game.
+    Bolt3D = {
+        Enable          = true,
+        --- 2 = parafusos no topo · 4 = um em cada canto da placa.
+        Bolts           = 4,
+        --- Voltas de mouse para soltar cada parafuso (placa pede menos que a roda).
+        TurnsToLoosen   = 1.5,
+        --- Sensibilidade: graus por unidade de movimento do cursor (maior = mais rápido).
+        Sensitivity     = 900.0,
+        --- Raio (coords de tela 0..1) para o cursor "agarrar" um parafuso.
+        HoverRadius     = 0.06,
+        --- Tempo máximo (ms) antes de falhar por timeout.
+        Timeout         = 25000,
+        --- Geometria da placa (calibrar in-game): altura na bounding box (0..1),
+        --- recuo traseiro (m), meia-largura e meia-altura do retângulo da placa (m).
+        PlateZFrac      = 0.30,
+        PlateYOffset    = 0.02,
+        PlateHalfWidth  = 0.20,
+        PlateHalfHeight = 0.07,
+    },
+
     --- Ferramenta exigida (verificada no client p/ UX e no servidor como verdade).
     ToolItem = 'screwdriver',
 
@@ -810,6 +835,25 @@ Config.Jackstand = {
         -- fallback lib.skillCheck (quando boii_minigames não estiver ativo)
         SkillCheckDifficulties = { 'easy', 'medium', 'medium', 'hard' },
         SkillCheckKeys         = { 'e', 'e', 'e', 'e' },
+
+        --- Minigame de parafusos 3D autoral (estilo "filo": câmera dedicada + cursor do
+        --- mouse + girar segurando o botão esquerdo). NÃO precisa de boii_minigames nem
+        --- de NUI; usa o modelo `bolt.ydr` (já incluído no stream/). Tem prioridade sobre
+        --- o boii/skill_circle quando Enable = true. Fallback automático para lib.skillCheck
+        --- se o modelo/bone da roda não carregar.
+        Bolt3D = {
+            Enable        = true,
+            --- Quantidade de parafusos por roda.
+            Bolts         = 5,
+            --- Voltas de mouse necessárias para soltar cada parafuso (2.0 = duas voltas).
+            TurnsToLoosen = 2.0,
+            --- Sensibilidade: graus de giro por unidade de movimento do cursor (maior = mais rápido).
+            Sensitivity   = 900.0,
+            --- Raio (em coords de tela 0..1) para o cursor "agarrar" um parafuso.
+            HoverRadius   = 0.06,
+            --- Tempo máximo (ms) antes de falhar por timeout.
+            Timeout       = 30000,
+        },
     },
 }
 
