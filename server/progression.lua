@@ -105,6 +105,13 @@ function VPChopAddXp(src, amount, reason)
     for t = prevTier + 1, prog.tier do
         notifyTierUp(src, t)
     end
+
+    -- vp_gangs: recompensa a gang ao desmanchar (só nos marcos de fase; não-destrutivo)
+    if GetResourceState('vp_gangs') == 'started'
+       and (reason == 'phase1' or reason == 'phase2' or reason == 'phase3' or reason == 'phase4') then
+        local okG, cidG = pcall(function() return exports.qbx_core:GetPlayer(src).PlayerData.citizenid end)
+        if okG and cidG then exports.vp_gangs:rewardGangActivity(cidG, 'vehicle_chop', {}) end
+    end
 end
 
 -- ─── Listeners do event bus ───────────────────────────────────────────────────

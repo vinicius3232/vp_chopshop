@@ -1,15 +1,15 @@
 -- bridge/evidence.lua
--- [EVIDENCE] Ponte server-side para o resource `evidences` (Advanced FiveM evidence script).
+-- [EVIDENCE] Ponte server-side para o resource `vp_crimescene` (sistema de cena de crime).
 -- Toda ação de crime do chopshop chama VPChopLeaveEvidence(src, coords, actionKey) APÓS o
 -- sucesso. A função planta vestígio coletável (digital + DNA) no local, vinculado
 -- biometricamente ao criminoso — o próprio `evidences` resolve a biometria a partir do serverId.
 --
--- API consumida (CONFIRMADA em resources/[standalone]/evidences/server/evidences/api.lua):
---   exports.evidences:syncEvidence(evidenceClass, owner, fun, ...)
---     evidenceClass : 'fingerprint' | 'blood' | 'saliva' | 'magazine'
---     owner         : serverId (number) do criminoso → o script resolve a biometria sozinho
---     fun           : 'atCoords' → planta evidência coletável no local
---     args atCoords : (coords vector3, metadata table?)
+-- API consumida (vp_crimescene/server/evidence_objects.lua):
+--   exports.vp_crimescene:AddGroundEvidence(evidenceType, coords, playerSrc, metadata?)
+--     evidenceType : 'blood' (DNA) — traço biométrico de chão coletável
+--     coords       : vector3/table {x,y,z}
+--     playerSrc    : serverId do criminoso → o script resolve a biometria sozinho
+--   (Migrado do antigo resource `evidences`, que foi removido.)
 --
 -- Padrões espelhados do vp_chopshop:
 --   guard de feature flag, GetResourceState gate (auto-desativa), IsValidSource,
@@ -45,8 +45,12 @@ end
 ---@param coords vector3
 ---@param actionKey string
 local function plantEvidence(evidenceClass, src, coords, actionKey)
+    -- [MIGRADO] vp_crimescene substituiu o antigo resource `evidences`.
+    -- Ele modela traços biométricos de chão como 'blood' (DNA): tanto a rolagem de
+    -- digital quanto a de DNA do chopshop viram um vestígio de DNA coletável,
+    -- vinculado ao criminoso (resolvido pelo serverId server-side).
     pcall(function()
-        exports.evidences:syncEvidence(evidenceClass, src, 'atCoords', coords, {
+        exports.vp_crimescene:AddGroundEvidence('blood', coords, src, {
             source = 'vp_chopshop',
             action = actionKey,
         })
@@ -71,7 +75,7 @@ function VPChopLeaveEvidence(src, coords, actionKey, plate)
     -- Guard 1: feature ligada na config.
     if not cfg or not cfg.Enable then return end
     -- Guard 2: resource presente e rodando — auto-desativa sem crashar se ausente.
-    if GetResourceState('evidences') ~= 'started' then return end
+    if GetResourceState('vp_crimescene') ~= 'started' then return end
     -- Guard 3: coords válido (vector3 com componentes numéricos).
     if not coords or type(coords.x) ~= 'number' then return end
     -- Guard 4: ação conhecida (tabela de chances existe).

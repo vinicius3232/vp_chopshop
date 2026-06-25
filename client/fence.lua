@@ -89,6 +89,12 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
         SetEntityInvincible(ent, true)
         SetBlockingOfNonTemporaryEvents(ent, true)
 
+        -- Scenario do ped: aplicado client-side (era feito no server, mas TaskStartScenarioInPlace é client-only)
+        local locCfg = Config.Fence and Config.Fence.Locations and Config.Fence.Locations[CurrentLocIdx]
+        if locCfg and locCfg.scenario and locCfg.scenario ~= '' then
+            TaskStartScenarioInPlace(ent, locCfg.scenario, 0, true)
+        end
+
         -- Buscar nível de trust (callback separado — getProgression NÃO retorna trust)
         local ok, trust = pcall(lib.callback.await, 'vp_chopshop:fence:getTrust', false)
         trust = (ok and type(trust) == 'number') and trust or 0

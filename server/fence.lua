@@ -188,13 +188,9 @@ AddEventHandler('vp_chopshop:server:spawnFenceNpc', function(loc)
         local ped = CreatePed(4, model, loc.coords.x, loc.coords.y, loc.coords.z, loc.coords.w, true, true)
         if not ped or ped == 0 then return end
 
-        SetEntityAsMissionEntity(ped, true, true)
-        FreezeEntityPosition(ped, true)
-        SetEntityInvincible(ped, true)
-        SetBlockingOfNonTemporaryEvents(ped, true)
-        if loc.scenario and loc.scenario ~= '' then
-            TaskStartScenarioInPlace(ped, loc.scenario, 0, true)
-        end
+        -- A config visual do ped (freeze/invincible/blocking/scenario) é feita CLIENT-side
+        -- no handler 'vp_chopshop:client:setupFenceNpc'. Esses natives são client-only e
+        -- não existem no server (SetEntityAsMissionEntity etc. → nil value).
 
         FenceNpcNetId = NetworkGetNetworkIdFromEntity(ped)
         -- Notificar todos os clientes para registrar targets
