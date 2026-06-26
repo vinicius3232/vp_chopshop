@@ -25,7 +25,9 @@ local _truckNearCache = false
 local _truckNearTimer = 0
 local TRUCK_NEAR_INTERVAL = 500  -- ms entre scans
 
-local function isTruckNearby()
+-- [AUDIT A1] Global para reuso no canInteract de props de pneu no chão (client/main.lua),
+-- que antes usava VPChopFindNearestTruck (GetGamePool nu) por frame.
+function VPChopIsTruckNearby()
     local now = GetGameTimer()
     if now - _truckNearTimer < TRUCK_NEAR_INTERVAL then return _truckNearCache end
     _truckNearTimer = now
@@ -459,7 +461,7 @@ function VPChopSpawnTyreProp(position)
             label    = L('fence_tyre_load_label'),
             icon     = 'fa-solid fa-truck',
             distance = 2.0,
-            canInteract = isTruckNearby,  -- [M1 FIX] cache 500ms; evita GetGamePool por frame
+            canInteract = VPChopIsTruckNearby,  -- [M1 FIX] cache 500ms; evita GetGamePool por frame
             onSelect = function() VPChopLoadTyreInTruck(prop) end,
         },
     })
@@ -513,7 +515,7 @@ function VPChopPickUpTyre(propHandle)
     -- Thread para E/X enquanto carrega
     CreateThread(function()
         while CarryingTyre do
-            Wait(50)
+            Wait(100)  -- [AUDIT M6] 50→100ms: polling de input; humano não percebe a diferença
             -- X = largar no chão
             if IsControlJustReleased(0, 73) then  -- X
                 VPChopDropTyre()

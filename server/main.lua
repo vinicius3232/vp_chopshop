@@ -345,6 +345,12 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
         and GetVehicleNumberPlateText(vehForPlate):gsub('%s+', '')
         or ''
 
+    -- [AUDIT M2] Emboscada decidida SERVER-SIDE após a recompensa. Antes dependia do client
+    -- chamar 'vp_chopshop:maybeAmbush' — um cheater que nunca chamava nunca sofria emboscada.
+    if Config.Ambush and Config.Ambush.Enable then
+        VPChopAmbushMaybe(source, netId, plate)
+    end
+
     -- Emitir evento para progression e fence escutarem
     TriggerEvent(VPChopEvt.PART_CHOPPED, source, netId, partKey, 1)
 
@@ -446,7 +452,8 @@ lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipe
     _benchCraftRateLimit[source] = nowBC + BENCH_CRAFT_MIN_INTERVAL_MS
     if BenchCraftBusy[source] then return { ok = false, err = 'busy' } end
     BenchCraftBusy[source] = true
-    local bench = benchById(benchId)
+    benchId = tonumber(benchId)  -- [AUDIT M3] sanitizar antes do lookup (consistência com pickupBench)
+    local bench = benchId and benchById(benchId)
     if not bench then BenchCraftBusy[source] = nil return { ok = false, err = 'bench' } end
     if not isWelderNearBench(bench) then BenchCraftBusy[source] = nil return { ok = false, err = 'no_welder' } end
     recipeIndex = tonumber(recipeIndex)
@@ -516,16 +523,9 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     return { ok = true, payout = payout, bonus = appliedBonus }
 end)
 
-lib.callback.register('vp_chopshop:maybeAmbush', function(source, netId)
-    if not IsValidSource(source) then return false end
-    -- Resolver placa para heat multiplier
-    local vehForPlate = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
-    local plate = (vehForPlate and vehForPlate ~= 0 and DoesEntityExist(vehForPlate))
-        and GetVehicleNumberPlateText(vehForPlate):gsub('%s+', '')
-        or ''
-    VPChopAmbushMaybe(source, netId, plate)
-    return true
-end)
+-- [AUDIT M2] Callback 'vp_chopshop:maybeAmbush' REMOVIDO. A emboscada agora é disparada
+-- server-side dentro do callback 'vp_chopshop:chopPart' (acima), após a recompensa, usando
+-- o netId/plate já resolvidos — o client não decide mais se/quando sofre emboscada.
 
 lib.callback.register('vp_chopshop:npcAcceptMission', function(source)
     if not IsValidSource(source) then return { ok=false } end

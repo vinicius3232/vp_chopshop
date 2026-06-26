@@ -89,7 +89,7 @@ CreateThread(function()
                 --    por ownership na Fase 1, mas evitamos roubar a placa do carro que dirigimos)
                 -- PlayerPedId() em vez de cache.ped: espelha o padrão usado no resto do resource;
                 -- canInteract roda sob demanda (não por frame), sem custo relevante.
-                local myVeh = GetVehiclePedIsIn(PlayerPedId(), false)
+                local myVeh = GetVehiclePedIsIn(cache.ped, false)
                 if myVeh ~= 0 and myVeh == entity then return false end
                 return true
             end,

@@ -444,6 +444,11 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     SellTyresBusy[src] = true
     local function release(res) SellTyresBusy[src] = nil; return res end
 
+    -- [AUDIT M4] Validar o tipo recebido do client ANTES de qualquer yield (.await do trust).
+    if source_type ~= 'truck' and source_type ~= 'inventory' then
+        return release({ ok=false, err='invalid_type' })
+    end
+
     local trust = VPChopFenceGetTrust(src)
     if trust < 1 then return release({ ok=false, err='no_trust' }) end
 
@@ -458,10 +463,6 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     local trustM   = trustMult(trust)
     local nightM   = getNightBonusMultiplier()
     local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult * nightM)
-
-    if source_type ~= 'truck' and source_type ~= 'inventory' then
-        return release({ ok=false, err='invalid_type' })
-    end
 
     local count = 0
 

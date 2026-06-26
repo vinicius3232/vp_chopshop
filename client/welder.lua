@@ -38,7 +38,7 @@ function VPChopUpsertWelder(welder)
                 icon = 'fa-solid fa-hand',
                 distance = Config.InteractDistance,
                 canInteract = function()
-                    return GetVehiclePedIsIn(PlayerPedId(), false) == 0
+                    return GetVehiclePedIsIn(cache.ped, false) == 0
                 end,
                 onSelect = function()
                     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:pickupWelder', false, welder.id)

@@ -89,8 +89,12 @@ function VPChopSerialBenchOptions(benchId)
         local now = GetGameTimer()
         if now - lastCheck < 1500 then return end
         lastCheck = now
-        local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:serial:benchAvailability', false)
-        if cbOk and type(res) == 'table' then avail = res end
+        -- [AUDIT M5] Fire-and-forget: nunca bloquear o canInteract do ox_target com .await.
+        -- Atualiza o cache em background; o canInteract usa o último valor conhecido.
+        CreateThread(function()
+            local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:serial:benchAvailability', false)
+            if cbOk and type(res) == 'table' then avail = res end
+        end)
     end
 
     return {
@@ -100,7 +104,7 @@ function VPChopSerialBenchOptions(benchId)
             icon        = 'fa-solid fa-eraser',
             distance    = Config.InteractDistance,
             canInteract = function()
-                if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return false end
+                if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
                 refresh()
                 return avail.scratch == true
             end,
@@ -112,7 +116,7 @@ function VPChopSerialBenchOptions(benchId)
             icon        = 'fa-solid fa-stamp',
             distance    = Config.InteractDistance,
             canInteract = function()
-                if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return false end
+                if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
                 refresh()
                 return avail.forge == true
             end,

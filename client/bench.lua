@@ -120,7 +120,7 @@ function VPChopUpsertBench(bench)
             icon = 'fa-solid fa-id-card-clip',
             distance = Config.InteractDistance,
             canInteract = function()
-                if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return false end
+                if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
                 -- UX: só oferece se houver placa roubada no inventário (servidor revalida)
                 local count = exports.ox_inventory:Search('count', 'stolen_plate') or 0
                 return count and count > 0
@@ -182,7 +182,7 @@ function VPChopUpsertBench(bench)
         icon = 'fa-solid fa-hand',
         distance = Config.InteractDistance,
         canInteract = function()
-            return GetVehiclePedIsIn(PlayerPedId(), false) == 0
+            return GetVehiclePedIsIn(cache.ped, false) == 0
         end,
         onSelect = function()
             local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:pickupBench', false, bench.id)

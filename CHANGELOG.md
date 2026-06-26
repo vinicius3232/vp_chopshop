@@ -2,6 +2,42 @@
 
 ---
 
+## [1.14.1] — 2026-06-26 — Correções de auditoria (4 dimensões)
+
+Auditoria completa (performance / segurança / qualidade / banco). Nenhum crítico; 0 exploits
+de ganho. Reparos de refinamento aplicados:
+
+### Fixed (Segurança)
+- **[M1] `server/plates.lua`:** `witnessScore` (vindo do client) agora é clampado a 25.0 antes
+  de calcular o bônus por testemunhas. Antes, `score=9999` saturava sempre o bônus máximo.
+- **[M2] `server/main.lua` + `client/main.lua`:** emboscada (`VPChopAmbushMaybe`) agora é
+  disparada **server-side** dentro do callback `chopPart`, após a recompensa. O callback
+  `vp_chopshop:maybeAmbush` foi removido — o client não decide mais se/quando sofre emboscada
+  (antes, um cheater que nunca chamava o callback nunca era emboscado).
+- **[M3] `server/main.lua`:** `benchId` sanitizado com `tonumber()` antes do lookup em `benchCraft`.
+- **[M4] `server/fence.lua`:** validação de `source_type` em `sellTyres` movida para antes do
+  primeiro `.await` (trust), evitando dado não validado cruzar o yield.
+
+### Fixed (Performance)
+- **[A1] `client/fence.lua` + `client/main.lua`:** `canInteract` do prop de pneu no chão agora usa
+  `VPChopIsTruckNearby()` (cache 500ms) em vez de `VPChopFindNearestTruck` (`GetGamePool` por
+  frame). Remove o pico de resmon em uso ativo.
+- **[M5] `client/partserial.lua`:** `refresh()` do `canInteract` da bancada agora roda em
+  `CreateThread` (fire-and-forget) — nunca bloqueia o `canInteract` com `.await`.
+- **[M6] `client/fence.lua`:** loop de carry de pneu `Wait(50)` → `Wait(100)`.
+- **[M7] `client/main.lua`:** `DrawMarker` do minigame trocado de tipo 28 para tipo 0 (menor overhead).
+- **[M8] `bench/welder/partserial/plates`:** `PlayerPedId()` → `cache.ped` nos `canInteract`.
+
+### Fixed (Robustez)
+- **[B2] `server/validate.lua`:** `Config.VehicleNearLiftRadius` agora passa por `tonumber()` com
+  fallback (evita erro de runtime se a config vier malformada).
+
+### Notes
+- Não alterado por decisão: `ServerTyreCounts` permanece global (acesso cross-file intencional);
+  loop de espera do `getWorld` no boot (baixo impacto em servidor pequeno).
+
+---
+
 ## [1.14.0] — 2026-06-25 — Minigame de parafusos 3D (estilo "filo") no roubo de pneu e placa
 
 ### Added

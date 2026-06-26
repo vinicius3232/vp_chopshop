@@ -370,9 +370,7 @@ local function openJackstandChopMenu(veh)
                 icon  = 'wrench',
                 onSelect = function()
                     if not tryChopSkillCheck() then return end
-                    if Config.Ambush and Config.Ambush.Enable then
-                        pcall(lib.callback.await, 'vp_chopshop:maybeAmbush', false, netId)
-                    end
+                    -- [AUDIT M2] Emboscada agora é disparada server-side no callback chopPart.
                     local animCfg, soundType = getPartAnimAndSound(partKey)
                     playChopSound(soundType)
                     spawnToolProp(tCfg and tCfg.HandProp)
@@ -744,8 +742,8 @@ do
                     if not b.done then
                         local mg = (b == hovered) and 220 or 40
                         local mr = (b == hovered) and 90  or 230
-                        DrawMarker(28, b.pos.x, b.pos.y, b.pos.z, 0.0,0.0,0.0, 0.0,0.0,0.0,
-                            0.028, 0.028, 0.028, mr, mg, 60, 140,
+                        DrawMarker(0, b.pos.x, b.pos.y, b.pos.z + 0.12, 0.0,0.0,0.0, 0.0,0.0,0.0,
+                            0.04, 0.04, 0.06, mr, mg, 60, 140,
                             false, false, 2, false, nil, nil, false)
                     end
                 end
@@ -1494,7 +1492,7 @@ local function placeTyreHandPropOnGround()
             label       = L('tyre_store_in_truck'),
             icon        = 'fa-solid fa-truck-pickup',
             distance    = 2.0,
-            canInteract = function() return VPChopFindNearestTruck(5.0) ~= nil end,
+            canInteract = function() return VPChopIsTruckNearby() end,  -- [AUDIT A1] cache 500ms (era GetGamePool por frame)
             onSelect    = function()
                 local t   = VPChopFindNearestTruck(5.0)
                 if not t then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end

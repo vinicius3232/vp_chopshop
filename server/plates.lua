@@ -116,7 +116,9 @@ end
 local function applyWitnessBonus(src, score)
     local w = Config.Plates and Config.Plates.Witness
     if not w then return 0, 0 end
-    score = math.max(0.0, tonumber(score) or 0.0)
+    -- [AUDIT M1] score vem do client → clampar a um teto realista de pedestres antes de usar.
+    -- Sem isto, mandar score=9999 saturava sempre o bônus máximo (frac=1.0).
+    score = math.min(math.max(0.0, tonumber(score) or 0.0), 25.0)
     if score < (tonumber(w.BonusMinScore) or math.huge) then return 0, 0 end  -- sem testemunhas reais → sem bônus
 
     -- Fração 0..1 do score relativo ao "teto" implícito (MaxChance/ChancePerScore).

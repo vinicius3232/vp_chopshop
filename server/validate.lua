@@ -32,7 +32,7 @@ function ValidatePlayerNearCoords(src, coords)
     if not ped or ped == 0 then return false end
     local pcoords = GetEntityCoords(ped)
     -- Margem extra: jogador trabalha a pé ao lado do carro, pode ficar até ~5m do centro do elevador
-    return #(pcoords - coords) <= (Config.VehicleNearLiftRadius + 1.0)
+    return #(pcoords - coords) <= ((tonumber(Config.VehicleNearLiftRadius) or 4.2) + 1.0)
 end
 
 ---@param src number
