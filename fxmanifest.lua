@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.14.1'
+version '1.14.2'
 
 dependencies {
     'ox_lib',
@@ -75,8 +75,9 @@ server_scripts {
 data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'
 data_file 'DLC_ITYP_REQUEST' 'stream/lr_supermod_garage_int.ytyp'
 -- [H1 FIX] wheel_spacer.ytyp removido — arquivo não existe na pasta stream.
--- bolt.ydr também ausente; minigame usa lib.skillCheck como fallback.
--- Adicionar os arquivos em stream/ para habilitar o bolt minigame 3D.
+-- NOTA: bolt.ydr existe em stream/ mas NÃO tem archetype .ytyp → RequestModel('bolt') não
+-- carrega o prop. O minigame de parafusos roda em MODO MARCADOR (DrawMarker) nesse caso —
+-- funciona sem o modelo 3D. Para ter o parafuso 3D girando, criar um .ytyp para bolt.ydr.
 
 files {
     'installation/ox_items_snippet.txt',

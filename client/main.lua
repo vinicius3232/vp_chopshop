@@ -610,7 +610,8 @@ do
     -- Converte coords do mundo para coords de tela (0..1). Usa a native do CFX;
     -- se indisponível, o pcall em volta do loop cai no fallback skillCheck.
     local function world2screen(x, y, z)
-        local on, sx, sy = GetScreenCoordFromWorldCoord(x, y, z)
+        local ok, on, sx, sy = pcall(GetScreenCoordFromWorldCoord, x, y, z)
+        if not ok then return false, 0.0, 0.0 end
         return on, sx or 0.0, sy or 0.0
     end
 
@@ -631,12 +632,22 @@ do
     -- o = { points={vec3...}, outward=vec3, camPos=vec3, lookAt=vec3,
     --       baseRot={x,y,z}, needed, sens, hoverR, timeout, fov }
     local function runBoltSurface(o)
+        if not o.points or #o.points == 0 then return 'fallback' end
+
+        -- O modelo do parafuso (bolt.ydr) é OPCIONAL: só carrega se houver um archetype .ytyp
+        -- válido — sem isso, RequestModel nunca completa. Então tentamos por pouco tempo e, se
+        -- não der, rodamos em MODO MARCADOR (parafuso desenhado via DrawMarker, sem entidade).
+        -- O minigame SEMPRE roda — nunca cai silenciosamente no skillCheck por falta de modelo.
         local boltHash = GetHashKey(BOLT_MODEL)
-        RequestModel(boltHash)
-        local t0 = GetGameTimer()
-        while not HasModelLoaded(boltHash) do
-            if GetGameTimer() - t0 > 4000 then return 'fallback' end
-            Wait(50)
+        local hasModel = false
+        if IsModelValid(boltHash) and IsModelInCdimage(boltHash) then
+            RequestModel(boltHash)
+            local t0 = GetGameTimer()
+            while not HasModelLoaded(boltHash) do
+                if GetGameTimer() - t0 > 1500 then break end
+                Wait(50)
+            end
+            hasModel = HasModelLoaded(boltHash)
         end
 
         local cam = CreateCamWithParams('DEFAULT_SCRIPTED_CAMERA',
@@ -649,21 +660,20 @@ do
         local bolts = {}
         for i = 1, #o.points do
             local p   = o.points[i]
-            local obj = CreateObject(boltHash, p.x, p.y, p.z, true, true, false)
-            if obj and obj ~= 0 then
-                SetEntityCollision(obj, false, false)
-                SetEntityRotation(obj, br.x, br.y, br.z, 5, true)
-                FreezeEntityPosition(obj, true)
-                bolts[#bolts + 1] = { ent = obj, pos = p, deg = 0.0, done = false }
+            local obj = nil
+            if hasModel then
+                obj = CreateObject(boltHash, p.x, p.y, p.z, true, true, false)
+                if obj and obj ~= 0 then
+                    SetEntityCollision(obj, false, false)
+                    SetEntityRotation(obj, br.x, br.y, br.z, 5, true)
+                    FreezeEntityPosition(obj, true)
+                else
+                    obj = nil
+                end
             end
+            bolts[#bolts + 1] = { ent = obj, pos = p, deg = 0.0, done = false }
         end
-        SetModelAsNoLongerNeeded(boltHash)
-
-        if #bolts == 0 then
-            RenderScriptCams(false, false, 0, true, true)
-            DestroyCam(cam, false)
-            return 'fallback'
-        end
+        if hasModel then SetModelAsNoLongerNeeded(boltHash) end
 
         local needed  = o.needed  or 720.0
         local sens    = o.sens    or 900.0
@@ -737,14 +747,17 @@ do
                     end
                 end
 
-                -- 2ª passada: marcador (verde = sob o cursor; vermelho = pendente)
+                -- 2ª passada: marcador. Cor vai de vermelho (0%) → verde (100%) conforme rosqueia;
+                -- o que está sob o cursor fica mais opaco. Dá feedback de giro mesmo sem o modelo 3D.
                 for _, b in ipairs(bolts) do
                     if not b.done then
-                        local mg = (b == hovered) and 220 or 40
-                        local mr = (b == hovered) and 90  or 230
-                        DrawMarker(0, b.pos.x, b.pos.y, b.pos.z + 0.12, 0.0,0.0,0.0, 0.0,0.0,0.0,
-                            0.04, 0.04, 0.06, mr, mg, 60, 140,
-                            false, false, 2, false, nil, nil, false)
+                        local prog = math.min(1.0, b.deg / needed)
+                        local mr = math.floor(230 * (1.0 - prog) + 60 * prog)
+                        local mg = math.floor(60 * (1.0 - prog) + 220 * prog)
+                        local a  = (b == hovered) and 220 or 110
+                        DrawMarker(0, b.pos.x, b.pos.y, b.pos.z + 0.12, 0.0,0.0,0.0, 180.0,0.0,0.0,
+                            0.05, 0.05, 0.08, mr, mg, 70, a,
+                            true, false, 2, false, nil, nil, false)
                     end
                 end
 
@@ -754,17 +767,21 @@ do
                     if move > 0.0 then
                         local turn = move * sens
                         hovered.deg = hovered.deg + turn
-                        local r = GetEntityRotation(hovered.ent, 5)
-                        SetEntityRotation(hovered.ent, r.x, r.y, r.z + turn, 5, true)
+                        if hovered.ent and DoesEntityExist(hovered.ent) then
+                            local r = GetEntityRotation(hovered.ent, 5)
+                            SetEntityRotation(hovered.ent, r.x, r.y, r.z + turn, 5, true)
+                        end
                         if hovered.deg >= needed then
                             hovered.done = true
                             remaining = remaining - 1
-                            FreezeEntityPosition(hovered.ent, false)
-                            SetEntityCollision(hovered.ent, true, true)
-                            SetEntityVelocity(hovered.ent,
-                                outward.x * 0.6, outward.y * 0.6, math.random() * 0.3 + 0.2)
-                            SetEntityAsNoLongerNeeded(hovered.ent)
-                            hovered.ent = nil
+                            if hovered.ent and DoesEntityExist(hovered.ent) then
+                                FreezeEntityPosition(hovered.ent, false)
+                                SetEntityCollision(hovered.ent, true, true)
+                                SetEntityVelocity(hovered.ent,
+                                    outward.x * 0.6, outward.y * 0.6, math.random() * 0.3 + 0.2)
+                                SetEntityAsNoLongerNeeded(hovered.ent)
+                                hovered.ent = nil
+                            end
                             PlaySoundFrontend(-1, 'Pin_Good', 'DLC_HEIST_FLEECA_SOUNDSET', true)
                             if remaining <= 0 then result = true end
                         end

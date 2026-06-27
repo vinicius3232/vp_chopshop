@@ -348,7 +348,7 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     -- [AUDIT M2] Emboscada decidida SERVER-SIDE após a recompensa. Antes dependia do client
     -- chamar 'vp_chopshop:maybeAmbush' — um cheater que nunca chamava nunca sofria emboscada.
     if Config.Ambush and Config.Ambush.Enable then
-        VPChopAmbushMaybe(source, netId, plate)
+        pcall(VPChopAmbushMaybe, source, netId, plate)  -- nunca deixar a emboscada quebrar o retorno do chop
     end
 
     -- Emitir evento para progression e fence escutarem

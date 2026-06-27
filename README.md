@@ -595,7 +595,10 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.14.1` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.14.2` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+
+> **v1.14.2** — hotfix: minigame de parafusos não aparecia (modelo `bolt` sem `.ytyp`); agora
+> roda sempre em modo marcador quando o prop 3D não está disponível. Ver CHANGELOG.
 
 > **v1.14.1** — correções de auditoria (4 dimensões): emboscada movida para server-side,
 > clamp do witnessScore, `canInteract` do prop de pneu com cache (resmon), `cache.ped`,

@@ -2,6 +2,30 @@
 
 ---
 
+## [1.14.2] — 2026-06-26 — HOTFIX: minigame de parafusos não aparecia (modelo não-carregável)
+
+### Fixed (Crítico de gameplay)
+- **Minigame de parafusos não entrava no roubo de pneu/placa.** Causa raiz: `bolt.ydr` existe em
+  `stream/` mas **não tem archetype `.ytyp`** → `RequestModel('bolt')` nunca completa. O antigo
+  `runBoltSurface` esperava 4s e caía em `'fallback'` (lib.skillCheck), de modo que o minigame 3D
+  **nunca aparecia** — só o skillcheck, seguido da recompensa (sintoma: "sai material e pula o
+  minigame").
+- **Correção:** o modelo do parafuso agora é **opcional**. `runBoltSurface` checa `IsModelValid` +
+  `IsModelInCdimage` (sem freeze de 4s) e, se o prop não estiver disponível, roda em **MODO
+  MARCADOR**: cada parafuso é desenhado via `DrawMarker` com cor indo de vermelho→verde conforme é
+  rosqueado. O minigame **sempre roda** agora — câmera, cursor e giro por mouse funcionam com ou
+  sem o modelo 3D.
+- `world2screen` protegido com `pcall` (robustez contra build sem a native).
+- `VPChopAmbushMaybe` (server, [AUDIT M2]) agora é chamado em `pcall` — uma falha de emboscada
+  nunca quebra o retorno/recompensa do `chopPart`.
+
+### Notes
+- Para ter o parafuso **3D girando** (em vez do marcador), criar um `.ytyp` válido para `bolt.ydr`.
+- A recompensa em materiais da roda (aluminum/rubber/metalscrap) é design existente (materiais +
+  pneu carregável para venda) — não foi alterada; o que mudou é que agora o minigame a precede.
+
+---
+
 ## [1.14.1] — 2026-06-26 — Correções de auditoria (4 dimensões)
 
 Auditoria completa (performance / segurança / qualidade / banco). Nenhum crítico; 0 exploits
