@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.14.2'
+version '1.14.3'
 
 dependencies {
     'ox_lib',
@@ -74,10 +74,11 @@ server_scripts {
 
 data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'
 data_file 'DLC_ITYP_REQUEST' 'stream/lr_supermod_garage_int.ytyp'
--- [H1 FIX] wheel_spacer.ytyp removido — arquivo não existe na pasta stream.
--- NOTA: bolt.ydr existe em stream/ mas NÃO tem archetype .ytyp → RequestModel('bolt') não
--- carrega o prop. O minigame de parafusos roda em MODO MARCADOR (DrawMarker) nesse caso —
--- funciona sem o modelo 3D. Para ter o parafuso 3D girando, criar um .ytyp para bolt.ydr.
+-- [FIX] wheel_spacer.ytyp É o archetype do bolt.ydr (o parafuso do minigame). O arquivo está
+-- em stream/, mas a linha de registro abaixo havia sido removida → o archetype 'bolt' nunca
+-- registrava, RequestModel('bolt') falhava e o minigame caía no modo marcador. Registrado de
+-- volta: agora o parafuso 3D carrega. (O modo marcador continua como fallback automático.)
+data_file 'DLC_ITYP_REQUEST' 'stream/wheel_spacer.ytyp'
 
 files {
     'installation/ox_items_snippet.txt',

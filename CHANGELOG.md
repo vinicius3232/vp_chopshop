@@ -2,6 +2,27 @@
 
 ---
 
+## [1.14.3] — 2026-06-27 — Parafuso 3D do minigame volta a carregar (registro do .ytyp)
+
+### Fixed
+- **Causa raiz real do "minigame não entrava":** o archetype do parafuso (`stream/bolt.ydr`) é
+  definido por `stream/wheel_spacer.ytyp` — o arquivo ESTAVA em `stream/`, mas a linha de
+  registro `data_file 'DLC_ITYP_REQUEST' 'stream/wheel_spacer.ytyp'` havia sido removida do
+  `fxmanifest.lua` (com comentário errado "arquivo não existe"). Sem o registro, o archetype
+  `bolt` nunca existia → `RequestModel('bolt')` falhava → minigame caía no modo marcador.
+  **Linha de registro restaurada** → o parafuso 3D carrega e o minigame roda com o modelo real,
+  com o NOSSO código e sem dependência externa.
+- `runBoltSurface`: guard de modelo relaxado para `IsModelValid` (sem exigir `IsModelInCdimage`,
+  que pode dar falso-negativo em asset streamed) — garante o uso do prop 3D quando disponível.
+- Modo marcador permanece como **fallback automático** se o asset faltar em algum cliente.
+
+### Notes
+- Os assets `stream/bolt.ydr` + `stream/wheel_spacer.ytyp` são idênticos aos do pacote pago
+  `ls_bolt_minigame` (Lith Studios). Já estavam no repositório. Uso no servidor próprio pressupõe
+  licença válida do pacote; não redistribuir em release público sem substituir por asset próprio.
+
+---
+
 ## [1.14.2] — 2026-06-26 — HOTFIX: minigame de parafusos não aparecia (modelo não-carregável)
 
 ### Fixed (Crítico de gameplay)

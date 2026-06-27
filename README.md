@@ -595,7 +595,11 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.14.2` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.14.3` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+
+> **v1.14.3** — fix: registro do archetype `wheel_spacer.ytyp` (parafuso `bolt`) no fxmanifest;
+> o parafuso 3D do minigame volta a carregar (causa raiz do "minigame não entrava"). Marcador
+> continua como fallback. Ver CHANGELOG.
 
 > **v1.14.2** — hotfix: minigame de parafusos não aparecia (modelo `bolt` sem `.ytyp`); agora
 > roda sempre em modo marcador quando o prop 3D não está disponível. Ver CHANGELOG.

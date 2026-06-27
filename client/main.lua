@@ -640,7 +640,7 @@ do
         -- O minigame SEMPRE roda — nunca cai silenciosamente no skillCheck por falta de modelo.
         local boltHash = GetHashKey(BOLT_MODEL)
         local hasModel = false
-        if IsModelValid(boltHash) and IsModelInCdimage(boltHash) then
+        if IsModelValid(boltHash) then
             RequestModel(boltHash)
             local t0 = GetGameTimer()
             while not HasModelLoaded(boltHash) do
