@@ -44,6 +44,10 @@ server_scripts {
     'bridge/server_framework.lua',
     'bridge/server_inventory.lua',
     'bridge/mdt.lua',
+    -- [v1.15 PR-D] ponte de persistência/deleção de veículo (QBox: DisablePersistence
+    -- + qbx_vehicles ownership lookup). Usa VPChopMDT.GetRealPlate em runtime → depois
+    -- de mdt.lua. Expõe Bridge{ResolveVehiclePersistence,DeleteWorldVehicle} p/ o discard.
+    'bridge/server_vehicle.lua',
     -- [EVIDENCE] ponte forense: usa InvCount (server_inventory) e VPChopMDT (mdt);
     -- expõe VPChopLeaveEvidence para os arquivos de crime abaixo. DEPOIS das bridges,
     -- ANTES de db.lua/heat.lua/plates.lua/main.lua.
@@ -69,6 +73,10 @@ server_scripts {
     -- server/advanced_chop.lua (AdvState/AdvMutex removidos).
     'server/session/advanced_state.lua',
     'server/session/advanced_state_spec.lua', -- self-gated
+    -- [v1.15 PR-D] fachada da operação terminal de descarte (contagem unificada
+    -- base+advanced, BEGIN/ROLLBACK/COMPLETE). Antes de server/main.lua (discard).
+    'server/session/discard_state.lua',
+    'server/session/discard_state_spec.lua',  -- self-gated
     'server/cooldown.lua',
     'server/discord.lua',
     'server/chop.lua',

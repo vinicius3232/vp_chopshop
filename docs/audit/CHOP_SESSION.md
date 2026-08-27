@@ -281,15 +281,78 @@ Mutex → `LockPart`/`UnlockPart` por (sessão, peça). Commit-antes-de-reward +
 pós-lock. `VPChopGetPartCount` = `CountParts(id,'base')` → **BASE-ONLY** (discard
 equivalente ao atual até a PR D). `EnforceRaised=false` continua exigindo
 ChopSession p/ STATE (só pula raised/participant).
-⚠️ **CONSTRAINT (mantida até PR D):** `VPChopGetPartCount` conta SÓ `origin='base'`
-(via `ChopSession.CountParts(id,'base')`). Peças advanced NÃO entram no
-`MinPartsToDiscard` — `discardVehicle` fica equivalente ao comportamento atual.
-A contagem unificada (base+advanced) é **deliberada na PR D**.
+⚠️ **CONSTRAINT (LEVANTADA na PR D):** até a PR C, `VPChopGetPartCount` = base-only e
+`discardVehicle` contava só base. Na **PR D** o discard passou a comparar
+`MinPartsToDiscard` com o **TOTAL** (base+advanced) via `ChopSession.CountParts(id)`.
+`VPChopGetPartCount(netId)` continua base-only para outros consumidores.
 
-**PR D — unified discard.** `discardVehicle` conta `session.parts` (base + advanced).
-Preserva o mutex `DiscardBusy` do P0-4. O fluxo terminal já está correto
-(`VPChopBaseState.clear` = `SetState→READY_FOR_DISCARD→Complete`); a PR D acrescenta
-`BridgeDeleteVehicle` / owned guard / transaction.
+**PR D — unified discard + owned/delete safety.** ✅ **FEITO** (PR #7).
+- **Contagem unificada:** `discardVehicle` usa `ChopSession.CountParts(sessionId)` SEM
+  filtro (base + advanced) vs `MinPartsToDiscard`. `VPChopGetPartCount(netId)` segue
+  **base-only** para outros consumidores (não mudou silenciosamente).
+- **Fachada** `server/session/discard_state.lua` (`VPChopDiscardState`):
+  `resolve` · `getCounts{total,base,advanced}` · `begin` (→READY_FOR_DISCARD) ·
+  `rollback` (→DISMANTLING) · `complete` (→COMPLETED). State machine FORA de `main.lua`.
+- **FREEZE:** em `READY_FOR_DISCARD`, `ChopSession.MarkPart`/`LockPart` recusam
+  `'discarding'` — a contagem que autorizou o payout não muda durante o yield do
+  adapter de cash. `MarkPart` documentado como *must-not-yield*.
+- **Transação:** resolve → quarentena check → validações → **ownership gate** →
+  contagem → lock (`DiscardBusy[sessionId]`) → `begin` → `BridgeAddCash` →
+  (`rollback`+return se falhar) → `complete` checado → `BridgeDeleteWorldVehicle`
+  (`{expectedFramework}`) → `CAR_DISCARDED` 1× → release.
+- **Complete falha pós-pagamento (hardening):** `BridgeRemoveCash` → se **compensou**:
+  `rollback`→DISMANTLING (descongela), mutex livre, `err='transaction'`, retry legítimo.
+  Se **compensação falhou**: `DiscardQuarantine[sessionId]=netId`, sessão fica
+  `READY_FOR_DISCARD`+FROZEN, `err='transaction_locked'`, **nunca** paga de novo; log
+  `SEVERE: PAYMENT COMMITTED + COMPLETE FAILED + COMPENSATION FAILED`. Quarentena
+  limpa só por `entityRemoved`. Nenhuma mensagem falsa de "compensado".
+- **Mutex** por **identidade de sessão** (`DiscardBusy[sessionId]=netId`), não netId cru.
+- **`bridge/server_vehicle.lua`:**
+  - `BridgeResolveVehiclePersistence(veh,ctx)` → `{status,vehicleId,framework,source,plate,ownedBy}`.
+    QBox: `Entity(veh).state.vehicleid` → `qbx_vehicles:GetPlayerVehicle`; senão placa
+    REAL (`VPChopMDT.GetRealPlate`) → `qbx_vehicles:GetVehicleIdByPlate` →
+    `GetPlayerVehicle`. **`not_owned` exige PROVA POSITIVA:** state id ausente +
+    resolver de placa existe + `VPChopDBReady==true` + placa legível + `GetRealPlate`
+    OK + `GetVehicleIdByPlate` **completou e devolveu exatamente `nil`**. Qualquer
+    passo ambíguo/indisponível/erro/id-inconsistente ⇒ `unknown` (fail-closed). QB/ESX
+    sem adapter ⇒ `unknown`. `safeExport` → `(completou?, resultado)`.
+  - `BridgeDeleteWorldVehicle(veh, {expectedFramework})` → QBox: se `expectedFramework`
+    ≠ framework atual (qbx_core parou depois do gate) ⇒ `{method='framework_race',
+    retryable}` **sem deletar**. Senão `qbx_core:DisablePersistence` **confirmado**
+    (export completou + state `persisted` não mais setado) — falhou ⇒
+    `{method='qbx_disable_persist_failed', retryable}` **sem `DeleteEntity`**. Só então
+    `DeleteEntity` + readback. `{ok,method,existsAfter,retryable}`.
+- **Retry de deleção (hardening):** `ChopSession.ResolveBoundVehicleForCleanup(sessionId)`
+  — só p/ cleanup destrutivo, consulta sessão TERMINAL, identidade **ESTRITA** (mais forte
+  que `vehicleStillValid`, que aceita fallback netId+model p/ non-owned sem marker):
+  (1) `state==COMPLETED`; (2) `fp.markerSet == true` **obrigatório** — sem marcador VSID
+  confirmado no mint ⇒ `identity_unproven` ⇒ NÃO auto-delete; (3) entidade existe;
+  (4) modelo bate; (5) `marker(ent) == vehicle.identity`. netId reciclado ⇒ `nil` ⇒ retry
+  **aborta** (nunca deleta o veículo novo, mesmo modelo idêntico). Cada retry revalida
+  identidade + framework + DisablePersistence. Máx 3, nunca toca o tombstone. O delete
+  INICIAL logo após o discard usa o handle já resolvido e não passa por aqui.
+- **`VPChopDBReady`:** `~= true` (nil OU false) ⇒ `unknown` — a resolução por placa só
+  vale com o DB de disfarce de placa operacional.
+- **OwnedPolicy** (`Config.Discard.OwnedPolicy`, default `'deny'`): `owned` OU `unknown`
+  ⇒ **DISCARD DENY** (`err='owned'`), antes de qualquer pagamento/transição.
+  `'destroy'` (apagar `player_vehicles` + compensar) **NÃO implementado** — qualquer
+  política ≠ destroy-funcional resulta em DENY.
+- **Delete falha pós-payout:** sessão fica `COMPLETED` (tombstone permanente), NÃO
+  reabre; `{ ok=true, cleanupPending=true }`; até 3 retries locais (`SetTimeout`), sem
+  tocar o tombstone. `entityRemoved` → `CleanupVehicle` quando a entidade enfim sumir.
+- **API QBox confirmada** (Qbox-project/qbx_core + qbx_vehicles @ main, 2026-08):
+  `qbx_core` **não** exporta `DeleteVehicle` (função global + `@deprecated`); o caminho
+  correto p/ outro resource é `DisablePersistence` + `DeleteEntity`.
+  `qbx_vehicles:GetVehicleIdByPlate(plate)→id?`,
+  `GetPlayerVehicle(id,filters?)→PlayerVehicle?`,
+  `DeletePlayerVehicles('vehicleId'|'plate'|'citizenid'|'license', value)→ok,err?`.
+- Testes: `discard_state_spec` **94 asserts** (D1–D27 + TX1/TX2 + OWN1–5 (2A/2B/2C) +
+  DEL1–5 (4B/4C) + fail-closed). Total harness **291**.
+- **NÃO tocado:** `ActionSession`, tyre entitlement, contratos, market, Bolt V2,
+  catalytic, dynamic pricing, Part Registry, persistência da ChopSession, rework de
+  rewards, payout/economia. `AdvCooldown` preservado. PR C não foi alterada.
+- **Pendente RELEASE:** testes reais QBox (owned vs NPC, fake plate + owned,
+  `DisablePersistence` real, delete-fail, 2–4 players, `resmon`).
 
 **PR E — tyre entitlement.** `PlayerTyreStock` → `session.parts[wheel_*]` com ciclo
 `REMOVED→CARRIED→STORED→SOLD`; `loadToTruck`/`sellTyres` consomem por `sessionId+partId`.
