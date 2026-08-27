@@ -34,7 +34,7 @@ local FAKE = {}
 --   'readback_nil'   → :set não lança mas o valor não fica legível
 --   'readback_wrong' → readback devolve outro valor
 local MARKER_BEHAVIOR = 'ok'
-ChopSession._test.setEntityAPI({
+local ENTITY_API = {
     get    = function(netId) return FAKE[netId] and (netId + 100000) or 0 end,  -- "handle" fake ≠ 0
     exists = function(h) return h ~= nil and h ~= 0 end,
     model  = function(h) local n = h - 100000; return FAKE[n] and FAKE[n].model or 0 end,
@@ -49,12 +49,16 @@ ChopSession._test.setEntityAPI({
         return FAKE[n].mark == vsid   -- espelha o readback da produção
     end,
     marker = function(h) local n = h - 100000; return FAKE[n] and FAKE[n].mark or nil end,
-})
+}
 local function spawnFake(netId, model, plate) FAKE[netId] = { model = model or 111, plate = plate or 'ABC123' } end
 local function despawnFake(netId) FAKE[netId] = nil end
 
--- Cada caso começa limpo.
-local function fresh() ChopSession._test.reset(); FAKE = {}; MARKER_BEHAVIOR = 'ok' end
+-- Cada caso começa limpo. Re-instala o EntityAPI (outro spec no mesmo runner pode
+-- tê-lo hijackado no load) e zera o mundo/estado.
+local function fresh()
+    ChopSession._test.setEntityAPI(ENTITY_API)
+    ChopSession._test.reset(); FAKE = {}; MARKER_BEHAVIOR = 'ok'
+end
 
 CreateThread(function()
     Wait(1500)  -- deixa o resource assentar

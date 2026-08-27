@@ -13,6 +13,11 @@ Config.ChopSession = {
     Debug           = false,       -- logs de create/state/cleanup (ou Config.Debug)
     SessionTimeoutMs = 15 * 60 * 1000,  -- sessão inativa é cancelada pelo sweeper
     SweepIntervalMs  = 30 * 1000,  -- período do sweeper (sem polling de entidades)
+
+    --- [v1.15 P1-1] Exige ChopSession ativa + veículo levantado + jogador
+    --- participante para o desmanche AVANÇADO (adv:chopPart/chopEngine/chopCarcass).
+    --- false = kill-switch de compatibilidade (comportamento legacy, sem o gate).
+    EnforceRaised   = true,
 }
 
 --- Distâncias
