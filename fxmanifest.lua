@@ -61,6 +61,10 @@ server_scripts {
     -- antes de server/advanced_chop.lua.
     'server/session/adv_gate.lua',
     'server/session/adv_gate_spec.lua',      -- self-gated (vp_chopshop_selftest 1)
+    -- [v1.15 PR-B] fachada do estado de peça do BASE CHOP sobre a ChopSession;
+    -- antes de server/chop.lua (que delega a ela).
+    'server/session/base_state.lua',
+    'server/session/base_state_spec.lua',    -- self-gated (vp_chopshop_selftest 1)
     'server/cooldown.lua',
     'server/discord.lua',
     'server/chop.lua',

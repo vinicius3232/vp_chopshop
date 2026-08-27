@@ -46,7 +46,7 @@ LockPart(id, partKey)       → bool, token     mutex de ação, token único, T
 UnlockPart(id, partKey, tk) → bool
 Touch(id)                   → nil
 Complete(id)                → bool, err       SÓ de READY_FOR_DISCARD (fix #3); COMPLETED→OK idempotente
-Cancel(id, reason)          → bool            terminal, idempotente
+Cancel(id, reason)          → bool, err        terminal+idempotente; RECUSA (false,'committed') sessão com parts
 CleanupVehicle(netId)       → nil             entityRemoved
 CleanupPlayer(src)          → nil             playerDropped
 Debug()                     → snapshot        observabilidade
@@ -94,14 +94,49 @@ CREATED ──► RAISED ──► DISMANTLING ──► READY_FOR_DISCARD ─�
 
 ## Lifecycle / cleanup
 
+> **[PR-B follow-up] `session.parts` é a fonte AUTORITATIVA do estado físico do
+> veículo.** **INVARIANT DEFINITIVO:** enquanto `vehicleStillValid(session) == true`,
+> **TEMPO SOZINHO NUNCA apaga committed vehicle state** (nem sessão com parts, nem
+> tombstone `COMPLETED`). **Não há TTL destrutivo.** O ÚNICO caminho que mata
+> estado físico é a entidade sumir/reciclar → `not vehicleStillValid` →
+> `CleanupVehicle`. Workflow (sessão SEM parts) pode expirar; estado físico não.
+> **WORKFLOW MEMBERSHIP ≠ VEHICLE STATE LIFETIME.**
+
 | Gatilho | Efeito |
 |---|---|
-| `entityRemoved(veh)` | `CleanupVehicle(netId)` — sessão removida na hora, índice reverso limpo |
-| `playerDropped` | `CleanupPlayer(src)` — sai dos participantes. Restam outros → sessão vive, `startedBy` reatribuído. Fica vazia → `Cancel(id,'abandoned')` |
-| sweeper (30 s) | inativa > `SessionTimeoutMs` → `Cancel(id,'timeout')`; terminal > 60 s → coletada; veículo inválido → `CleanupVehicle` |
-| `Get`/`GetByVehicle` | recheck de liveness — modelo do `netId` mudou ou entidade sumiu → cleanup + `nil` |
+| `entityRemoved(veh)` | `CleanupVehicle(netId)` — sessão removida na hora |
+| `playerDropped` — sobra participante | sessão vive, `startedBy` reatribuído |
+| `playerDropped` — vazia, **sem** parts | `Cancel(id,'abandoned')` |
+| `playerDropped` — vazia, **com** parts | **sessão mantida** (sem participantes, resolvível, `raised` zerado, `parts`/VSID preservados; `lastActivity` NÃO renovado). Novo fluxo legítimo pode reentrar |
+| `playerDropped` — sessão TERMINAL | só remove a membership; não toca `lastActivity` nem o tombstone |
+| sweeper — sessão **sem** parts, inativa > `SessionTimeoutMs` | `Cancel(id,'timeout')` |
+| sweeper — sessão **com** parts + veículo válido | **NUNCA cancela por tempo** (qualquer idade). `OrphanWarnAfterMs` → só `dbg` de telemetria |
+| sweeper — veículo inválido (não-terminal) | `CleanupVehicle` — **único** caminho que mata estado físico |
+| sweeper — `CANCELLED`, idle > 60 s **ou** veículo morto | coletada |
+| sweeper — `COMPLETED` + veículo **válido** | **tombstone permanente** (qualquer idade) — bloqueia `Create` com `'completed'` |
+| sweeper — `COMPLETED` + veículo **inválido** | coletada → netId liberado |
+| `Get`/`GetByVehicle` | recheck de liveness — modelo/marcador/entidade → cleanup + `nil` |
 
 Sem polling de entidades. Sweeper itera só a tabela de sessões.
+Config: `OrphanWarnAfterMs` (1h — **só log**, `0` = sem log). **Removidos** os
+knobs destrutivos `OrphanTimeoutMs` / `TombstoneRetentionS`.
+
+### Fail-closed no caso raro de netId reciclado
+Se `entityRemoved` for perdido **E** o marcador `vpChopVsid` indisponível **E** o
+netId reciclado **no mesmo modelo** **E** (para tombstone) `ownedId` ausente nos
+dois lados — a sessão antiga bloqueia o veículo novo (falso-positivo). É a escolha
+**fail-closed** deliberada: melhor uma sessão antiga bloqueando um veículo novo do
+que um TTL que apaga o ledger e permite recompensa duplicada. Múltiplos fatores
+(entity exists / model / ownedId / `vpChopVsid` / `entityRemoved`) tornam o
+cenário improvável; só quando **todos** falham juntos.
+
+### KNOWN OPERATIONAL LIMITATION — restart do resource
+A ChopSession é **in-memory**. Um restart do resource perde `Sessions`,
+`ByVehicleNetId`, o ledger `parts` e os VSIDs. **O ledger NÃO é persistente
+através de restart.** Não há persistência nesta PR (nem planejada para as
+próximas da série). Reconstrução a partir do estado real dos veículos (natives
+GTA de peça ausente) pode ser estudada depois, se necessário — não bloqueia a
+arquitetura atual.
 
 ## Idempotência (preparação p/ ActionSession / retry)
 
@@ -210,8 +245,7 @@ fluxo de tyre. Ver seção Riscos.
 | `Config.ChopSession.Enable=false` → `Create` = `nil,'disabled'` → jackstand para | documentado; default `true`. Kill-switch consciente. |
 | `_partLocks` TTL 60s (`Config.ChopSession.PartLockTtlMs`) | lock não liberado expira sozinho; a fase que adotar `LockPart` ainda deve parear com `UnlockPart` em todos os returns |
 | Seam `ChopSession._test` | **só definido sob convar `vp_chopshop_selftest=1`** — em produção é `nil` |
-| `Create` de sessão `COMPLETED` cujo veículo foi coletado pelo sweeper (>60s) antes de `entityRemoved` | após a coleta o índice reverso some → `Create` cunha nova. Aceitável: um chop concluído já deveria ter o veículo descartado. Ver **Nota p/ PR B**. |
-| **Fallback (sem marcador) + netId reciclado no MESMO modelo + `entityRemoved` perdido, sobre sessão `COMPLETED`** | `vehicleStillValid(raw)` = true (só model) → `Create` do veículo novo é **negado** com `completed` (falso-positivo). É **fail-safe** (nega, não corrompe); auto-cura no `entityRemoved` ou na coleta terminal em 60s. Não vale trocar por um falso-allow de reabertura. |
+| **Fallback (sem marcador `vpChopVsid`) + netId reciclado no MESMO modelo + `entityRemoved` perdido + `ownedId` ausente nos dois lados** | `vehicleStillValid` = true (só model) → a sessão antiga (COMPLETED tombstone OU ativa com parts) **bloqueia** o veículo novo (`Create` → `'completed'` / mesma sessão). **Escolha fail-closed deliberada** (o usuário decidiu): melhor bloquear um veículo novo do que um TTL que apaga o ledger e abre recompensa duplicada. Múltiplos fatores (entity/model/ownedId/marcador/entityRemoved) tornam o cenário raro; só quando **todos** falham juntos. Não há auto-cura por tempo. |
 
 ## Commits
 
@@ -233,27 +267,28 @@ fluxo de tyre. Ver seção Riscos.
 - Teste servidor: adv chop sem jackstand → DENY; com → OK; 2 players.
 - **Nada mais.** Nenhuma mudança em `AdvState`/`AdvMutex`/rewards.
 
-**PR B — base chop → ChopSession.** `ChoppedByNetId` → `session.parts`.
-`VPChopWasChopped`/`VPChopGetPartCount`/`VPChopClearVehicle` viram fachadas que
-consultam a ChopSession. `chopPart` cria/toca a sessão. Preserva rate-limit +
-mutex + todos os hardenings do hotfix.
+**PR B — base chop → ChopSession.** ✅ **FEITO** (PR #5). `ChoppedByNetId` removido;
+`server/session/base_state.lua` é a fachada única; `parts` = estado físico
+autoritativo do veículo. **INVARIANT: tempo sozinho nunca destrói committed
+state enquanto `vehicleStillValid`; NÃO há TTL destrutivo.** `Cancel` recusa
+sessão com parts. `VPChopClearVehicle` → `Complete` (tombstone permanente).
 
 **PR C — advanced chop → ChopSession.** *Só depois do base.* `AdvState` →
-`session.parts`; `AdvMutex` → `LockPart`/`UnlockPart` (pareado). Neste ponto
-base + advanced têm **uma** fonte de verdade.
+`session.parts` (com `origin='advanced'`); `AdvMutex` → `LockPart`/`UnlockPart` (pareado).
+Neste ponto base + advanced têm **uma** fonte de verdade.
+⚠️ **CONSTRAINT OBRIGATÓRIA:** `VPChopGetPartCount` conta **todos** os entries de
+`session.parts`. Hoje só há peças base. Quando a PR C mover `AdvState` p/ a mesma
+tabela, `partCount` passará a contar advanced
+**automaticamente** → `discardVehicle` (`MinPartsToDiscard`) muda de comportamento.
+A PR C **deve preservar explicitamente** a semântica atual de `VPChopGetPartCount`
+até a PR D (unified discard) — ex.: metadata mínima por peça (`source='base'|'advanced'`)
+ou `partCount` filtrado. Não implementar no follow-up da PR B; registrado como
+constraint da PR C.
 
-**PR D — unified discard.** `discardVehicle` conta `session.parts` (base + advanced)
-em vez do contador só-base. Preserva o mutex `DiscardBusy` do P0-4.
-⚠️ `ChopSession.Complete` só transita de `READY_FOR_DISCARD` (fix #3). O fluxo do
-discard deve fazer `SetState(id,'READY_FOR_DISCARD')` **antes** de `Complete(id)` —
-não adicionar transição `DISMANTLING→COMPLETED`.
-
-**Nota p/ PR B (base chop):** se o sweeper coletar uma sessão `COMPLETED` (>60s idle)
-enquanto o veículo ainda existe, um `Create` seguinte cunha sessão nova com
-`parts` vazio. Quando o base chop passar a consumir `session.parts`, a re-criação
-nesse veículo deve **semear `parts` a partir do estado real do veículo** (natives
-GTA de porta/roda ausente) OU a retenção terminal deve exceder a janela realista
-de descarte. Hoje (fundação) nada consome `parts` → inócuo.
+**PR D — unified discard.** `discardVehicle` conta `session.parts` (base + advanced).
+Preserva o mutex `DiscardBusy` do P0-4. O fluxo terminal já está correto
+(`VPChopBaseState.clear` = `SetState→READY_FOR_DISCARD→Complete`); a PR D acrescenta
+`BridgeDeleteVehicle` / owned guard / transaction.
 
 **PR E — tyre entitlement.** `PlayerTyreStock` → `session.parts[wheel_*]` com ciclo
 `REMOVED→CARRIED→STORED→SOLD`; `loadToTruck`/`sellTyres` consomem por `sessionId+partId`.

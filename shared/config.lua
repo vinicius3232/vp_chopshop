@@ -11,8 +11,16 @@ Config.Debug = false
 Config.ChopSession = {
     Enable          = true,        -- master switch do módulo
     Debug           = false,       -- logs de create/state/cleanup (ou Config.Debug)
-    SessionTimeoutMs = 15 * 60 * 1000,  -- sessão inativa é cancelada pelo sweeper
+    SessionTimeoutMs = 15 * 60 * 1000,  -- sessão SEM peça removida inativa → cancelada
     SweepIntervalMs  = 30 * 1000,  -- período do sweeper (sem polling de entidades)
+    --- [PR-B follow-up] `ChopSession.parts` é o estado físico server-authoritative
+    --- do veículo. INVARIANT: enquanto a entidade identificada existir, TEMPO
+    --- SOZINHO nunca apaga esse estado (nem sessão com parts, nem tombstone
+    --- COMPLETED). Não há TTL destrutivo. O único caminho que mata estado físico é
+    --- a entidade sumir/reciclar (`vehicleStillValid == false` → CleanupVehicle).
+    --- `OrphanWarnAfterMs`: só LOG/telemetria de sessão órfã (0 participantes, com
+    --- parts) inativa há muito tempo — NUNCA cancela. `0` = sem warn.
+    OrphanWarnAfterMs = 60 * 60 * 1000,  -- 1h
 
     --- [v1.15 P1-1] Exige ChopSession ativa + veículo levantado + jogador
     --- participante para o desmanche AVANÇADO (adv:chopPart/chopEngine/chopCarcass).

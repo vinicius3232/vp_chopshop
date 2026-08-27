@@ -3,10 +3,10 @@
 --  ChopSession — fonte server-authoritative ÚNICA do estado de um desmanche.
 --  v1.15 arch/chop-session · FASE: FUNDAÇÃO (core + lifecycle + jackstand).
 --
---  NESTA FASE o core NÃO substitui ainda ChoppedByNetId (server/chop.lua) nem
---  AdvState (server/advanced_chop.lua). Ele existe, é testável, e o jackstand é
---  o primeiro consumidor real (server/session/jackstand.lua). A migração do
---  estado de peças (base → advanced) vem nas próximas PRs, com aprovação.
+--  Consumidores: jackstand (raise/lower) e, desde a PR-B, o BASE CHOP —
+--  server/session/base_state.lua (fachada) substituiu ChoppedByNetId como fonte
+--  de verdade das peças da Fase 1. AdvState (server/advanced_chop.lua) ainda NÃO
+--  migrado (PR C). ChopSession.parts contém só peças base por enquanto.
 --
 --  API pública (tabela global `ChopSession`):
 --    Create(netId, src)            → session | nil, err     (idempotente por netId)
@@ -163,6 +163,15 @@ local TRANSITIONS = {
     COMPLETED         = {},
     CANCELLED         = {},
 }
+
+--- [v1.15 PR-B follow-up] `session.parts` é a fonte AUTORITATIVA do estado físico
+--- do veículo. Sessão COM peça removida = "ledger" que não pode morrer por
+--- disconnect/timeout enquanto o veículo existir.
+---@param s table
+---@return boolean
+local function hasParts(s)
+    return next(s.parts) ~= nil
+end
 
 -- ─── Núcleo ────────────────────────────────────────────────────────────────────
 
@@ -446,6 +455,9 @@ function ChopSession.Cancel(id, reason)
     local s = Sessions[id]
     if not s then return false end
     if TERMINAL[s.state] then return true end
+    -- [PR-B micro] COMMITTED VEHICLE STATE só morre com a entidade. Uma sessão que
+    -- já tem peça removida NÃO pode ser cancelada por workflow — nada é tocado.
+    if hasParts(s) then return false, 'committed' end
     s.state = 'CANCELLED'
     s.cancelReason = reason or 'cancelled'
     s.lastActivity = os.time()
@@ -465,19 +477,37 @@ function ChopSession.CleanupVehicle(netId)
     end
 end
 
---- Player saiu: remove dos participantes. Se sobrar alguém, a sessão vive
---- (startedBy é reatribuído). Se ficar vazia, cancela.
+--- Player saiu: remove dos participantes.
+--- WORKFLOW MEMBERSHIP ≠ VEHICLE STATE LIFETIME:
+---  • sobra participante → sessão vive, startedBy reatribuído.
+---  • fica vazia SEM peça removida → Cancel('abandoned') (comportamento anterior).
+---  • fica vazia COM peça removida → sessão NÃO é destruída. Fica sem participantes
+---    e resolvível por GetByVehicle enquanto o veículo existir; um novo fluxo
+---    legítimo pode reentrar. `raised` é zerado por segurança; `parts`/VSID ficam.
 ---@param src number
 function ChopSession.CleanupPlayer(src)
     for id, s in pairs(Sessions) do
         if s.participants[src] then
             s.participants[src] = nil
-            local remaining = next(s.participants)
-            if not remaining then
-                ChopSession.Cancel(id, 'abandoned')
-            elseif s.startedBy == src then
-                s.startedBy = remaining
-                dbg('CleanupPlayer', 'startedBy de', id, 'reatribuído a', remaining)
+            if TERMINAL[s.state] then
+                -- Terminal permanece terminal: só remove a membership, sem tocar
+                -- lastActivity nem invariants do tombstone.
+            else
+                local remaining = next(s.participants)
+                if not remaining then
+                    if hasParts(s) then
+                        -- Estado físico registrado → sessão NÃO é destruída por
+                        -- disconnect. Fica órfã (resolvível), raised zerado por
+                        -- segurança. NÃO renova lastActivity (não é atividade).
+                        s.raised, s.raisedBy = false, nil
+                        dbg('CleanupPlayer', id, 'sem participantes mas COM parts → mantida')
+                    else
+                        ChopSession.Cancel(id, 'abandoned')
+                    end
+                elseif s.startedBy == src then
+                    s.startedBy = remaining
+                    dbg('CleanupPlayer', 'startedBy de', id, 'reatribuído a', remaining)
+                end
             end
         end
     end
@@ -519,20 +549,42 @@ end)
 -- só percorre a tabela de sessões (pequena) num intervalo largo.
 local TERMINAL_RETENTION_S = 60
 local function sweepOnce()
-    local timeout = cfgNum('SessionTimeoutMs', 15 * 60 * 1000) / 1000  -- s
+    -- INVARIANT: enquanto vehicleStillValid(s) == true, TEMPO SOZINHO nunca apaga
+    -- committed vehicle state (session com parts, ou tombstone COMPLETED). Workflow
+    -- (sessão SEM parts) expira; estado físico não. O ÚNICO caminho que mata estado
+    -- físico é a entidade sumir/reciclar → `not vehicleStillValid` → CleanupVehicle.
+    local timeout   = cfgNum('SessionTimeoutMs', 15 * 60 * 1000) / 1000   -- s
+    local warnAfter = cfgNum('OrphanWarnAfterMs', 60 * 60 * 1000) / 1000  -- s (SÓ log/telemetria)
     local now = os.time()
     for id, s in pairs(Sessions) do
-        if TERMINAL[s.state] and (now - s.lastActivity) > TERMINAL_RETENTION_S then
-            Sessions[id] = nil
-            if ByVehicleNetId[s.vehicle.netId] == id then
-                ByVehicleNetId[s.vehicle.netId] = nil
+        local idle    = now - s.lastActivity
+        local vehGone = not vehicleStillValid(s)
+        if TERMINAL[s.state] then
+            -- COMPLETED + veículo vivo = TOMBSTONE permanente (bloqueia re-chop após
+            -- payment/discard mesmo se DeleteEntity falhar). SEM TTL. Só sai quando
+            -- a entidade some/recicla. CANCELLED: retenção curta.
+            local keepTombstone = (s.state == 'COMPLETED') and not vehGone
+            if not keepTombstone and (vehGone or idle > TERMINAL_RETENTION_S) then
+                Sessions[id] = nil
+                if ByVehicleNetId[s.vehicle.netId] == id then
+                    ByVehicleNetId[s.vehicle.netId] = nil
+                end
             end
-        elseif not TERMINAL[s.state] and (now - s.lastActivity) > timeout then
-            dbg('sweep: timeout', id)
-            ChopSession.Cancel(id, 'timeout')
-        elseif not TERMINAL[s.state] and not vehicleStillValid(s) then
+        elseif vehGone then
             dbg('sweep: veículo inválido', id)
             ChopSession.CleanupVehicle(s.vehicle.netId)
+        elseif not hasParts(s) then
+            -- Sessão SEM estado físico (só workflow): timeout normal.
+            if idle > timeout then
+                dbg('sweep: timeout (sem parts)', id)
+                ChopSession.Cancel(id, 'timeout')
+            end
+        else
+            -- Sessão COM parts + veículo vivo: NUNCA cancela por tempo. Só telemetria.
+            if warnAfter > 0 and idle > warnAfter and not s._orphanWarned then
+                s._orphanWarned = true
+                dbg('sweep: órfã com parts há ' .. idle .. 's (netId ' .. s.vehicle.netId .. ') — MANTIDA')
+            end
         end
     end
 end
