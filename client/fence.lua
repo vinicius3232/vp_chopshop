@@ -582,13 +582,15 @@ function VPChopLoadTyreInTruck(propHandle)
     local cur = math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0)
     if cur >= max then lib.notify({ description=L('fence_truck_full'), type='error' }); return end
 
+    -- [v1.15 #1] Código morto (ver nota no topo do bloco), mas mantido contract-correct:
+    -- loadToTruck agora é lib.callback (request/response). Só age em ok==true.
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
+        NetworkGetNetworkIdFromEntity(truck))
+    if not cbOk or not res or not res.ok then
+        lib.notify({ description=L('fence_no_pickup_nearby'), type='error' }); return
+    end
     VPChopRemoveTyreProp(propHandle)
-    -- [H1 FIX] Notificar servidor para incrementar o contador server-side.
-    -- O state bag (false = sem broadcast para outros clientes) é mantido apenas para UI local.
-    -- [BUG FIX] Usava 'truckNetId' (nil neste scope) — corrigido para converter o handle local.
-    TriggerServerEvent('vp_chopshop:tyre:loadToTruck', NetworkGetNetworkIdFromEntity(truck))
-    Entity(truck).state:set('chopTyreCount', cur + 1, false)
-    lib.notify({ description=L('fence_tyre_loaded_fmt', cur + 1, max), type='success', duration=2500 })
+    lib.notify({ description=L('fence_tyre_loaded_fmt', res.count, res.max or max), type='success', duration=2500 })
 end
 
 --- Retorna o handle do truck mais próximo dentro do raio indicado, ou nil se não houver.
@@ -616,14 +618,16 @@ function VPChopLoadTyreInTruckFromCarry(truck)
     local cur = math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0)
     if cur >= max then lib.notify({ description=L('fence_truck_full'), type='error' }); return end
 
+    -- [v1.15 #1] Código morto, mantido contract-correct: loadToTruck é lib.callback.
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
+        NetworkGetNetworkIdFromEntity(truck))
+    if not cbOk or not res or not res.ok then
+        lib.notify({ description=L('fence_no_pickup_nearby'), type='error' }); return
+    end
     local prop = CarryingTyre.prop
     CarryingTyre = nil
     if DoesEntityExist(prop) then DeleteObject(prop) end
-
-    -- [H1 FIX] Mesmo padrão: servidor contabiliza, state bag é apenas UI local (false).
-    TriggerServerEvent('vp_chopshop:tyre:loadToTruck', NetworkGetNetworkIdFromEntity(truck))
-    Entity(truck).state:set('chopTyreCount', cur + 1, false)
-    lib.notify({ description=L('fence_tyre_loaded_fmt', cur + 1, max), type='success', duration=2500 })
+    lib.notify({ description=L('fence_tyre_loaded_fmt', res.count, res.max or max), type='success', duration=2500 })
 end
 
 -- ─── Cleanup ──────────────────────────────────────────────────────────────────

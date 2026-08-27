@@ -260,49 +260,71 @@ local function isPickupTruckModel(model)
 end
 
 local TRUCK_LOAD_COOLDOWN_MS = 1500
-local TruckLoadBusy = {} ---@type table<number, boolean>
+local TruckLoadBusy = {} ---@type table<number, boolean>   src   → carga em curso
+--- [v1.15 #2] Lock econômico por truck: nenhum increment/venda concorrente do MESMO storage.
+local TruckStorageBusy = {} ---@type table<integer, boolean>  netId → operação em curso
 
---- [v1.15 P0-1] API única e autenticada de carga de pneu no truck.
-RegisterNetEvent('vp_chopshop:tyre:loadToTruck', function(netId)
-    local src = source
-    if not IsValidSource(src) then return end
-    if not (Config.TyreSelling and Config.TyreSelling.Enable) then return end
+local function truckMaxTyres()
+    return math.max(1, math.floor(tonumber(Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4))
+end
+
+--- [v1.15 P0-1 / #1] Carga autenticada de pneu no truck — REQUEST/RESPONSE.
+--- O cliente só remove o prop / encerra o carry / notifica sucesso se ok==true.
+--- O novo contador (`count`) é SEMPRE o valor server-side; o cliente nunca o calcula.
+lib.callback.register('vp_chopshop:tyre:loadToTruck', function(src, netId)
+    if not IsValidSource(src) then return { ok = false, err = 'invalid' } end
+    if not (Config.TyreSelling and Config.TyreSelling.Enable) then return { ok = false, err = 'disabled' } end
     netId = tonumber(netId)
-    if not netId then return end
+    if not netId then return { ok = false, err = 'net' } end
 
     -- Mutex por jogador: impede double-fire concorrente consumir 1 crédito e somar 2
-    if TruckLoadBusy[src] then return end
+    if TruckLoadBusy[src] then return { ok = false, err = 'processing' } end
     TruckLoadBusy[src] = true
-    local function done() TruckLoadBusy[src] = nil end
+    local function release(res) TruckLoadBusy[src] = nil; return res end
 
     local now = GetGameTimer()
-    if TruckLoadCooldown[src] and now < TruckLoadCooldown[src] then return done() end
+    if TruckLoadCooldown[src] and now < TruckLoadCooldown[src] then
+        return release({ ok = false, err = 'cooldown' })
+    end
     TruckLoadCooldown[src] = now + TRUCK_LOAD_COOLDOWN_MS
 
     -- Precisa ter removido uma roda legítima antes (crédito server-side)
     if (PlayerTyreStock[src] or 0) < 1 then
         LogSuspicious(src, 'tyre:loadToTruck', 'Sem crédito de pneu (nenhuma roda removida)')
-        return done()
+        return release({ ok = false, err = 'no_stock' })
     end
 
     -- Truck: entidade + modelo + proximidade (trust-no-client)
     local truck = NetworkGetEntityFromNetworkId(netId)
-    if not truck or truck == 0 or not DoesEntityExist(truck) then return done() end
+    if not truck or truck == 0 or not DoesEntityExist(truck) then
+        return release({ ok = false, err = 'no_truck' })
+    end
     if not isPickupTruckModel(GetEntityModel(truck)) then
         LogSuspicious(src, 'tyre:loadToTruck', 'Veículo alvo não é pickup truck (netId=' .. netId .. ')')
-        return done()
+        return release({ ok = false, err = 'bad_truck' })
     end
-    if not ValidatePlayerNearVehicle(src, truck, 8.0) then return done() end
+    if not ValidatePlayerNearVehicle(src, truck, 8.0) then
+        return release({ ok = false, err = 'range' })
+    end
 
-    local maxTyres = math.max(1, math.floor(tonumber(Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4))
+    -- [v1.15 #2] Lock por storage: serializa TODA operação no mesmo truck (carga OU venda).
+    -- Hoje o trecho read→write abaixo é síncrono (sem yield), mas o lock garante o
+    -- comportamento se alguma validação futura passar a ceder — dois carregamentos
+    -- concorrentes no mesmo truck nunca leem o mesmo `cur`.
+    if TruckStorageBusy[netId] then return release({ ok = false, err = 'truck_busy' }) end
+    TruckStorageBusy[netId] = true
+    local function releaseAll(res) TruckStorageBusy[netId] = nil; return release(res) end
+
+    local maxTyres = truckMaxTyres()
     local cur = ServerTyreCounts[netId] or 0
-    if cur >= maxTyres then return done() end
+    if cur >= maxTyres then return releaseAll({ ok = false, err = 'truck_full' }) end
 
     -- Consumir crédito e incrementar o contador autoritativo
     PlayerTyreStock[src] = PlayerTyreStock[src] - 1
-    ServerTyreCounts[netId] = cur + 1
-    Entity(truck).state:set('chopTyreCount', cur + 1, true)
-    done()
+    local newCount = cur + 1
+    ServerTyreCounts[netId] = newCount
+    Entity(truck).state:set('chopTyreCount', newCount, true)
+    return releaseAll({ ok = true, count = newCount, max = maxTyres })
 end)
 
 AddEventHandler('playerDropped', function()
@@ -317,6 +339,7 @@ AddEventHandler('entityRemoved', function(entity)
     local netId = NetworkGetNetworkIdFromEntity(entity)
     if netId and netId ~= 0 then
         ServerTyreCounts[netId] = nil
+        TruckStorageBusy[netId] = nil
     end
 end)
 
@@ -480,32 +503,41 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     if source_type == 'truck' and truckNetId then
         -- Truck: contador server-side é a verdade (nunca o state bag do cliente).
         local nid = tonumber(truckNetId)
-        local truck = NetworkGetEntityFromNetworkId(nid or 0)
+        if not nid then return release({ ok=false, err='no_truck' }) end
+
+        -- [v1.15 #2] Lock econômico por truck: dois jogadores não vendem o mesmo storage
+        -- simultaneamente, e nenhuma carga (loadToTruck) entra durante a venda.
+        -- releaseTruck() encadeia release() do player → libera AMBOS os locks em todo return.
+        if TruckStorageBusy[nid] then return release({ ok=false, err='truck_busy' }) end
+        TruckStorageBusy[nid] = true
+        local function releaseTruck(res) TruckStorageBusy[nid] = nil; return release(res) end
+
+        local truck = NetworkGetEntityFromNetworkId(nid)
         if not truck or truck == 0 or not DoesEntityExist(truck) then
-            return release({ ok=false, err='no_truck' })
+            return releaseTruck({ ok=false, err='no_truck' })
         end
         -- [v1.15 P0-2] Validar modelo + proximidade ao truck (antes só checava existência).
         if not isPickupTruckModel(GetEntityModel(truck)) then
             LogSuspicious(src, 'fence:sellTyres', 'Veículo alvo não é pickup truck')
-            return release({ ok=false, err='bad_truck' })
+            return releaseTruck({ ok=false, err='bad_truck' })
         end
         if not ValidatePlayerNearVehicle(src, truck, 8.0) then
-            return release({ ok=false, err='truck_range' })
+            return releaseTruck({ ok=false, err='truck_range' })
         end
 
         local count = ServerTyreCounts[nid] or 0
-        if count <= 0 then return release({ ok=false, err='no_tyres' }) end
+        if count <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
 
         -- [v1.15 P0-2] Pagar ANTES de zerar o contador; se o pagamento falhar, nada é perdido.
         local total = unitPrice * count
         if not BridgeAddCash(src, total, 'fence_tyres') then
-            return release({ ok=false, err='payment' })
+            return releaseTruck({ ok=false, err='payment' })
         end
         ServerTyreCounts[nid] = nil
         Entity(truck).state:set('chopTyreCount', 0, true)
         addTrustXp(src, xpPerTyre * count)
         TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
-        return release({ ok=true, count=count, total=total })
+        return releaseTruck({ ok=true, count=count, total=total })
     end
 
     -- Inventário: chopshop_tyre items
