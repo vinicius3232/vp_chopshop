@@ -11,6 +11,9 @@ Escopo: **somente P0-1..P0-4**. Nada de ChopSession/ActionSession/Bolt/Catalytic
 | `7aee5a9` | close tyre grant + unify authenticated truck load | P0-1, P0-3 | server/fence.lua, server/main.lua, client/main.lua, client/fence.lua |
 | `529bdc4` | validate truck entity/model/distance in sellTyres | P0-2 | server/fence.lua |
 | `0ba8332` | discardVehicle mutex + payment-first ordering | P0-4 | server/main.lua |
+| `e5c26d4` | acknowledge tyre load and lock truck sale (follow-up) | — | server/fence.lua, client/main.lua, client/fence.lua |
+
+> **Follow-up `e5c26d4`** (revisão pré-GO ChopSession) — ver seção dedicada no fim do doc.
 
 > P0-1 e P0-3 ficaram no mesmo commit porque são uma única mudança coesa: não dá para
 > unificar o caminho de carga sem também eliminar a rota morta de concessão, e o novo
@@ -221,3 +224,104 @@ Os 4 P0 estão fechados na análise estática e na revisão adversarial. O que f
 **Sugestão:** o revisor humano aplica os 3 patches num servidor de teste, roda os itens
 1–4 acima, e só então dá GO para ChopSession. Se algum falhar, é fix pontual dentro deste
 mesmo hotfix — não desbloqueia a próxima fase (regra 136).
+
+---
+
+# Follow-up `e5c26d4` — acknowledge tyre load + lock truck sale
+
+Ajuste de consistência pedido na review pré-GO ChopSession. **Não fecha novo P0**
+(os 4 seguem fechados); endereça 2 itens de robustez do fluxo de pneu.
+Diff: 3 arquivos, +85 / −40. `server/fence.lua`, `client/main.lua`, `client/fence.lua`.
+
+## Mudança do contrato client ↔ server
+
+`vp_chopshop:tyre:loadToTruck` passa de **`RegisterNetEvent` (fire-and-forget)** para
+**`lib.callback.register` (request/response)**.
+
+| | Antes (`7aee5a9`) | Agora (`e5c26d4`) |
+|---|---|---|
+| Client dispara | `TriggerServerEvent(evt, truckNetId)` | `lib.callback.await(evt, false, truckNetId)` |
+| Client remove prop / encerra carry | **imediatamente**, sem esperar | **só se `res.ok == true`** |
+| Notificação de sucesso | `L('tyre_stored_fmt', cur+1, max)` — **`cur+1` calculado no client** | `L('tyre_stored_fmt', res.count, res.max)` — **`count` vem do servidor** |
+| Deny (cooldown / sem stock / truck inválido / cheio / lock) | client não sabia — fingia armazenamento local | prop **permanece**, carry **mantido**, notifica erro via `VPChopTyreLoadErr(err)` |
+
+**Retorno do servidor:**
+```
+ok   → { ok = true,  count = <ServerTyreCounts pós-incremento>, max = <MaxTyresInTruck> }
+deny → { ok = false, err = 'cooldown' | 'no_stock' | 'no_truck' | 'bad_truck'
+                          | 'range' | 'truck_busy' | 'truck_full'
+                          | 'processing' | 'net' | 'disabled' }
+```
+
+`VPChopTyreLoadErr(err)` (novo, `client/main.lua`) mapeia para chaves de locale **já
+existentes** (`tyre_truck_full`, `tyre_no_truck_nearby`, `err_cooldown`,
+`notify_generic_error`) — `shared/locale.lua` **não foi tocado**.
+
+Call sites migrados para `lib.callback.await`: 2 vivos (`client/main.lua` — ground-prop
+target e menu `[G]`), 2 mortos (`client/fence.lua` `VPChopLoadTyreInTruck*` — mantidos
+contract-correct; remoção total continua sendo `chore:` futuro).
+
+## Comportamento em DENY (novo)
+1. Servidor valida; se falhar retorna `{ ok=false, err=... }`.
+2. Client: `if not cbOk or not res or not res.ok then VPChopNotify(VPChopTyreLoadErr(res and res.err),'error'); return end`.
+3. **O prop NÃO é deletado. O carry NÃO é encerrado.** O jogador pode tentar de novo.
+4. `PlayerTyreStock` **não é consumido** (o decremento só ocorre após todas as validações, na seção síncrona final).
+
+## Comportamento em SUCESSO
+1. Servidor: valida → adquire `TruckStorageBusy[netId]` → `PlayerTyreStock[src] -= 1` →
+   `ServerTyreCounts[netId] = cur+1` → `Entity(truck).state:set('chopTyreCount', newCount, true)` (broadcast) → libera locks → retorna `{ ok=true, count=newCount, max }`.
+2. Client: remove o ox_target + `DeleteEntity(handProp)` (ou `VPChopDropCarryPart()`) e
+   notifica `tyre_stored_fmt` com o **`count` do servidor**.
+
+## Lock por truck — `TruckStorageBusy[netId]`
+
+Adicionado ao lado do `SellTyresBusy[src]` (por jogador) já existente. **Não substitui**
+o lock por jogador — os dois coexistem.
+
+| Operação | Locks adquiridos | Release |
+|---|---|---|
+| `loadToTruck` | `TruckLoadBusy[src]` → (após validações) `TruckStorageBusy[netId]` | `releaseAll()` em todo return pós-acquire; `release()` (só player) nos returns anteriores |
+| `sellTyres` (truck) | `SellTyresBusy[src]` → (no ramo truck) `TruckStorageBusy[netId]` | `releaseTruck()` encadeia `release()`; libera ambos em **todos** os returns do ramo |
+| `sellTyres` (inventário) | `SellTyresBusy[src]` | `release()` |
+
+- `loadToTruck` recusa `truck_busy` enquanto uma venda do mesmo `netId` corre (e vice-versa).
+- Nenhum `return` pós-acquire pula o release (auditado — ver testes T-lock abaixo).
+- `entityRemoved` limpa `ServerTyreCounts[netId]` **e** `TruckStorageBusy[netId]`.
+- Nenhuma das seções críticas (read→write de `ServerTyreCounts`, `BridgeAddCash`→clear)
+  contém `yield` hoje; os locks são a garantia caso uma validação futura passe a ceder
+  (princípio do item 9 da review).
+
+## Testes estáticos adicionais (trace)
+
+| # | Cenário | Esperado | Resultado |
+|---|---|---|---|
+| T1 | Servidor rejeita `loadToTruck` (qualquer err) | prop continua com o jogador | `res.ok=false` → `return` antes de `DeleteEntity`/`DropCarryPart` ✅ |
+| T2 | Truck cheio (`cur >= max`) | `err='truck_full'`; pneu continua; **stock não consumido** | check `cur>=maxTyres` ocorre **antes** de `PlayerTyreStock -= 1` ✅ |
+| T3 | Sem crédito (`stock < 1`) | DENY; carry continua | `err='no_stock'` antes de tocar truck/stock ✅ |
+| T4 | 2 jogadores `sellTyres` no MESMO truck | no máx **1** pagamento | A pega `TruckStorageBusy[nid]`; B → `truck_busy` **antes de `BridgeAddCash`** ✅ |
+| T5 | 2 jogadores carregam pneus legítimos **diferentes** no mesmo truck | cada um armazenado **exatamente 1×**, respeitando capacidade | serializado por `TruckStorageBusy[netId]`: B espera A liberar, relê `cur`, incrementa. `ServerTyreCounts` = soma correta; nenhum crédito perdido ✅ |
+| T6 | Resposta de sucesso | client usa `res.count` do servidor, não calcula | `tyre_stored_fmt(res.count, res.max or max)` ✅ |
+| T-lock-1 | `loadToTruck` — todo return pós-`TruckStorageBusy[netId]=true` | libera o lock | só `releaseAll({truck_full})` e `releaseAll({ok})` ✅ |
+| T-lock-2 | `sellTyres` ramo truck — todo return pós-`TruckStorageBusy[nid]=true` | libera **ambos** os locks | `releaseTruck()` em no_truck/bad_truck/truck_range/no_tyres/payment/ok ✅ |
+| T-lock-3 | jogador cai no meio de `loadToTruck`/`sellTyres` | locks liberados | handlers são yield-free → sempre atingem o release; `playerDropped` limpa `TruckLoadBusy`/`SellTyresBusy`/stock; `entityRemoved` limpa `TruckStorageBusy` |
+
+## Revisão adversarial (OmniRoute `challenge`)
+6 vetores testados; 5 descartados pelo próprio revisor (locks liberam em todos os returns;
+client não finge armazenamento local; 2º seller bloqueado antes do pagamento; caminho feliz
+4-pneus OK; prop nunca deletado com `ok=false`). 1 apontamento — race de incremento entre
+duas cargas concorrentes no mesmo truck — **endereçado** com `TruckStorageBusy[netId]` na
+carga (não só na venda), embora o trecho seja síncrono hoje.
+
+## Status pós follow-up
+- P0-1 CLOSED · P0-2 CLOSED · P0-3 CLOSED · **P0-4 double-payout CLOSED**.
+- ⚠️ **P1-4 NÃO fechado**: `discardVehicle` ainda usa `DeleteEntity` direto, sem
+  `BridgeDeleteVehicle` nem guard de veículo owned/persistente. `discardVehicle` **não**
+  está totalmente finalizado — isso entra na arquitetura seguinte.
+- `PlayerTyreStock` continua sendo solução temporária: **prova apenas que o jogador
+  removeu uma roda legítima; NÃO prova transporte físico do pneu.** A prova de transporte
+  vira entitlement por `sessionId + partId` na ChopSession. Sem persistência/DB agora.
+
+## GO
+- **GO ARQUITETURAL para ChopSession** — sujeito a esta revisão estática passar.
+- **GO DE RELEASE** permanece condicionado a: functional QBox + multiplayer (2–4) +
+  regressão (Fence/plates/serial/heat/tyremarks) + `resmon` antes/depois, em servidor real.
