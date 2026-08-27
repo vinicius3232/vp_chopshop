@@ -56,7 +56,7 @@ AddEventHandler('playerDropped', function()
     PlateStealCooldown[src] = nil
 end)
 
--- Limpar flag anti-duplo-roubo quando a entidade some (padrão do AdvState em advanced_chop.lua).
+-- Limpar flag anti-duplo-roubo quando a entidade some.
 AddEventHandler('entityRemoved', function(entity)
     local netId = NetworkGetNetworkIdFromEntity(entity)
     if netId and netId ~= 0 then

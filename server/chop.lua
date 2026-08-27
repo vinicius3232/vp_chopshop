@@ -2,11 +2,11 @@
 -- [v1.15 PR-B] O estado de peça do BASE CHOP migrou de `ChoppedByNetId` para
 -- `ChopSession.parts` (via server/session/base_state.lua). As funções públicas
 -- (WasChopped/MarkChopped/VPChopServerTryPart/VPChopGetPartCount/VPChopClearVehicle)
--- mantêm a semântica de antes e delegam à fachada. AdvState NÃO migrado.
+-- mantêm a semântica de antes e delegam à fachada. Peças base = origin='base'.
 
 --- Mutex leve: bloqueia coroutines concorrentes para o mesmo netId:partKey.
---- PRESERVADO — esta PR é migração de STATE, não de mutex. (LockPart da
---- ChopSession será adotado numa PR posterior.)
+--- PRESERVADO no base chop — a PR-B foi migração de STATE, não de mutex.
+--- (o advanced chop já usa ChopSession.LockPart desde a PR-C.)
 local ChopInProgress = {} ---@type table<string, true>
 
 -- [GAMEPLAY unificação] Sistema de "recompensa pendente entregue na bancada" REMOVIDO.
@@ -113,9 +113,9 @@ function VPChopServerTryPart(src, netId, partKey)
     return ok, err, rewards
 end
 
---- Retorna o número de peças BASE já removidas de um veículo.
---- (AdvState não conta — advanced chop migra na PR C. discardVehicle continua
---- equivalente ao comportamento atual.)
+--- Retorna o número de peças da FASE 1 (origin='base') já removidas de um veículo.
+--- Peças advanced (origin='advanced') NÃO contam — `discardVehicle` continua
+--- equivalente ao atual até a PR D (unified discard).
 ---@param netId integer
 ---@return integer
 function VPChopGetPartCount(netId)

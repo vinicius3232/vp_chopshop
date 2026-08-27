@@ -48,10 +48,12 @@ local base = arg[1] or '.'
 dofile(base .. '/server/session/chop_session.lua')   -- provê ChopSession (+ sweeper thread [1])
 dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequireRaisedSession
 dofile(base .. '/server/session/base_state.lua')      -- provê VPChopBaseState
+dofile(base .. '/server/session/advanced_state.lua')  -- provê VPChopAdvancedState
 dofile(base .. '/server/chop.lua')                    -- provê VPChopServerTryPart etc. (delega a base_state)
 dofile(base .. '/server/session/chop_session_spec.lua')
 dofile(base .. '/server/session/adv_gate_spec.lua')
 dofile(base .. '/server/session/base_state_spec.lua')
+dofile(base .. '/server/session/advanced_state_spec.lua')
 
 -- threads[1] é o sweeper do módulo (loop infinito com Wait no-op) — pulado.
 -- threads[2..N] são os corpos dos specs.

@@ -3,10 +3,10 @@
 --  ChopSession — fonte server-authoritative ÚNICA do estado de um desmanche.
 --  v1.15 arch/chop-session · FASE: FUNDAÇÃO (core + lifecycle + jackstand).
 --
---  Consumidores: jackstand (raise/lower) e, desde a PR-B, o BASE CHOP —
---  server/session/base_state.lua (fachada) substituiu ChoppedByNetId como fonte
---  de verdade das peças da Fase 1. AdvState (server/advanced_chop.lua) ainda NÃO
---  migrado (PR C). ChopSession.parts contém só peças base por enquanto.
+--  Consumidores: jackstand (raise/lower), o BASE CHOP (server/session/base_state.lua,
+--  substituiu ChoppedByNetId — PR-B) e o ADVANCED CHOP (server/session/advanced_state.lua,
+--  substituiu AdvState/AdvMutex — PR-C). `session.parts[k].origin` = 'base'|'advanced'.
+--  Base + advanced têm UMA fonte server-authoritative: ChopSession.parts.
 --
 --  API pública (tabela global `ChopSession`):
 --    Create(netId, src)            → session | nil, err     (idempotente por netId)
@@ -370,22 +370,39 @@ function ChopSession.GetPartState(id, partKey)
     return p and p.state or nil
 end
 
---- Idempotente: marcar peça já removida devolve (true, true) sem duplicar.
+--- Idempotente: marcar peça já removida devolve (true, true) sem duplicar nem
+--- sobrescrever metadata existente.
 ---@param id string
 ---@param partKey string
 ---@param src number
+---@param opts? { origin?: 'base'|'advanced' }   metadata escolhida SÓ por código server-side
 ---@return boolean ok, boolean duplicate
-function ChopSession.MarkPart(id, partKey, src)
+function ChopSession.MarkPart(id, partKey, src, opts)
     local s = Sessions[id]
     if not s or TERMINAL[s.state] then return false, false end
     if type(partKey) ~= 'string' then return false, false end
-    if s.parts[partKey] then return true, true end
-    s.parts[partKey] = { state = 'REMOVED', by = src, at = os.time() }
+    if s.parts[partKey] then return true, true end   -- duplicate: metadata preservada
+    local origin = (opts and opts.origin == 'advanced') and 'advanced' or 'base'
+    s.parts[partKey] = { state = 'REMOVED', by = src, at = os.time(), origin = origin }
     s.lastActivity = os.time()
     if s.state == 'CREATED' or s.state == 'RAISED' then
         ChopSession.SetState(id, 'DISMANTLING')
     end
     return true, false
+end
+
+--- Conta peças na sessão, opcionalmente filtrando por `origin`.
+---@param id string
+---@param origin? 'base'|'advanced'   nil = todas
+---@return integer
+function ChopSession.CountParts(id, origin)
+    local s = Sessions[id]
+    if not s then return 0 end
+    local c = 0
+    for _, p in pairs(s.parts) do
+        if origin == nil or p.origin == origin then c = c + 1 end
+    end
+    return c
 end
 
 --- Mutex leve por peça (para operações com janela de UX). Token de uso único.
