@@ -60,6 +60,20 @@ local EntityAPI = {
         local st = Entity(ent).state
         return st and (st.vehicleid or (st.vehicleData and st.vehicleData.id)) or nil
     end,
+    -- [v1.15 #7] Marcador server-local na própria entidade. `false` = não replicado.
+    -- REFORÇO de lifecycle/identidade — NÃO é segredo, token de auth, nem prova
+    -- anti-cheat isolada. É mais UM fator; model/ownedId/entityRemoved/timeout
+    -- continuam valendo. `tag` só reporta sucesso com WRITE + READBACK confirmado.
+    tag = function(ent, vsid)
+        local ok = pcall(function() Entity(ent).state:set('vpChopVsid', vsid, false) end)
+        if not ok then return false end
+        local readOk, value = pcall(function() return Entity(ent).state.vpChopVsid end)
+        return readOk and value == vsid
+    end,
+    marker = function(ent)
+        local ok, v = pcall(function() return Entity(ent).state.vpChopVsid end)
+        return ok and v or nil
+    end,
 }
 
 -- ─── Estado em memória ──────────────────────────────────────────────────────────
@@ -78,9 +92,14 @@ local _sidSeq  = 0
 -- Ver docs/audit/VEHICLE_SESSION_ID.md. Resumo:
 --   • netId sozinho é reciclável → não serve de identidade persistente.
 --   • Nenhum primitivo de QBox/OneSync/ox_lib cobre veículos NÃO-owned (o caso comum).
---   • VSID = id opaco cunhado 1× por sessão + fingerprint {netId, model, plate}.
---   • Invalidação: entityRemoved (imediata) + recheck de liveness (modelo!) em todo
---     Get/GetByVehicle + timeout por inatividade. Placa é forense, nunca identidade.
+--   • VSID = id opaco cunhado 1× por sessão + fingerprint {netId, model, plate, ownedId}.
+--   • Invalidação (fatores SOMADOS, nunca substituem uns aos outros):
+--       entityRemoved (imediata) + recheck de modelo em todo Get/GetByVehicle +
+--       ownedId (quando existe) + marcador server-local vpChopVsid (fix #7, só
+--       participa se WRITE+READBACK confirmou no mint) + timeout por inatividade.
+--   • Placa é forense, nunca identidade. `vpChopVsid` é REFORÇO de lifecycle —
+--     não é segredo/token/prova anti-cheat isolada. Ausência dele NUNCA invalida
+--     sessões (cai no fallback model/ownedId/entityRemoved/timeout).
 
 ---@param netId integer
 ---@return string vsid, table fingerprint
@@ -111,6 +130,12 @@ local function vehicleStillValid(session)
     if not fp.model then return false end
     -- Modelo mudou ⇒ netId foi reciclado noutro veículo.
     if EntityAPI.model(ent) ~= fp.model then return false end
+    -- [v1.15 #7] Marcador server-local: pega netId reciclado no MESMO modelo (não-owned).
+    -- Só decide se conseguimos cravar o marcador no mint (fp.markerSet). Caso o
+    -- runtime não suporte state bag server-local, cai no fallback (model/ownedId).
+    if fp.markerSet and EntityAPI.marker(ent) ~= session.vehicle.identity then
+        return false
+    end
     -- Se ambos os lados têm ownedId, exigir match (mais forte, custo zero).
     if fp.ownedId then
         local liveOwned = EntityAPI.owned(ent)
@@ -152,14 +177,14 @@ function ChopSession.CanTransition(from, to)
     return (TRANSITIONS[from] or {})[to] == true
 end
 
---- Resolve + revalida. Sessão stale (veículo sumiu / netId reciclado / terminal
---- há muito tempo) é limpa aqui e retorna nil.
+--- [v1.15 #1] ACTIVE SESSION LOOKUP — retorna SÓ sessão ativa (não-terminal) e
+--- revalidada. Terminal (COMPLETED/CANCELLED) → nil. Gameplay usa só isto.
 ---@param sessionId string
 ---@return table|nil
 function ChopSession.Get(sessionId)
     local s = Sessions[sessionId]
     if not s then return nil end
-    if TERMINAL[s.state] then return s end   -- terminal: devolve p/ leitura, não revalida
+    if TERMINAL[s.state] then return nil end
     if not vehicleStillValid(s) then
         dbg('Get: sessão', sessionId, 'stale (veículo inválido) → cleanup')
         ChopSession.CleanupVehicle(s.vehicle.netId)
@@ -168,6 +193,10 @@ function ChopSession.Get(sessionId)
     return s
 end
 
+-- [v1.15 #1] Não há `Peek` público: leitura terminal/debug é via `Debug()`
+-- (snapshot read-only). Gameplay usa só Get/GetByVehicle (ACTIVE lookup).
+
+--- ACTIVE SESSION LOOKUP por veículo (terminal → nil).
 ---@param netId integer
 ---@return table|nil
 function ChopSession.GetByVehicle(netId)
@@ -178,7 +207,9 @@ function ChopSession.GetByVehicle(netId)
     return ChopSession.Get(id)
 end
 
---- Idempotente: se já existe sessão viva p/ o netId, devolve-a (não cunha nova).
+--- Idempotente p/ sessão ATIVA. Terminal:
+---   • CANCELLED → não é reutilizável: descarta e cunha nova (cs/vsid novos).
+---   • COMPLETED → não pode reabrir enquanto o veículo original existir → nil,'completed'.
 ---@param netId integer
 ---@param src number
 ---@return table|nil session, string|nil err
@@ -188,10 +219,32 @@ function ChopSession.Create(netId, src)
     if not netId then return nil, 'net' end
     if not (src and GetPlayerName(src)) then return nil, 'src' end
 
-    local existing = ChopSession.GetByVehicle(netId)
-    if existing then
-        ChopSession.AddParticipant(existing.id, src)
-        return existing
+    -- Consulta o índice reverso CRU (inclui sessões terminais ainda não coletadas).
+    local rawId = ByVehicleNetId[netId]
+    local raw   = rawId and Sessions[rawId] or nil
+    if raw then
+        if not TERMINAL[raw.state] then
+            local active = ChopSession.Get(rawId)   -- revalida
+            if active then
+                ChopSession.AddParticipant(active.id, src)
+                -- [v1.15 #7b] re-crava o marcador (idempotente): cobre o caso raro de
+                -- a entidade server-side ter perdido o state bag desde o mint.
+                if not active.vehicle._fp.markerSet then
+                    local e = EntityAPI.get(netId)
+                    if EntityAPI.exists(e) then
+                        active.vehicle._fp.markerSet = EntityAPI.tag(e, active.vehicle.identity) == true
+                    end
+                end
+                return active
+            end
+            -- Get devolveu nil → stale, já limpo → segue p/ cunhar nova.
+        elseif raw.state == 'COMPLETED' then
+            if vehicleStillValid(raw) then return nil, 'completed' end
+            ChopSession.CleanupVehicle(netId)       -- veículo foi-se: libera o slot
+        else -- CANCELLED
+            Sessions[rawId] = nil
+            ByVehicleNetId[netId] = nil
+        end
     end
 
     local ent = EntityAPI.get(netId)
@@ -199,6 +252,7 @@ function ChopSession.Create(netId, src)
 
     _sidSeq = _sidSeq + 1
     local vsid, fp = mintVehicleIdentity(netId)
+    fp.markerSet = EntityAPI.tag(ent, vsid) == true   -- [v1.15 #7] crava o marcador
     local now = os.time()
     local s = {
         id           = ('cs:%d'):format(_sidSeq),
@@ -280,7 +334,7 @@ end
 ---@return boolean
 function ChopSession.ClearRaised(id)
     local s = Sessions[id]
-    if not s then return false end
+    if not s or TERMINAL[s.state] then return false end   -- [v1.15 #4] mesmo invariante de MarkRaised
     s.raised   = false
     s.raisedBy = nil
     s.lastActivity = os.time()
@@ -363,13 +417,19 @@ function ChopSession.Touch(id)
     if s then s.lastActivity = os.time() end
 end
 
---- Terminal + idempotente.
+--- [v1.15 #3] Respeita a FSM: só completa a partir de um estado com transição
+--- válida p/ COMPLETED (hoje: READY_FOR_DISCARD). COMPLETED→Complete = idempotente.
 ---@param id string
----@return boolean
+---@return boolean ok, string|nil err
 function ChopSession.Complete(id)
     local s = Sessions[id]
-    if not s then return false end
-    if TERMINAL[s.state] then return true end
+    if not s then return false, 'no_session' end
+    if s.state == 'COMPLETED' then return true end        -- idempotente
+    if s.state == 'CANCELLED' then return false, 'terminal' end
+    if not ChopSession.CanTransition(s.state, 'COMPLETED') then
+        dbg('Complete BLOQUEADO', id, 'de', s.state)
+        return false, 'bad_state'
+    end
     s.state = 'COMPLETED'
     s.completed = true
     s.lastActivity = os.time()
@@ -442,21 +502,6 @@ function ChopSession.Debug()
     return out
 end
 
--- ─── Seam de teste ────────────────────────────────────────────────────────────
--- Só é EXPOSTO quando a convar vp_chopshop_selftest=1. Em produção `_test` é nil —
--- um lua executor server-side não pode chamar reset()/setEntityAPI() p/ apagar
--- sessões ou injetar veículos falsos.
-if GetConvar('vp_chopshop_selftest', '0') == '1' then
-    ChopSession._test = {
-        setEntityAPI = function(tbl) for k, v in pairs(tbl) do EntityAPI[k] = v end end,
-        reset = function()
-            Sessions, ByVehicleNetId = {}, {}
-            _vsidSeq, _sidSeq = 0, 0
-        end,
-        _sessions = function() return Sessions end,
-    }
-end
-
 -- ─── Hooks de limpeza ──────────────────────────────────────────────────────────
 
 AddEventHandler('entityRemoved', function(entity)
@@ -472,27 +517,50 @@ end)
 
 -- Sweeper de timeout + coleta de sessões terminais. Sem polling de entidades:
 -- só percorre a tabela de sessões (pequena) num intervalo largo.
-CreateThread(function()
-    local interval = cfgNum('SweepIntervalMs', 30000)
-    local timeout  = cfgNum('SessionTimeoutMs', 15 * 60 * 1000) / 1000  -- s
-    while true do
-        Wait(interval)
-        local now = os.time()
-        for id, s in pairs(Sessions) do
-            if TERMINAL[s.state] and (now - s.lastActivity) > 60 then
-                Sessions[id] = nil
-                if ByVehicleNetId[s.vehicle.netId] == id then
-                    ByVehicleNetId[s.vehicle.netId] = nil
-                end
-            elseif not TERMINAL[s.state] and (now - s.lastActivity) > timeout then
-                dbg('sweep: timeout', id)
-                ChopSession.Cancel(id, 'timeout')
-            elseif not TERMINAL[s.state] and not vehicleStillValid(s) then
-                dbg('sweep: veículo inválido', id)
-                ChopSession.CleanupVehicle(s.vehicle.netId)
+local TERMINAL_RETENTION_S = 60
+local function sweepOnce()
+    local timeout = cfgNum('SessionTimeoutMs', 15 * 60 * 1000) / 1000  -- s
+    local now = os.time()
+    for id, s in pairs(Sessions) do
+        if TERMINAL[s.state] and (now - s.lastActivity) > TERMINAL_RETENTION_S then
+            Sessions[id] = nil
+            if ByVehicleNetId[s.vehicle.netId] == id then
+                ByVehicleNetId[s.vehicle.netId] = nil
             end
+        elseif not TERMINAL[s.state] and (now - s.lastActivity) > timeout then
+            dbg('sweep: timeout', id)
+            ChopSession.Cancel(id, 'timeout')
+        elseif not TERMINAL[s.state] and not vehicleStillValid(s) then
+            dbg('sweep: veículo inválido', id)
+            ChopSession.CleanupVehicle(s.vehicle.netId)
         end
     end
+end
+
+CreateThread(function()
+    local interval = cfgNum('SweepIntervalMs', 30000)
+    while true do
+        Wait(interval)
+        sweepOnce()
+    end
 end)
+
+-- ─── Seam de teste ────────────────────────────────────────────────────────────
+-- Só EXPOSTO sob a convar vp_chopshop_selftest=1. Em produção `_test` é nil — um
+-- lua executor server-side não pode apagar sessões nem injetar veículos falsos.
+if GetConvar('vp_chopshop_selftest', '0') == '1' then
+    ChopSession._test = {
+        setEntityAPI = function(tbl) for k, v in pairs(tbl) do EntityAPI[k] = v end end,
+        reset = function()
+            Sessions, ByVehicleNetId = {}, {}
+            _vsidSeq, _sidSeq = 0, 0
+        end,
+        _sessions = function() return Sessions end,
+        setIdle   = function(id, seconds)   -- back-date lastActivity p/ testar o sweeper
+            if Sessions[id] then Sessions[id].lastActivity = os.time() - seconds end
+        end,
+        sweep     = sweepOnce,
+    }
+end
 
 dbg('módulo carregado')

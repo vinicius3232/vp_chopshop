@@ -27,45 +27,78 @@ minigame continua sendo **UX/gameplay**; a autoridade de estado e economia é o 
 ActionSession protege. (Correção de terminologia da review: ActionSession ≠
 "minigame proof".)
 
+## Definições vêm do servidor (8.4)
+
+O **client NUNCA escolhe autoritativamente** `kind`, `toolItem`, `duration` nem
+`reward`. O client pede apenas o **alvo**:
+
+```
+Start request (client → server):  { sessionId = 'cs:<n>', action = 'wheel_lf' | 'engine' | 'plate' | ... }
+```
+
+O servidor deriva tudo do **Part Registry / Tool Registry** (fases futuras):
+`kind`, ferramentas aceitas, `minDurationMs`, `noise`, dependências (Part Graph),
+tabela de reward. `netId` sai da própria ChopSession (`session.vehicle.netId`),
+não do client.
+
 ## Interface proposta (server — `ActionSession.*`)
 
 ```
-Start(src, opts) → { ok, actionId, nonce, startedAt, expiresAt } | { ok=false, err }
-  opts = {
-    sessionId  = 'cs:<n>',      -- ChopSession a que a ação pertence
-    kind       = 'wheel'|'panel'|'engine'|'plate'|'vin'|...,
-    partKey    = 'wheel_lf',    -- opcional conforme kind
-    toolItem   = 'impact_wrench',
-    netId      = <int>,         -- redundante c/ session, revalidado
-  }
-  valida: IsValidSource, ChopSession.Get(sessionId) vivo, HasParticipant,
-          vehicleStillValid, proximidade, posse da tool, Part Graph deps,
-          nenhuma ActionSession aberta do mesmo (sessionId, partKey),
-          ChopSession.LockPart(sessionId, partKey).
-  efeito: cria ActionSessions[actionId] = { src, sessionId, partKey, kind,
-          toolItem, netId, vsid, startedAt, expiresAt, nonce, consumed=false }.
+Start(src, req) → { ok, actionId, startedAt, expiresAt } | { ok=false, err }
+  req = { sessionId, action }         -- SÓ isto vem do client
+  server deriva: kind, toolItem(s), minDurationMs, rewardRule  (Part/Tool Registry)
+  valida: IsValidSource, ChopSession.Get(sessionId) vivo (lookup ATIVO — terminal
+          nunca passa), HasParticipant, vehicleStillValid, proximidade, posse de
+          uma tool aceita, Part Graph deps, GetPartState(action) == nil,
+          rate-limit por src (8.3), ChopSession.LockPart(sessionId, action).
+  efeito: ActionSessions[actionId] = {
+            status='OPEN', src, sessionId, action, kind, toolItem, netId, vsid,
+            startedAt, expiresAt, _nonce,      -- _nonce NUNCA sai pro client (8.1)
+            result=nil,
+          }
+  Retorna ao client APENAS: actionId, startedAt, expiresAt.
 
-Complete(src, actionId) → { ok, rewards? } | { ok=false, err }
-  revalida TUDO de novo (não confia em nada guardado do client):
-    - ActionSessions[actionId] existe, src bate, consumed==false, now < expiresAt
-    - now - startedAt >= minDurationMs[kind]
-    - ChopSession ainda viva, participante, veículo válido (VSID), proximidade
-    - tool ainda presente
-    - ChopSession.GetPartState(partKey) ainda nil (não removida por outro caminho)
-  efeito: consumed=true; ChopSession.MarkPart(...); ChopSession.UnlockPart(...);
-          gera rewards/entitlement server-side; emite PART_CHOPPED.
-  idempotência: Complete de actionId já consumed → { ok=false, err='consumed' }
-                (nunca recompensa 2×). Retry legítimo de rede: o client trata
-                'consumed' como sucesso se já viu o resultado, ou re-Start.
+Complete(src, actionId) → { ok, replay?, rewards? } | { ok=false, err }
+  0) ActionSessions[actionId] existe? src bate?  senão → err
+  1) status == 'COMPLETED' (8.2 — replay de rede):
+       return { ok=true, replay=true, rewards = act.result.rewards }
+       — mesmo resultado LÓGICO, SEM repetir MarkPart / reward / XP / item /
+         money / PART_CHOPPED.
+  2) status == 'CANCELLED' / 'EXPIRED' → { ok=false, err='closed' }
+  3) status == 'OPEN' → revalida TUDO (não confia em nada guardado do client):
+       - now < expiresAt
+       - now - startedAt >= minDurationMs[kind]      (anti instant-complete)
+       - ChopSession ainda ATIVA, participante, VSID válido, proximidade
+       - tool aceita ainda presente
+       - ChopSession.GetPartState(action) ainda nil
+     efeito atômico (sem yield no meio):
+       ChopSession.MarkPart(sessionId, action, src)
+       gera rewards/entitlement server-side (rewardRule)
+       emite PART_CHOPPED
+       ChopSession.UnlockPart(sessionId, action, token)
+       act.status = 'COMPLETED'
+       act.result = { rewards = <...> }              -- resultado terminal guardado
+     return { ok=true, rewards = act.result.rewards }
 
-Cancel(src, actionId)  → bool     (client cancelou o minigame; libera o LockPart)
-Expire sweep                      (thread; actionId > expiresAt → Cancel implícito)
-CleanupPlayer(src) / CleanupSession(sessionId)   (playerDropped / sessão morta)
+Cancel(src, actionId)  → bool     status='CANCELLED'; UnlockPart. (client cancelou o minigame)
+Expire sweep                      thread; OPEN & now>expiresAt → status='EXPIRED'; UnlockPart
+CleanupPlayer(src) / CleanupSession(sessionId)   fecham as ActionSessions afetadas
 ```
 
-`actionId` / `nonce`: strings opacas de uso único. `nonce` é um segredo interno
-(não vai pro client) usado como reforço anti-forjamento; `actionId` vai pro client
-e volta no `Complete`.
+### 8.1 — Nonce
+`actionId` é o único token que vai/volta do client. `_nonce` é **segredo interno**
+usado só para reforço anti-forjamento no servidor e **nunca é devolvido ao client**.
+(O doc anterior devolvia `nonce` no `Start` — corrigido.)
+
+### 8.2 — Idempotência = resultado terminal, não `err=consumed`
+`ActionSessions[actionId]` guarda `status` + `result`. Um retry legítimo do MESMO
+`src`+`actionId` sobre uma action `COMPLETED` retorna `{ ok=true, replay=true }`
+com o **mesmo resultado lógico**, **sem** repetir reward/MarkPart/XP/item/money/
+event. Isso cobre resposta de rede perdida sem punir o jogador nem duplicar.
+
+### 8.3 — Rate limit é defense-in-depth
+ActionSession **não substitui** rate-limiting. Os rate-limits por `src` dos
+callbacks atuais (`chopPart`, `adv:*`, etc.) permanecem — ActionSession soma a eles.
 
 ## `minDurationMs` (anti instant-complete)
 
@@ -81,8 +114,8 @@ ActionSessions dela são canceladas.
 
 ## Migração (quando autorizado)
 
-1. `chopPart` (base): `Start` no lugar do rate-limit atual; `Complete` no lugar
-   do corpo atual. `WasChopped` → `ChopSession.GetPartState`.
+1. `chopPart` (base): `Start`/`Complete` envolvem o corpo atual. O rate-limit
+   por `src` **permanece** (8.3). `WasChopped` → `ChopSession.GetPartState`.
 2. `adv:*`: idem, com `minDurationMs` maior + Part Graph deps.
 3. `stealPlate` / `vinScratch`: `kind='plate'`/`'vin'`.
 4. Só então: `Config.ChopSession.RequireActionSession` default `true`; flag de

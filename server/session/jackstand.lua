@@ -59,13 +59,22 @@ lib.callback.register('vp_chopshop:session:requestRaise', function(src, netId)
     local item = Config.Jackstand.Item or 'chopshop_jackstand'
     if (tonumber(InvCount(src, item)) or 0) < 1 then return { ok = false, err = 'no_item' } end
 
+    -- Create pode negar: 'disabled' / 'completed' (sessão concluída, veículo ainda
+    -- existe) / 'vehicle'. CANCELLED é reutilizável → Create cunha nova por dentro.
     local session, err = ChopSession.Create(netId, src)
     if not session then return { ok = false, err = err or 'session' } end
-    ChopSession.AddParticipant(session.id, src)
+
+    -- [v1.15 #2] Checar EXPLICITAMENTE cada mutação — nunca responder ok se a
+    -- sessão recusou (ex.: terminou entre o Create e aqui).
+    if not ChopSession.AddParticipant(session.id, src) then
+        return { ok = false, err = 'session' }
+    end
 
     local already = session.raised == true
     if not already then
-        ChopSession.MarkRaised(session.id, src)
+        if not ChopSession.MarkRaised(session.id, src) then
+            return { ok = false, err = 'session' }
+        end
     else
         ChopSession.Touch(session.id)
     end
@@ -80,7 +89,8 @@ end)
 
 -- ─── requestLower ─────────────────────────────────────────────────────────────
 -- req:  ('vp_chopshop:session:requestLower', vehicleNetId)
--- ok:   { ok=true }   (também ok se a sessão já sumiu — o client faz o visual)
+-- ok:   { ok=true }              baixou (raised limpo)
+-- ok:   { ok=true, stale=true }  sessão já sumiu — o client limpa o visual mesmo assim
 -- deny: { ok=false, err='player'|'net'|'not_participant' }
 lib.callback.register('vp_chopshop:session:requestLower', function(src, netId)
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
@@ -90,11 +100,12 @@ lib.callback.register('vp_chopshop:session:requestLower', function(src, netId)
     local session = ChopSession.GetByVehicle(netId)
     if not session then
         -- Sessão já foi invalidada (veículo removido / timeout). O client ainda
-        -- precisa limpar o visual dele → devolve ok.
+        -- precisa limpar o visual dele → devolve ok+stale.
         return { ok = true, stale = true }
     end
-    if not ChopSession.HasParticipant(session.id, src)
-        and not ValidatePlayerNearVehicle(src, NetworkGetEntityFromNetworkId(netId), maxRaiseDist()) then
+    -- [v1.15 #5] Autorização EXPLÍCITA: só participante da sessão baixa o veículo.
+    -- Proximidade não é bypass — ajuda externa seria regra de gameplay explícita.
+    if not ChopSession.HasParticipant(session.id, src) then
         return { ok = false, err = 'not_participant' }
     end
 

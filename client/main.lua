@@ -1390,8 +1390,9 @@ end
 function VPChopSessionErr(err)
     if err == 'no_item' then return L('jackstand_no_item') end
     if err == 'cooldown' then return L('jackstand_busy') end
+    if err == 'already' or err == 'completed' then return L('jackstand_already_raised') end
     if err == 'class' or err == 'vehicle' or err == 'net' or err == 'range' then return L('jackstand_no_car') end
-    return L('notify_generic_error')  -- player / disabled / session
+    return L('notify_generic_error')  -- player / disabled / session / not_participant
 end
 
 function VPChopJackstandRaiseCar()
@@ -1470,9 +1471,15 @@ function VPChopJackstandLowerCar(veh)
     destroyToolProp()
     if not ok then JackstandBusy = false; return end
 
-    -- [v1.15 arch] Avisa o servidor p/ limpar `raised` na ChopSession. O visual
-    -- local é sempre limpo (mesmo se a sessão já sumiu por entityRemoved/timeout).
-    pcall(lib.callback.await, 'vp_chopshop:session:requestLower', false, NetworkGetNetworkIdFromEntity(veh))
+    -- [v1.15 #6] O servidor é autoridade: só baixa o visual se ok==true OU stale==true
+    -- (sessão já sumiu). ok==false (ex.: não-participante) → mantém o visual + notifica.
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:session:requestLower', false,
+        NetworkGetNetworkIdFromEntity(veh))
+    if not cbOk or not res or (not res.ok and not res.stale) then
+        JackstandBusy = false
+        VPChopNotify(VPChopSessionErr(res and res.err), 'error')
+        return
+    end
 
     doLowerVehicle(veh, data.originalZ)
     for i = 1, #data.props do

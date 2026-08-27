@@ -38,17 +38,34 @@ vehicle._fp = {
 }
 ```
 
-### Invalidação (qualquer uma → sessão morta)
+### Invalidação — fatores SOMADOS (nenhum substitui o outro)
 
 1. **`entityRemoved(ent)`** (server event) → `ChopSession.CleanupVehicle(netId)` **imediato**.
 2. **Recheck de liveness em todo `Get`/`GetByVehicle`** (`vehicleStillValid`):
    - entidade do `netId` deve existir **E**
-   - `GetEntityModel(ent)` deve **igualar** `_fp.model` → se difere, o `netId` foi
-     reciclado noutro veículo → sessão stale → cleanup + retorna `nil`.
-   - se ambos os lados têm `ownedId`, exigir match (mais forte, custo zero).
-3. **Timeout por inatividade** (`SessionTimeoutMs`, default 15 min desde `lastActivity`)
-   → sweeper cancela. Sweeper roda a cada `SweepIntervalMs` (30 s), percorre **só** a
-   tabela de sessões (pequena) — **sem `GetGamePool` / sem polling de entidades**.
+   - `GetEntityModel(ent)` deve **igualar** `_fp.model` → se difere, `netId` reciclado
+     noutro veículo → stale → cleanup + `nil`.
+   - se ambos os lados têm `ownedId`, exigir match.
+   - **marcador server-local `vpChopVsid`** (abaixo) — participa **só** se
+     `_fp.markerSet == true`.
+3. **Timeout por inatividade** (`SessionTimeoutMs`, default 15 min) → sweeper cancela.
+   Sweeper a cada `SweepIntervalMs` (30 s), percorre **só** a tabela de sessões —
+   **sem `GetGamePool` / sem polling de entidades**.
+
+### Marcador server-local `vpChopVsid` (fix #7)
+
+`Entity(ent).state:set('vpChopVsid', vsid, false)` (não replicado) cravado no mint.
+Pega o caso que model+ownedId não pegam: **netId reciclado no MESMO modelo**, veículo
+não-owned, `entityRemoved` perdido.
+
+`_fp.markerSet` só vira `true` com **WRITE + READBACK confirmado**: após o `:set`,
+relemos `Entity(ent).state.vpChopVsid` e exigimos `== vsid`. Se o `:set` lançar, ou
+o valor não ficar legível, ou vier diferente → `markerSet = false` e o marcador
+**não participa** de `vehicleStillValid` (cai no fallback model/ownedId/entityRemoved/
+timeout). **Ausência/indisponibilidade do marcador NUNCA invalida sessões.**
+
+`vpChopVsid` é **REFORÇO de lifecycle/identidade** — **não** é segredo, token de
+autenticação, nem prova anti-cheat isolada.
 
 ### Por que não `netId + plateHash`
 
