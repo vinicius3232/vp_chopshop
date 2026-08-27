@@ -5,6 +5,16 @@ Config.Locale = 'pt'
 
 Config.Debug = false
 
+--- [v1.15 arch] ChopSession — fonte server-authoritative do estado de desmanche.
+--- NESTA FASE só o jackstand consome (raise/lower server-side). A migração do
+--- estado de peças (base/advanced → ChopSession.parts) vem nas próximas PRs.
+Config.ChopSession = {
+    Enable          = true,        -- master switch do módulo
+    Debug           = false,       -- logs de create/state/cleanup (ou Config.Debug)
+    SessionTimeoutMs = 15 * 60 * 1000,  -- sessão inativa é cancelada pelo sweeper
+    SweepIntervalMs  = 30 * 1000,  -- período do sweeper (sem polling de entidades)
+}
+
 --- Distâncias
 Config.InteractDistance = 2.4
 Config.MaxPlaceDistance = 5.0
