@@ -273,17 +273,18 @@ autoritativo do veículo. **INVARIANT: tempo sozinho nunca destrói committed
 state enquanto `vehicleStillValid`; NÃO há TTL destrutivo.** `Cancel` recusa
 sessão com parts. `VPChopClearVehicle` → `Complete` (tombstone permanente).
 
-**PR C — advanced chop → ChopSession.** *Só depois do base.* `AdvState` →
-`session.parts` (com `origin='advanced'`); `AdvMutex` → `LockPart`/`UnlockPart` (pareado).
-Neste ponto base + advanced têm **uma** fonte de verdade.
-⚠️ **CONSTRAINT OBRIGATÓRIA:** `VPChopGetPartCount` conta **todos** os entries de
-`session.parts`. Hoje só há peças base. Quando a PR C mover `AdvState` p/ a mesma
-tabela, `partCount` passará a contar advanced
-**automaticamente** → `discardVehicle` (`MinPartsToDiscard`) muda de comportamento.
-A PR C **deve preservar explicitamente** a semântica atual de `VPChopGetPartCount`
-até a PR D (unified discard) — ex.: metadata mínima por peça (`source='base'|'advanced'`)
-ou `partCount` filtrado. Não implementar no follow-up da PR B; registrado como
-constraint da PR C.
+**PR C — advanced chop → ChopSession.** ✅ **FEITO** (PR #6). `AdvState`/`AdvMutex`
+**REMOVIDOS** (0 ocorrências funcionais). `server/session/advanced_state.lua`
+(`VPChopAdvancedState`) é a fachada; peças advanced têm `origin='advanced'`,
+base `origin='base'`. `MarkPart(id,partKey,src,{origin=…})`, `CountParts(id,origin?)`.
+Mutex → `LockPart`/`UnlockPart` por (sessão, peça). Commit-antes-de-reward + recheck
+pós-lock. `VPChopGetPartCount` = `CountParts(id,'base')` → **BASE-ONLY** (discard
+equivalente ao atual até a PR D). `EnforceRaised=false` continua exigindo
+ChopSession p/ STATE (só pula raised/participant).
+⚠️ **CONSTRAINT (mantida até PR D):** `VPChopGetPartCount` conta SÓ `origin='base'`
+(via `ChopSession.CountParts(id,'base')`). Peças advanced NÃO entram no
+`MinPartsToDiscard` — `discardVehicle` fica equivalente ao comportamento atual.
+A contagem unificada (base+advanced) é **deliberada na PR D**.
 
 **PR D — unified discard.** `discardVehicle` conta `session.parts` (base + advanced).
 Preserva o mutex `DiscardBusy` do P0-4. O fluxo terminal já está correto

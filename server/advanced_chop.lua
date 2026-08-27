@@ -4,14 +4,14 @@
 -- Fase 2 — Portas / Capô / Porta-malas  → requer serra    → 1× car_parts por peça
 -- Fase 3 — Motor                         → requer chave    → 5× car_parts (capô removido primeiro)
 -- Fase 4 — Carcaça                       → requer solda    → recicláveis
+--
+-- [v1.15 PR-C] AdvState e AdvMutex REMOVIDOS. Estado de peça e mutex agora vivem
+-- na ChopSession (via server/session/advanced_state.lua). Base + advanced
+-- compartilham UMA fonte server-authoritative: ChopSession.parts.
+-- Gameplay/economia/rewards/progress bars: INALTERADOS.
 -- ============================================================
 
--- ─── Estado por netId ────────────────────────────────────────────────────────
--- [netId] = { door_dside_f=true, bonnet=true, adv_engine=true, adv_carcass=true, ... }
-local AdvState   = {}
-local AdvMutex   = {} -- [netId:key] = true  (mutex por operação)
-local AdvCooldown = {} -- [src] = GetGameTimer() — rate-limit por jogador
-
+local AdvCooldown   = {} -- [src] = GetGameTimer() — rate-limit por jogador (PRESERVADO)
 local ADV_COOLDOWN_MS = 3000  -- mínimo entre ações de desmanche avançado
 
 local function advOnCooldown(src)
@@ -28,48 +28,13 @@ AddEventHandler('playerDropped', function()
     AdvCooldown[src] = nil
 end)
 
--- [v1.15 P1-1] O gate de autoridade do jackstand vive em server/session/adv_gate.lua
--- (VPChopAdvRequireRaisedSession) — carregado antes deste arquivo e testável em
--- isolamento. NÃO migra AdvState/AdvMutex/rewards — só SOMA o gate.
-local advRequireRaisedSession = VPChopAdvRequireRaisedSession
+-- [v1.15 P1-1] Gate de autoridade (server/session/adv_gate.lua) — devolve o
+-- sessionId da ChopSession (ou nil no modo compat EnforceRaised=false, resolvido
+-- depois via ensureSession).
+local advGate = VPChopAdvRequireRaisedSession
 
-local function getState(netId)
-    if not AdvState[netId] then AdvState[netId] = {} end
-    return AdvState[netId]
-end
-
-local function isChopped(netId, key)
-    local st = AdvState[netId]
-    return st and st[key] == true
-end
-
-local function markChopped(netId, key)
-    getState(netId)[key] = true
-end
-
--- Mutex leve: evita race condition em acções simultâneas
-local function tryLock(netId, key)
-    local k = tostring(netId) .. ':' .. key
-    if AdvMutex[k] then return false end
-    AdvMutex[k] = true
-    return true, k
-end
-
-local function unlock(lockKey)
-    AdvMutex[lockKey] = nil
-end
-
--- Limpar ao destruir entidade
-AddEventHandler('entityRemoved', function(entity)
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-    if netId and netId ~= 0 then
-        AdvState[netId] = nil
-        local prefix = tostring(netId) .. ':'
-        for k in pairs(AdvMutex) do
-            if k:sub(1, #prefix) == prefix then AdvMutex[k] = nil end
-        end
-    end
-end)
+-- [v1.15 PR-C] entityRemoved de AdvState/AdvMutex REMOVIDO — o lifecycle da
+-- entidade é da ChopSession (chop_session.lua tem seu entityRemoved).
 
 -- ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -79,22 +44,15 @@ local function getVehCoords(netId)
     return GetEntityCoords(veh)
 end
 
---- Durabilidade da ferramenta
 local function consumeSaw(src)
     return VPChopConsumeTool(src, false)
 end
 
---- [AUDIT-FIX C2] As fases 2/3/4 não deixavam vestígio forense nem armavam a marca de pneu
---- (o desmanche avançado por jackstand passava 100% limpo). Este helper espelha o MESMO padrão
---- da Fase 1 (server/main.lua ~378) e dos hooks de placa (server/plates.lua): planta evidência
---- com a placa REAL resolvida e arma a janela de marca de pneu (client + server-side via
---- VPChopArmTyreWindow do server/tyremarks.lua, C2+H1).
---- Assinatura confirmada em bridge/evidence.lua: VPChopLeaveEvidence(src, coords, actionKey, plate?).
+--- [AUDIT-FIX C2] Vestígio forense + arma marca de pneu (Fases 2/3/4). Inalterado.
 ---@param src number
 ---@param netId number
 ---@param vehCoords vector3
 local function leaveAdvancedTrace(src, netId, vehCoords)
-    -- Resolver a placa REAL pelo veículo já validado (trust-no-client; mesmo padrão de heat.lua).
     local veh = NetworkGetEntityFromNetworkId(netId)
     local realPlate = nil
     if veh and veh ~= 0 and DoesEntityExist(veh) then
@@ -103,16 +61,18 @@ local function leaveAdvancedTrace(src, netId, vehCoords)
             realPlate = VPChopMDT.GetRealPlate(visible)
         end
     end
-
-    -- Vestígio forense no local do veículo (digital + DNA vinculados ao criminoso).
     VPChopLeaveEvidence(src, vehCoords, 'chop_part', realPlate)
-
-    -- Armar a janela de marca de pneu (client + gate server-side anti-cheat).
     if Config.TyreMarks and Config.TyreMarks.Enable then
         local armMs = (Config.TyreMarks.ArmWindowSeconds or 45) * 1000
         VPChopArmTyreWindow(src, armMs)  -- [AUDIT-FIX H1]
         TriggerClientEvent('vp_chopshop:armTyreMark', src, armMs)
     end
+end
+
+--- Resolve/cria o sessionId após validar entidade/distância (nunca do payload cru).
+---@return string|nil
+local function resolveSession(sessionId, netId, src)
+    return sessionId or VPChopAdvancedState.ensureSession(netId, src)
 end
 
 -- ─── Fase 2: Portas / Capô / Porta-malas ─────────────────────────────────────
@@ -125,44 +85,50 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
     if advOnCooldown(src) then return { ok = false, err = 'processing' } end
 
-    -- Validar tipos de entrada (rejeita payloads malformados de lua executor)
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'net' } end
     if type(partKey) ~= 'string' or #partKey > 32 or #partKey < 3 then
         return { ok = false, err = 'part' }
     end
 
-    -- [v1.15 P1-1] Sessão ativa + participante + veículo levantado (antes das
-    -- validações legacy). Não substitui nenhuma delas.
-    local okS, errS, advSessionId = advRequireRaisedSession(src, netId)
+    -- [v1.15 P1-1] Gate de autoridade (read-only). sessionId pode vir nil no modo compat.
+    local okS, errS, sessionId = advGate(src, netId)
     if not okS then return { ok = false, err = errS } end
 
-    -- Gate: parte já desmontada?
-    if isChopped(netId, partKey) then return { ok = false, err = 'done' } end
-
-    -- Parte válida?
     local partDef = ChopParts[partKey]
     if not partDef or partDef.kind ~= 'door' then return { ok = false, err = 'part' } end
 
-    -- Veículo e distância
     local vehCoords = getVehCoords(netId)
     if not vehCoords then return { ok = false, err = 'vehicle' } end
     if not ValidatePlayerNearPoint(src, vehCoords, 6.0) then return { ok = false, err = 'distance' } end
 
-    -- Mutex
-    local locked, lockKey = tryLock(netId, partKey)
+    -- Só AGORA (entidade + distância válidas) resolvemos/criamos a ChopSession.
+    sessionId = resolveSession(sessionId, netId, src)
+    if not sessionId then return { ok = false, err = 'session' } end
+
+    if VPChopAdvancedState.wasRemoved(sessionId, partKey) then return { ok = false, err = 'done' } end
+
+    -- Mutex por (sessão, peça)
+    local locked, token = VPChopAdvancedState.lockPart(sessionId, partKey)
     if not locked then return { ok = false, err = 'processing' } end
+    local function done(res) VPChopAdvancedState.unlockPart(sessionId, partKey, token); return res end
+
+    -- [PR-C] RECHECK após o lock (defense-in-depth).
+    if VPChopAdvancedState.wasRemoved(sessionId, partKey) then return done({ ok = false, err = 'done' }) end
 
     -- Verificar e consumir serra
-    if not consumeSaw(src) then
-        unlock(lockKey)
-        return { ok = false, err = 'no_saw' }
-    end
+    if not consumeSaw(src) then return done({ ok = false, err = 'no_saw' }) end
 
-    -- [FIX H-3] Verificar retorno de InvAdd — inventário cheio: peça marcada mas notificar jogador
+    -- [PR-C] COMMIT ANTES DE REWARD: nenhuma recompensa sem committed part state.
+    local mOk, mDup = VPChopAdvancedState.markPart(sessionId, src, partKey)
+    if not mOk then return done({ ok = false, err = 'session' }) end
+    if mDup then return done({ ok = false, err = 'done' }) end
+    advMarkCooldown(src)
+
+    -- Recompensa (após commit). Política de inventário-cheio INALTERADA: peça
+    -- permanece REMOVED, warning, sem rollback.
     local reward = Config.AdvancedChop.DoorReward or { item = 'car_parts', amount = 1 }
     if reward.item and (reward.amount or 0) > 0 then
-        -- [SERIAL] car_parts nasce ROUBADA com série + modelo de origem (mesma série por carro).
         local ok = (reward.item == 'car_parts')
             and VPChopAddStolenCarParts(src, netId, reward.amount)
             or  InvAdd(src, reward.item, reward.amount)
@@ -171,18 +137,10 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
         end
     end
 
-    markChopped(netId, partKey)
-    if advSessionId then ChopSession.Touch(advSessionId) end  -- [v1.15 P1-1] só no sucesso
-    advMarkCooldown(src)
-    unlock(lockKey)
-
-    -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 2). `vehCoords` validado acima.
     leaveAdvancedTrace(src, netId, vehCoords)
-
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, partKey, 2)
 
-    -- [H4 FIX] Filtrar breakDoor por proximidade (era broadcast -1 para todos os clientes).
-    -- Mesmo padrão corrigido no breakPart (L3 fix). Só clientes perto da entidade recebem.
+    -- [H4 FIX] breakDoor filtrado por proximidade.
     local ent = NetworkGetEntityFromNetworkId(netId)
     local bpos = (ent and ent ~= 0 and DoesEntityExist(ent)) and GetEntityCoords(ent) or nil
     for _, pid in ipairs(GetPlayers()) do
@@ -197,7 +155,7 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
         end
     end
 
-    return { ok = true }
+    return done({ ok = true })
 end)
 
 -- ─── Fase 3: Motor ────────────────────────────────────────────────────────────
@@ -213,40 +171,37 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'net' } end
 
-    -- [v1.15 P1-1] Sessão ativa + participante + veículo levantado.
-    local okS, errS, advSessionId = advRequireRaisedSession(src, netId)
+    local okS, errS, sessionId = advGate(src, netId)
     if not okS then return { ok = false, err = errS } end
 
-    -- Capô deve estar removido
-    if not isChopped(netId, 'bonnet') then return { ok = false, err = 'hood_first' } end
-
-    -- Já desmontado?
-    if isChopped(netId, 'adv_engine') then return { ok = false, err = 'done' } end
-
-    -- Veículo e distância
     local vehCoords = getVehCoords(netId)
     if not vehCoords then return { ok = false, err = 'vehicle' } end
     if not ValidatePlayerNearPoint(src, vehCoords, 6.0) then return { ok = false, err = 'distance' } end
 
-    -- Verificar chave de fenda
-    if not VPChopHasTool(src, true) then
-        return { ok = false, err = 'no_screwdriver' }
-    end
+    sessionId = resolveSession(sessionId, netId, src)
+    if not sessionId then return { ok = false, err = 'session' } end
 
-    -- Mutex
-    local locked, lockKey = tryLock(netId, 'adv_engine')
+    -- Dependência: capô removido (autoridade = ChopSession, nunca estado client).
+    if not VPChopAdvancedState.wasRemoved(sessionId, 'bonnet') then return { ok = false, err = 'hood_first' } end
+    if VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'done' } end
+
+    -- Chave de fenda (verificar antes do lock; consumir depois)
+    if not VPChopHasTool(src, true) then return { ok = false, err = 'no_screwdriver' } end
+
+    local locked, token = VPChopAdvancedState.lockPart(sessionId, 'adv_engine')
     if not locked then return { ok = false, err = 'processing' } end
+    local function done(res) VPChopAdvancedState.unlockPart(sessionId, 'adv_engine', token); return res end
 
-    -- Consumir chave de fenda (verificado acima; consumido agora no lock)
-    if not VPChopConsumeTool(src, true) then
-        unlock(lockKey)
-        return { ok = false, err = 'no_screwdriver' }
-    end
+    if VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return done({ ok = false, err = 'done' }) end
+    if not VPChopConsumeTool(src, true) then return done({ ok = false, err = 'no_screwdriver' }) end
 
-    -- [FIX H-3] Verificar retorno de InvAdd — inventário cheio: motor marcado mas notificar jogador
+    local mOk, mDup = VPChopAdvancedState.markPart(sessionId, src, 'adv_engine')
+    if not mOk then return done({ ok = false, err = 'session' }) end
+    if mDup then return done({ ok = false, err = 'done' }) end
+    advMarkCooldown(src)
+
     local reward = Config.AdvancedChop.EngineReward or { item = 'car_parts', amount = 5 }
     if reward.item and (reward.amount or 0) > 0 then
-        -- [SERIAL] As 5 car_parts do motor herdam a MESMA série/modelo do carro (mesmo netId).
         local ok = (reward.item == 'car_parts')
             and VPChopAddStolenCarParts(src, netId, reward.amount)
             or  InvAdd(src, reward.item, reward.amount)
@@ -255,14 +210,9 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
         end
     end
 
-    markChopped(netId, 'adv_engine')
-    if advSessionId then ChopSession.Touch(advSessionId) end  -- [v1.15 P1-1] só no sucesso
-    advMarkCooldown(src)
-    unlock(lockKey)
-    -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 3). `vehCoords` validado acima.
     leaveAdvancedTrace(src, netId, vehCoords)
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_engine', 3)
-    return { ok = true }
+    return done({ ok = true })
 end)
 
 -- ─── Fase 4: Carcaça ──────────────────────────────────────────────────────────
@@ -278,22 +228,20 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'net' } end
 
-    -- [v1.15 P1-1] Sessão ativa + participante + veículo levantado.
-    local okS, errS, advSessionId = advRequireRaisedSession(src, netId)
+    local okS, errS, sessionId = advGate(src, netId)
     if not okS then return { ok = false, err = errS } end
 
-    -- Motor deve estar desmontado
-    if not isChopped(netId, 'adv_engine') then return { ok = false, err = 'engine_first' } end
-
-    -- Já cortado?
-    if isChopped(netId, 'adv_carcass') then return { ok = false, err = 'done' } end
-
-    -- Veículo e distância
     local vehCoords = getVehCoords(netId)
     if not vehCoords then return { ok = false, err = 'vehicle' } end
     if not ValidatePlayerNearPoint(src, vehCoords, 8.0) then return { ok = false, err = 'distance' } end
 
-    -- Verificar soldadora perto (server-side — trust no client)
+    sessionId = resolveSession(sessionId, netId, src)
+    if not sessionId then return { ok = false, err = 'session' } end
+
+    if not VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'engine_first' } end
+    if VPChopAdvancedState.wasRemoved(sessionId, 'adv_carcass') then return { ok = false, err = 'done' } end
+
+    -- Soldadora perto (server-side)
     local welderRadius = tonumber(Config.AdvancedChop.WelderRadius) or 8.0
     local hasWelder = false
     for _, w in ipairs(ServerWelders or {}) do
@@ -301,23 +249,26 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
     end
     if not hasWelder then return { ok = false, err = 'no_welder_adv' } end
 
-    -- Mutex
-    local locked, lockKey = tryLock(netId, 'adv_carcass')
+    local locked, token = VPChopAdvancedState.lockPart(sessionId, 'adv_carcass')
     if not locked then return { ok = false, err = 'processing' } end
+    local function done(res) VPChopAdvancedState.unlockPart(sessionId, 'adv_carcass', token); return res end
 
-    -- [FIX H-3] Dar recompensas recicláveis com verificação de retorno
+    if VPChopAdvancedState.wasRemoved(sessionId, 'adv_carcass') then return done({ ok = false, err = 'done' }) end
+
+    local mOk, mDup = VPChopAdvancedState.markPart(sessionId, src, 'adv_carcass')
+    if not mOk then return done({ ok = false, err = 'session' }) end
+    if mDup then return done({ ok = false, err = 'done' }) end
+    advMarkCooldown(src)
+
     local anyFull = false
     for _, reward in ipairs(Config.AdvancedChop.CarcassRewards or {}) do
         if reward.item and (reward.amount or 0) > 0 then
             local chance = reward.chance or 1.0
             if math.random() <= chance then
-                -- [SERIAL] Se a carcaça também der car_parts, herda a série/modelo do carro.
                 local ok = (reward.item == 'car_parts')
                     and VPChopAddStolenCarParts(src, netId, reward.amount)
                     or  InvAdd(src, reward.item, reward.amount)
-                if not ok then
-                    anyFull = true
-                end
+                if not ok then anyFull = true end
             end
         end
     end
@@ -325,12 +276,7 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
         TriggerClientEvent('ox_lib:notify', src, { type='warning', description='Inventário cheio — alguns itens de carcaça perdidos.' })
     end
 
-    markChopped(netId, 'adv_carcass')
-    if advSessionId then ChopSession.Touch(advSessionId) end  -- [v1.15 P1-1] só no sucesso
-    advMarkCooldown(src)
-    unlock(lockKey)
-    -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 4). `vehCoords` validado acima.
     leaveAdvancedTrace(src, netId, vehCoords)
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_carcass', 4)
-    return { ok = true }
+    return done({ ok = true })
 end)

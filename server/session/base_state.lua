@@ -4,8 +4,9 @@
 --  ChopSession. Antes: server/chop.lua guardava `ChoppedByNetId[netId][partKey]`.
 --  Agora a fonte de verdade é `ChopSession.parts`; server/chop.lua delega aqui.
 --
---  Só o BASE CHOP usa isto. AdvState (advanced_chop.lua) NÃO migrado nesta PR.
---  Não espalha acesso a `session.parts` — todo o toque na ChopSession vive aqui.
+--  Só o BASE CHOP usa isto (peças origin='base'). O advanced tem sua própria
+--  fachada: server/session/advanced_state.lua (PR-C). Não espalha acesso a
+--  `session.parts` — todo o toque na ChopSession vive nas fachadas.
 --
 --  Participação: NÃO adiciona o chamador como participante. Participação nasce
 --  só por quem INICIA o chop (ChopSession.Create adiciona o criador) ou por
@@ -42,19 +43,19 @@ function VPChopBaseState.markPart(src, netId, partKey)
         if not created then return false, false, err or 'session' end
         s = created
     end
-    local ok, dup = ChopSession.MarkPart(s.id, partKey, src)
+    local ok, dup = ChopSession.MarkPart(s.id, partKey, src, { origin = 'base' })
     return ok, dup
 end
 
 --- @param netId integer
---- @return integer   -- nº de peças BASE removidas (só as que estão em session.parts;
----                       AdvState não conta — comportamento equivalente ao atual)
+--- @return integer   -- nº de peças da FASE 1 (origin='base') removidas.
+---   [PR-C] Filtra por origin: agora que o advanced usa a mesma
+---   session.parts, `discardVehicle` continua contando SÓ base — igual ao atual.
+---   A contagem unificada (base+advanced) é deliberada na PR D.
 function VPChopBaseState.partCount(netId)
     local s = ChopSession.GetByVehicle(netId)
     if not s then return 0 end
-    local c = 0
-    for _ in pairs(s.parts) do c = c + 1 end
-    return c
+    return ChopSession.CountParts(s.id, 'base')
 end
 
 --- Conclusão do discard (ÚNICO call site: server/main.lua discardVehicle).

@@ -108,7 +108,7 @@ CreateThread(function()
     local ok8 = VPChopServerTryPart(2, 10, 'wheel_lf')
     check('B8 novo chop cunha sessão nova (id diferente)', ok8 == true and ChopSession.GetByVehicle(10).id ~= oldId)
 
-    -- B12) base part NÃO contamina estado avançado (AdvState continua separado)
+    -- B12) base part NÃO contamina estado avançado (separado por origin)
     fresh(); spawn(10, 111)
     VPChopServerTryPart(1, 10, 'bonnet')             -- (Config.AdvancedChop nil no harness → base processa)
     local sp = sessParts(10)

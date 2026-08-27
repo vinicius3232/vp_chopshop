@@ -5,7 +5,7 @@
 --
 --  Testa a COMPOSIÇÃO (sessão ativa + raised + participante + kill-switch) sobre
 --  a ChopSession real. Os callbacks adv:* completos (lib.callback + tools +
---  AdvMutex) ficam no TEST_PLAN de servidor.
+--  rewards) ficam no TEST_PLAN de servidor.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 if (GetConvarInt and GetConvarInt('vp_chopshop_selftest', 0) or 0) ~= 1 then return end

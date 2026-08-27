@@ -9,7 +9,8 @@
 --  AGORA: exige ChopSession ATIVA para o veículo + `raised == true` + jogador
 --  REGISTRADO como participante da sessão.
 --
---  Escopo desta PR: SÓ este gate. NÃO migra AdvState/AdvMutex/rewards/tools.
+--  Este módulo é SÓ o gate de autoridade. O estado de peça / mutex do advanced
+--  vive em server/session/advanced_state.lua (PR-C).
 --  Participação nasce só pelo fluxo legítimo (vp_chopshop:session:requestRaise
 --  — inclusive um 2º jogador que peça raise num carro já levantado vira
 --  participante). Chamar adv:* NUNCA adiciona ninguém à sessão.
@@ -23,12 +24,22 @@
 --- @param netId integer
 --- @return boolean ok, string|nil err, string|nil sessionId
 function VPChopAdvRequireRaisedSession(src, netId)
-    -- Kill-switch de compatibilidade — comportamento legacy (sem gate de sessão).
-    if Config.ChopSession and Config.ChopSession.EnforceRaised == false then
-        return true, nil, nil
+    -- [v1.15 PR-C] Master switch cedo: com o módulo desligado o callback nem chega
+    -- a consumir ferramenta (consumeSaw/drill rodam DEPOIS do gate).
+    if Config.ChopSession and Config.ChopSession.Enable == false then
+        return false, 'disabled'
     end
-    -- ACTIVE lookup: sessão terminal (CANCELLED/COMPLETED) → nil → not_raised.
+    -- READ-ONLY: nunca cria sessão (payload cru). ACTIVE lookup (terminal → nil).
     local session = ChopSession.GetByVehicle(netId)
+
+    -- [v1.15 PR-C] EnforceRaised=false = compatibilidade: pula APENAS o requisito
+    -- de `raised` + participante/jackstand. A ChopSession CONTINUA sendo a fonte
+    -- obrigatória de STATE — o callback resolve/cria a sessão (via
+    -- VPChopAdvancedState.ensureSession) DEPOIS de validar entidade/distância.
+    if Config.ChopSession and Config.ChopSession.EnforceRaised == false then
+        return true, nil, session and session.id or nil
+    end
+
     if not session or session.raised ~= true then
         return false, 'not_raised'
     end
