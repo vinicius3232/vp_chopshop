@@ -22,6 +22,8 @@ local _benchCraftRateLimit  = {}  ---@type table<number, number>
 -- o callback 'vp_chopshop:deliverPart' deixou de existir (recompensa agora é imediata).
 local _alarmDisarmRateLimit = {}  ---@type table<number, number>
 local ALARM_DISARM_MIN_INTERVAL_MS = 2000
+-- [v1.15 P0-4] Mutex de discard por netId (previne double-payout em double-call concorrente).
+local DiscardBusy = {} ---@type table<integer, boolean>  netId → true durante o discard
 
 local function benchById(id)
     return ServerBenchesById[id]
@@ -138,24 +140,11 @@ AddEventHandler('playerDropped', function()
     end
 end)
 
--- Tyre count autoritativo no servidor: cliente envia evento, servidor valida e
--- incrementa. State bag espelha ServerTyreCounts para UI do cliente.
-RegisterNetEvent('vp_chopshop:server:addTyreToTruck', function(netId)
-    local src = source
-    if not IsValidSource(src) then return end
-    netId = tonumber(netId)
-    if not netId then return end
-    local truck = NetworkGetEntityFromNetworkId(netId)
-    if truck == 0 or not DoesEntityExist(truck) then return end
-    if not ValidatePlayerNearVehicle(src, truck, 8.0) then return end
-    local max = tonumber((Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck)) or 4
-    local cur = ServerTyreCounts[netId] or 0
-    if cur >= max then return end
-    -- [C1 FIX] Write to ServerTyreCounts (the source of truth for sellTyres payout).
-    -- Both client load paths (jackstand carry and fence prop) now share one counter.
-    ServerTyreCounts[netId] = cur + 1
-    Entity(truck).state:set('chopTyreCount', cur + 1, true)
-end)
+-- [v1.15 P0-1] Handler 'vp_chopshop:server:addTyreToTruck' REMOVIDO.
+-- Era uma 2ª implementação concorrente da carga de pneu no truck (a outra em
+-- server/fence.lua) e incrementava ServerTyreCounts sem lastro em item/crédito.
+-- Unificado em 'vp_chopshop:tyre:loadToTruck' (server/fence.lua), que consome um
+-- crédito PlayerTyreStock ganho ao remover uma roda legítima via chopPart.
 
 --- Cancela o alarme de um veículo quando o jogador o desarma manualmente.
 --- Valida server-side que o jogador possui o item exigido (trust-no-client).
@@ -476,16 +465,25 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     netId = tonumber(netId)
     if not netId then return { ok = false, err = 'args' } end
 
+    -- [v1.15 P0-4] Mutex por netId (não por source): o exploit é double-payout no MESMO
+    -- veículo — dois callbacks (mesmo jogador OU dois jogadores) passavam o gate de
+    -- partCount e ambos pagavam antes de VPChopClearVehicle. O handler abaixo não tem
+    -- yield, então sempre chama releaseDiscard; o entityRemoved abaixo limpa qualquer
+    -- entrada órfã (defesa contra edições futuras que introduzam yield).
+    if DiscardBusy[netId] then return { ok = false, err = 'processing' } end
+    DiscardBusy[netId] = true
+    local function releaseDiscard(res) DiscardBusy[netId] = nil; return res end
+
     local veh = NetworkGetEntityFromNetworkId(netId)
-    if veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
+    if veh == 0 or not DoesEntityExist(veh) then return releaseDiscard({ ok = false, err = 'vehicle' }) end
 
     local maxDist = (Config.VehicleNearLiftRadius or 5.0) + 2.0
-    if not ValidatePlayerNearVehicle(source, veh, maxDist) then return { ok = false, err = 'distance' } end
+    if not ValidatePlayerNearVehicle(source, veh, maxDist) then return releaseDiscard({ ok = false, err = 'distance' }) end
 
     local partCount = VPChopGetPartCount(netId)
     local minParts  = math.floor(tonumber((Config.Discard or {}).MinPartsToDiscard) or 4)
     if partCount < minParts then
-        return { ok = false, err = 'parts_min', count = partCount, min = minParts }
+        return releaseDiscard({ ok = false, err = 'parts_min', count = partCount, min = minParts })
     end
 
     -- Calcular payout
@@ -514,13 +512,24 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     local maxPayout = math.floor((tonumber((Config.Discard or {}).DefaultPayout) or 1500) * 10)
     payout = math.min(payout, maxPayout)
 
-    BridgeAddCash(source, payout, 'discard_payout')  -- [L3 FIX] reason adicionado para transaction logging
+    -- [v1.15 P0-4] Ordem transacional: pagar PRIMEIRO. Se o pagamento falhar, o veículo
+    -- permanece e o jogador pode tentar de novo (nada é perdido). Só após confirmar o
+    -- pagamento é que limpamos o estado e deletamos a entidade (passo terminal).
+    if not BridgeAddCash(source, payout, 'discard_payout') then
+        return releaseDiscard({ ok = false, err = 'payment' })
+    end
     VPChopClearVehicle(netId)
     AlarmActive[netId] = nil  -- veículo descartado: alarme encerrado
     TriggerEvent(VPChopEvt.CAR_DISCARDED, source, netId, plate, payout)
-    DeleteEntity(veh)
+    if DoesEntityExist(veh) then DeleteEntity(veh) end
 
-    return { ok = true, payout = payout, bonus = appliedBonus }
+    return releaseDiscard({ ok = true, payout = payout, bonus = appliedBonus })
+end)
+
+-- [v1.15 P0-4] Limpa mutex de discard órfão se a entidade sumir por outra via.
+AddEventHandler('entityRemoved', function(entity)
+    local nid = NetworkGetNetworkIdFromEntity(entity)
+    if nid and nid ~= 0 then DiscardBusy[nid] = nil end
 end)
 
 -- [AUDIT M2] Callback 'vp_chopshop:maybeAmbush' REMOVIDO. A emboscada agora é disparada

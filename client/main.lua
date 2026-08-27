@@ -1476,6 +1476,15 @@ end)
 
 -- ─── Tyre carry: keybind [G] para abrir menu de opções ──────────────────────
 
+--- [v1.15 #1] Mapeia o err do callback loadToTruck para uma mensagem localizada
+--- (usa apenas chaves de locale já existentes — sem tocar shared/locale.lua).
+function VPChopTyreLoadErr(err)
+    if err == 'truck_full' then return L('tyre_truck_full') end
+    if err == 'no_truck' or err == 'range' or err == 'bad_truck' then return L('tyre_no_truck_nearby') end
+    if err == 'cooldown' or err == 'processing' or err == 'truck_busy' then return L('err_cooldown') end
+    return L('notify_generic_error')  -- no_stock / net / disabled / invalid
+end
+
 --- Coloca o prop da mão no chão: desanexa, raycast para Z correto, congela.
 --- Adiciona target ox_target no prop resultante para carregar no truck.
 local function placeTyreHandPropOnGround()
@@ -1511,15 +1520,19 @@ local function placeTyreHandPropOnGround()
             distance    = 2.0,
             canInteract = function() return VPChopIsTruckNearby() end,  -- [AUDIT A1] cache 500ms (era GetGamePool por frame)
             onSelect    = function()
-                local t   = VPChopFindNearestTruck(5.0)
+                local t = VPChopFindNearestTruck(5.0)
                 if not t then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
-                local cur = math.floor(tonumber(Entity(t).state.chopTyreCount) or 0)
-                if cur >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
-                -- [H3 FIX] Servidor valida e incrementa a contagem (state bag set via servidor).
-                TriggerServerEvent('vp_chopshop:server:addTyreToTruck', NetworkGetNetworkIdFromEntity(t))
+                -- [v1.15 #1] Request/response: só remove o prop e notifica sucesso se o
+                -- servidor confirmou (ok==true). count vem do servidor, nunca de cur+1.
+                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
+                    NetworkGetNetworkIdFromEntity(t))
+                if not cbOk or not res or not res.ok then
+                    VPChopNotify(VPChopTyreLoadErr(res and res.err), 'error')
+                    return
+                end
                 exports.ox_target:removeLocalEntity(handProp)
                 DeleteEntity(handProp)
-                VPChopNotify(L('tyre_stored_fmt', cur + 1, max), 'success')
+                VPChopNotify(L('tyre_stored_fmt', res.count, res.max or max), 'success')
             end,
         },
     })
@@ -1553,14 +1566,17 @@ RegisterCommand('+vp_tyre_options', function()
             description = cur >= max and L('tyre_truck_full') or nil,
             onSelect    = function()
                 if not VPChopCarryingPart or not VPChopCarryingPart.isTyre then return end
-                local t2  = VPChopFindNearestTruck(5.0)
+                local t2 = VPChopFindNearestTruck(5.0)
                 if not t2 then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
-                local c2  = math.floor(tonumber(Entity(t2).state.chopTyreCount) or 0)
-                if c2 >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
-                -- [H3 FIX] Servidor valida e incrementa a contagem (state bag set via servidor).
-                TriggerServerEvent('vp_chopshop:server:addTyreToTruck', NetworkGetNetworkIdFromEntity(t2))
+                -- [v1.15 #1] Request/response: encerra o carry só se o servidor confirmou.
+                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
+                    NetworkGetNetworkIdFromEntity(t2))
+                if not cbOk or not res or not res.ok then
+                    VPChopNotify(VPChopTyreLoadErr(res and res.err), 'error')
+                    return
+                end
                 VPChopDropCarryPart()
-                VPChopNotify(L('tyre_stored_fmt', c2 + 1, max), 'success')
+                VPChopNotify(L('tyre_stored_fmt', res.count, res.max or max), 'success')
             end,
         }
     end
