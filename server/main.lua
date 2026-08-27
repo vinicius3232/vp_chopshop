@@ -138,24 +138,11 @@ AddEventHandler('playerDropped', function()
     end
 end)
 
--- Tyre count autoritativo no servidor: cliente envia evento, servidor valida e
--- incrementa. State bag espelha ServerTyreCounts para UI do cliente.
-RegisterNetEvent('vp_chopshop:server:addTyreToTruck', function(netId)
-    local src = source
-    if not IsValidSource(src) then return end
-    netId = tonumber(netId)
-    if not netId then return end
-    local truck = NetworkGetEntityFromNetworkId(netId)
-    if truck == 0 or not DoesEntityExist(truck) then return end
-    if not ValidatePlayerNearVehicle(src, truck, 8.0) then return end
-    local max = tonumber((Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck)) or 4
-    local cur = ServerTyreCounts[netId] or 0
-    if cur >= max then return end
-    -- [C1 FIX] Write to ServerTyreCounts (the source of truth for sellTyres payout).
-    -- Both client load paths (jackstand carry and fence prop) now share one counter.
-    ServerTyreCounts[netId] = cur + 1
-    Entity(truck).state:set('chopTyreCount', cur + 1, true)
-end)
+-- [v1.15 P0-1] Handler 'vp_chopshop:server:addTyreToTruck' REMOVIDO.
+-- Era uma 2ª implementação concorrente da carga de pneu no truck (a outra em
+-- server/fence.lua) e incrementava ServerTyreCounts sem lastro em item/crédito.
+-- Unificado em 'vp_chopshop:tyre:loadToTruck' (server/fence.lua), que consome um
+-- crédito PlayerTyreStock ganho ao remover uma roda legítima via chopPart.
 
 --- Cancela o alarme de um veículo quando o jogador o desarma manualmente.
 --- Valida server-side que o jogador possui o item exigido (trust-no-client).

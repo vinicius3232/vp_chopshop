@@ -426,6 +426,11 @@ function deliverCar()
 end
 
 -- ─── Props de pneu no chão ────────────────────────────────────────────────────
+-- [v1.15] NOTA: o bloco abaixo (VPChopSpawnTyreProp / VPChopPickUpTyre / VPChopDropTyre /
+-- VPChopLoadTyreInTruck / VPChopLoadTyreInTruckFromCarry) é CÓDIGO MORTO — sem call site
+-- externo. O fluxo vivo de pneu→truck está em client/main.lua (VPChopCarryingPart.isTyre
+-- → 'vp_chopshop:tyre:loadToTruck'). Marcado para remoção num commit 'chore:' separado;
+-- os TriggerServerEvent aqui foram repontados só para não referenciar evento inexistente.
 
 --- Spawna prop de pneu no chão na posição indicada.
 ---@param position vector3
@@ -581,7 +586,7 @@ function VPChopLoadTyreInTruck(propHandle)
     -- [H1 FIX] Notificar servidor para incrementar o contador server-side.
     -- O state bag (false = sem broadcast para outros clientes) é mantido apenas para UI local.
     -- [BUG FIX] Usava 'truckNetId' (nil neste scope) — corrigido para converter o handle local.
-    TriggerServerEvent('vp_chopshop:tyre:truckLoad', NetworkGetNetworkIdFromEntity(truck))
+    TriggerServerEvent('vp_chopshop:tyre:loadToTruck', NetworkGetNetworkIdFromEntity(truck))
     Entity(truck).state:set('chopTyreCount', cur + 1, false)
     lib.notify({ description=L('fence_tyre_loaded_fmt', cur + 1, max), type='success', duration=2500 })
 end
@@ -616,7 +621,7 @@ function VPChopLoadTyreInTruckFromCarry(truck)
     if DoesEntityExist(prop) then DeleteObject(prop) end
 
     -- [H1 FIX] Mesmo padrão: servidor contabiliza, state bag é apenas UI local (false).
-    TriggerServerEvent('vp_chopshop:tyre:truckLoad', NetworkGetNetworkIdFromEntity(truck))
+    TriggerServerEvent('vp_chopshop:tyre:loadToTruck', NetworkGetNetworkIdFromEntity(truck))
     Entity(truck).state:set('chopTyreCount', cur + 1, false)
     lib.notify({ description=L('fence_tyre_loaded_fmt', cur + 1, max), type='success', duration=2500 })
 end

@@ -1516,7 +1516,7 @@ local function placeTyreHandPropOnGround()
                 local cur = math.floor(tonumber(Entity(t).state.chopTyreCount) or 0)
                 if cur >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
                 -- [H3 FIX] Servidor valida e incrementa a contagem (state bag set via servidor).
-                TriggerServerEvent('vp_chopshop:server:addTyreToTruck', NetworkGetNetworkIdFromEntity(t))
+                TriggerServerEvent('vp_chopshop:tyre:loadToTruck', NetworkGetNetworkIdFromEntity(t))
                 exports.ox_target:removeLocalEntity(handProp)
                 DeleteEntity(handProp)
                 VPChopNotify(L('tyre_stored_fmt', cur + 1, max), 'success')
@@ -1558,7 +1558,7 @@ RegisterCommand('+vp_tyre_options', function()
                 local c2  = math.floor(tonumber(Entity(t2).state.chopTyreCount) or 0)
                 if c2 >= max then VPChopNotify(L('tyre_truck_full'), 'error'); return end
                 -- [H3 FIX] Servidor valida e incrementa a contagem (state bag set via servidor).
-                TriggerServerEvent('vp_chopshop:server:addTyreToTruck', NetworkGetNetworkIdFromEntity(t2))
+                TriggerServerEvent('vp_chopshop:tyre:loadToTruck', NetworkGetNetworkIdFromEntity(t2))
                 VPChopDropCarryPart()
                 VPChopNotify(L('tyre_stored_fmt', c2 + 1, max), 'success')
             end,
