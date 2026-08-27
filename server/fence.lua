@@ -475,36 +475,56 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     local nightM   = getNightBonusMultiplier()
     local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult * nightM)
 
-    local count = 0
+    local xpPerTyre = math.floor(((Config.Fence and Config.Fence.XpPerDelivery) or 20) * 0.5)
 
     if source_type == 'truck' and truckNetId then
-        -- Truck: ler contador server-side (não o state bag do cliente).
+        -- Truck: contador server-side é a verdade (nunca o state bag do cliente).
         local nid = tonumber(truckNetId)
         local truck = NetworkGetEntityFromNetworkId(nid or 0)
-        if truck and truck ~= 0 and DoesEntityExist(truck) then
-            count = ServerTyreCounts[nid] or 0
-            if count > 0 then
-                ServerTyreCounts[nid] = nil
-                Entity(truck).state:set('chopTyreCount', 0, true)
-            end
+        if not truck or truck == 0 or not DoesEntityExist(truck) then
+            return release({ ok=false, err='no_truck' })
         end
-    else
-        -- Inventário: chopshop_tyre items
-        count = exports.ox_inventory:GetItemCount(src, 'chopshop_tyre') or 0
-        if count > 0 then
-            if not exports.ox_inventory:RemoveItem(src, 'chopshop_tyre', count) then
-                return release({ ok=false, err='remove_failed' })
-            end
+        -- [v1.15 P0-2] Validar modelo + proximidade ao truck (antes só checava existência).
+        if not isPickupTruckModel(GetEntityModel(truck)) then
+            LogSuspicious(src, 'fence:sellTyres', 'Veículo alvo não é pickup truck')
+            return release({ ok=false, err='bad_truck' })
         end
+        if not ValidatePlayerNearVehicle(src, truck, 8.0) then
+            return release({ ok=false, err='truck_range' })
+        end
+
+        local count = ServerTyreCounts[nid] or 0
+        if count <= 0 then return release({ ok=false, err='no_tyres' }) end
+
+        -- [v1.15 P0-2] Pagar ANTES de zerar o contador; se o pagamento falhar, nada é perdido.
+        local total = unitPrice * count
+        if not BridgeAddCash(src, total, 'fence_tyres') then
+            return release({ ok=false, err='payment' })
+        end
+        ServerTyreCounts[nid] = nil
+        Entity(truck).state:set('chopTyreCount', 0, true)
+        addTrustXp(src, xpPerTyre * count)
+        TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
+        return release({ ok=true, count=count, total=total })
     end
 
+    -- Inventário: chopshop_tyre items
+    local count = exports.ox_inventory:GetItemCount(src, 'chopshop_tyre') or 0
     if count <= 0 then return release({ ok=false, err='no_tyres' }) end
+    if not exports.ox_inventory:RemoveItem(src, 'chopshop_tyre', count) then
+        return release({ ok=false, err='remove_failed' })
+    end
 
     local total = unitPrice * count
-    BridgeAddCash(src, total, 'fence_tyres')
-    addTrustXp(src, math.floor(((Config.Fence and Config.Fence.XpPerDelivery) or 20) * 0.5) * count)
+    if not BridgeAddCash(src, total, 'fence_tyres') then
+        -- [v1.15 P0-2] Compensação: devolver os pneus removidos se o pagamento falhar.
+        if not exports.ox_inventory:AddItem(src, 'chopshop_tyre', count) then
+            print(('[vp_chopshop] WARN: sellTyres refund falhou (inv cheio) para %s — %d pneus'):format(ServerChopPlayerKey(src), count))
+        end
+        return release({ ok=false, err='payment' })
+    end
+    addTrustXp(src, xpPerTyre * count)
     TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
-
     return release({ ok=true, count=count, total=total })
 end)
 
