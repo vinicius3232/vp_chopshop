@@ -22,8 +22,14 @@ local _benchCraftRateLimit  = {}  ---@type table<number, number>
 -- o callback 'vp_chopshop:deliverPart' deixou de existir (recompensa agora é imediata).
 local _alarmDisarmRateLimit = {}  ---@type table<number, number>
 local ALARM_DISARM_MIN_INTERVAL_MS = 2000
--- [v1.15 P0-4] Mutex de discard por netId (previne double-payout em double-call concorrente).
-local DiscardBusy = {} ---@type table<integer, boolean>  netId → true durante o discard
+-- [v1.15 P0-4 / PR-D] Mutex de discard por IDENTIDADE DE SESSÃO (não netId cru).
+-- Dois jogadores tentando vender o MESMO veículo → mesma ChopSession → mesmo lock
+-- → no máximo um fluxo terminal. value = netId (p/ limpeza órfã no entityRemoved).
+local DiscardBusy = {} ---@type table<string, integer>  sessionId → netId durante o discard
+-- [v1.15 PR-D hardening] QUARENTENA fail-closed: pagamento COMMITADO + Complete FALHOU
+-- + compensação FALHOU. A sessão fica READY_FOR_DISCARD + FROZEN; nenhum novo discard
+-- pode pagar de novo. Limpa só por entityRemoved (ou admin futuro — não nesta PR).
+local DiscardQuarantine = {} ---@type table<string, integer>  sessionId → netId
 
 local function benchById(id)
     return ServerBenchesById[id]
@@ -459,42 +465,95 @@ end)
 -- A recompensa da Fase 1 agora é imediata (ver callback 'vp_chopshop:chopPart' acima),
 -- igual às fases avançadas. Não há mais "entrega de peça na bancada" — a bancada só faz craft.
 
+--- [v1.15 PR-D hardening] Retries locais de deleção de mundo. Cada tentativa REVALIDA:
+---   1. sessão continua COMPLETED (tombstone);
+---   2. a entidade atual ainda PROVA ser a original — via
+---      ChopSession.ResolveBoundVehicleForCleanup (VSID/marker/model/ownedId).
+---      netId reciclado noutro veículo → devolve nil → retry ABORTA (nunca deleta o
+---      veículo novo);
+---   3. framework esperado ainda vale (BridgeDeleteWorldVehicle fail-closa em race);
+---   4. DisablePersistence confirmado (idem).
+--- NUNCA apaga o tombstone. Sem loop infinito: 3 tentativas.
+local function scheduleDeleteRetry(sessionId, expectedFw, attemptsLeft)
+    attemptsLeft = attemptsLeft or 3
+    SetTimeout(2500, function()
+        local veh, reason = ChopSession.ResolveBoundVehicleForCleanup(sessionId)
+        if not veh then
+            -- identidade não confirmável / sessão sumiu / já não é tombstone → parar.
+            if reason == 'identity_mismatch' or reason == 'identity_unproven' then
+                print(('[vp_chopshop][discard] retry ABORTADA (session %s, %s): identidade da entidade não pode ser provada — auto-delete cancelado, tombstone + cleanupPending preservados.'):format(sessionId, reason))
+            end
+            return
+        end
+        local d = BridgeDeleteWorldVehicle(veh, { expectedFramework = expectedFw })
+        if not d.existsAfter then return end   -- sucesso → entityRemoved → CleanupVehicle
+        if d.retryable and attemptsLeft > 1 then
+            scheduleDeleteRetry(sessionId, expectedFw, attemptsLeft - 1)
+        else
+            print(('[vp_chopshop][discard] session %s: deleção de mundo ainda pendente (method=%s) após retries — tombstone COMPLETED + cleanupPending preservados.'):format(sessionId, d.method))
+        end
+    end)
+end
+
 lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     if not (Config.Discard and Config.Discard.Enable) then return { ok = false, err = 'disabled' } end
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
     netId = tonumber(netId)
     if not netId then return { ok = false, err = 'args' } end
 
-    -- [v1.15 P0-4] Mutex por netId (não por source): o exploit é double-payout no MESMO
-    -- veículo — dois callbacks (mesmo jogador OU dois jogadores) passavam o gate de
-    -- partCount e ambos pagavam antes de VPChopClearVehicle. O handler abaixo não tem
-    -- yield, então sempre chama releaseDiscard; o entityRemoved abaixo limpa qualquer
-    -- entrada órfã (defesa contra edições futuras que introduzam yield).
-    if DiscardBusy[netId] then return { ok = false, err = 'processing' } end
-    DiscardBusy[netId] = true
-    local function releaseDiscard(res) DiscardBusy[netId] = nil; return res end
+    local minParts = math.floor(tonumber((Config.Discard or {}).MinPartsToDiscard) or 4)
 
     local veh = NetworkGetEntityFromNetworkId(netId)
-    if veh == 0 or not DoesEntityExist(veh) then return releaseDiscard({ ok = false, err = 'vehicle' }) end
+    if veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
 
     local maxDist = (Config.VehicleNearLiftRadius or 5.0) + 2.0
-    if not ValidatePlayerNearVehicle(source, veh, maxDist) then return releaseDiscard({ ok = false, err = 'distance' }) end
+    if not ValidatePlayerNearVehicle(source, veh, maxDist) then return { ok = false, err = 'distance' } end
 
-    local partCount = VPChopGetPartCount(netId)
-    local minParts  = math.floor(tonumber((Config.Discard or {}).MinPartsToDiscard) or 4)
-    if partCount < minParts then
-        return releaseDiscard({ ok = false, err = 'parts_min', count = partCount, min = minParts })
+    -- [PR-D] Resolver a ChopSession ANTES do lock (identidade do mutex).
+    local sessionId = VPChopDiscardState.resolve(netId)
+    if not sessionId then
+        -- Sem sessão ativa = nenhuma peça committed = não há o que descartar.
+        return { ok = false, err = 'parts_min', count = 0, min = minParts }
     end
 
-    -- Calcular payout
+    -- [PR-D hardening] Quarentena fail-closed: pagamento commitado + Complete + compensação
+    -- todos falharam antes. Nenhum novo discard paga de novo até a entidade sumir.
+    if DiscardQuarantine[sessionId] then return { ok = false, err = 'transaction_locked' } end
+
+    -- [P0-4 / PR-D] Mutex por identidade de sessão. Sem yield entre check e set.
+    if DiscardBusy[sessionId] then return { ok = false, err = 'processing' } end
+    DiscardBusy[sessionId] = netId
+    local function releaseDiscard(res) DiscardBusy[sessionId] = nil; return res end
+
+    -- [PR-D] OWNERSHIP GATE — antes de qualquer pagamento/transição.
+    -- BridgeResolveVehiclePersistence só LÊ; dúvida ⇒ 'unknown' ⇒ fail-closed.
+    local persistence  = BridgeResolveVehiclePersistence(veh, 'discard')
+    local ownedPolicy  = (Config.Discard or {}).OwnedPolicy or 'deny'
+    if persistence.status ~= 'not_owned' then
+        -- 'owned' ou 'unknown'. 'destroy' (apagar registro persistente + compensar)
+        -- NÃO é implementado nesta PR → qualquer política que não seja um destroy
+        -- funcional resulta em DENY. Preferimos negar a destruir um player vehicle.
+        if persistence.status == 'unknown' or Config.Debug then
+            print(('[vp_chopshop][discard] netId %s: persistence=%s (src=%s, policy=%s) → DENY')
+                :format(netId, persistence.status, persistence.source, tostring(ownedPolicy)))
+        end
+        return releaseDiscard({ ok = false, err = 'owned', persistence = persistence.status })
+    end
+
+    -- [PR-D] CONTAGEM UNIFICADA (base + advanced) — mudança DELIBERADA desta PR.
+    local counts = VPChopDiscardState.getCounts(sessionId)
+    if counts.total < minParts then
+        return releaseDiscard({ ok = false, err = 'parts_min', count = counts.total, min = minParts,
+                                base = counts.base, advanced = counts.advanced })
+    end
+
+    -- Calcular payout (INALTERADO — esta PR não é balance de economia)
     local model  = GetEntityModel(veh)
     local payout = math.floor(tonumber((Config.Discard or {}).DefaultPayout) or 1500)
     local byModel = Config.Discard and Config.Discard.PayoutByModel
     if byModel and byModel[model] then
         payout = math.floor(tonumber(byModel[model]) or payout)
     end
-
-    -- Bónus polícia
     local appliedBonus = false
     local bonusCfg = Config.Discard and Config.Discard.CopsBonus
     if bonusCfg and bonusCfg.Enable then
@@ -505,31 +564,82 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
             appliedBonus = true
         end
     end
-
     local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
-
-    -- Sanity cap: payout nunca deve exceder 10× o DefaultPayout
     local maxPayout = math.floor((tonumber((Config.Discard or {}).DefaultPayout) or 1500) * 10)
     payout = math.min(payout, maxPayout)
 
-    -- [v1.15 P0-4] Ordem transacional: pagar PRIMEIRO. Se o pagamento falhar, o veículo
-    -- permanece e o jogador pode tentar de novo (nada é perdido). Só após confirmar o
-    -- pagamento é que limpamos o estado e deletamos a entidade (passo terminal).
+    -- [PR-D] BEGIN DISCARD → SetState(READY_FOR_DISCARD) → FREEZE (MarkPart/LockPart
+    -- passam a recusar 'discarding'). Protege a contagem que autorizou o payout
+    -- durante um eventual yield de BridgeAddCash.
+    local bOk = VPChopDiscardState.begin(sessionId)
+    if not bOk then return releaseDiscard({ ok = false, err = 'transaction' }) end
+
+    -- PAYMENT
     if not BridgeAddCash(source, payout, 'discard_payout') then
+        VPChopDiscardState.rollback(sessionId)   -- READY_FOR_DISCARD → DISMANTLING; nada perdido
         return releaseDiscard({ ok = false, err = 'payment' })
     end
-    VPChopClearVehicle(netId)
-    AlarmActive[netId] = nil  -- veículo descartado: alarme encerrado
+
+    -- [PR-D] COMPLETE checado. Com sessão resolvida + lock exclusivo + estado
+    -- congelado, Complete() é determinístico; a compensação abaixo é fallback
+    -- excepcional (não deve ocorrer).
+    local cOk = VPChopDiscardState.complete(sessionId)
+    if not cOk then
+        -- [PR-D hardening] Pagamento COMMITADO + Complete FALHOU. Tentar compensar e
+        -- REFLETIR o resultado real — nunca escrever "compensado" sem confirmar.
+        local compensated = BridgeRemoveCash(source, payout, 'discard_compensation')
+        if compensated then
+            -- Economicamente de volta ao zero → retry legítimo pode ocorrer depois.
+            VPChopDiscardState.rollback(sessionId)   -- READY_FOR_DISCARD → DISMANTLING (descongela)
+            LogSuspicious(source, 'discardVehicle',
+                ('COMPLETE FAILED / PAYOUT COMPENSATED ($%d) — session %s → rollback DISMANTLING'):format(payout, sessionId))
+            return releaseDiscard({ ok = false, err = 'transaction' })
+        end
+        -- Compensação FALHOU: pagamento ficou. NÃO liberar p/ novo payout.
+        -- Sessão permanece READY_FOR_DISCARD + FROZEN + em QUARENTENA.
+        DiscardQuarantine[sessionId] = netId
+        LogSuspicious(source, 'discardVehicle',
+            ('SEVERE: PAYMENT COMMITTED + COMPLETE FAILED + COMPENSATION FAILED ($%d) — session %s QUARANTINED (frozen, no re-payout)'):format(payout, sessionId))
+        return releaseDiscard({ ok = false, err = 'transaction_locked' })
+    end
+
+    -- Ponto terminal atingido: a partir daqui NÃO reabrimos a sessão.
+    AlarmActive[netId] = nil
+
+    -- [PR-D hardening] preserva o framework resolvido no ownership gate — se o
+    -- qbx_core parar entre aqui e o delete, BridgeDeleteWorldVehicle fail-closa
+    -- (não cai silenciosamente p/ DeleteEntity nativo).
+    local del = BridgeDeleteWorldVehicle(veh, { expectedFramework = persistence.framework })
+
+    -- CAR_DISCARDED: 1×, SÓ após o terminal commit.
     TriggerEvent(VPChopEvt.CAR_DISCARDED, source, netId, plate, payout)
-    if DoesEntityExist(veh) then DeleteEntity(veh) end
+
+    if del.existsAfter then
+        -- Entidade não sumiu. Jogador JÁ foi pago; sessão JÁ é COMPLETED (tombstone).
+        -- Não é retry-able discard. Retries de CLEANUP vinculadas à identidade da sessão.
+        print(('[vp_chopshop][discard] session %s (netId %s): BridgeDeleteWorldVehicle não removeu a entidade (method=%s) — cleanupPending, tombstone preservado.')
+            :format(sessionId, netId, del.method))
+        scheduleDeleteRetry(sessionId, persistence.framework)
+        return releaseDiscard({ ok = true, payout = payout, bonus = appliedBonus, cleanupPending = true })
+    end
 
     return releaseDiscard({ ok = true, payout = payout, bonus = appliedBonus })
 end)
 
--- [v1.15 P0-4] Limpa mutex de discard órfão se a entidade sumir por outra via.
+-- [v1.15 P0-4 / PR-D] Limpa mutex de discard órfão se a entidade sumir por outra via.
 AddEventHandler('entityRemoved', function(entity)
     local nid = NetworkGetNetworkIdFromEntity(entity)
-    if nid and nid ~= 0 then DiscardBusy[nid] = nil end
+    if not nid or nid == 0 then return end
+    for sid, lockedNet in pairs(DiscardBusy) do
+        if lockedNet == nid then DiscardBusy[sid] = nil end
+    end
+    -- [PR-D hardening] a entidade quarantined enfim sumiu → libera a quarentena.
+    for sid, qNet in pairs(DiscardQuarantine) do
+        if qNet == nid then
+            DiscardQuarantine[sid] = nil
+            print(('[vp_chopshop][discard] session %s: quarentena liberada (entidade removida).'):format(sid))
+        end
+    end
 end)
 
 -- [AUDIT M2] Callback 'vp_chopshop:maybeAmbush' REMOVIDO. A emboscada agora é disparada

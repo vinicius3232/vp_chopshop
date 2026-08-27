@@ -372,14 +372,21 @@ end
 
 --- Idempotente: marcar peça já removida devolve (true, true) sem duplicar nem
 --- sobrescrever metadata existente.
+--- ⚠ DEVE permanecer SEM YIELD: o FREEZE de READY_FOR_DISCARD (PR-D) só é atômico
+--- porque o check de estado e a gravação da peça acontecem no mesmo tick. Não
+--- adicionar log assíncrono / DB write aqui.
 ---@param id string
 ---@param partKey string
 ---@param src number
 ---@param opts? { origin?: 'base'|'advanced' }   metadata escolhida SÓ por código server-side
----@return boolean ok, boolean duplicate
+---@return boolean ok, boolean duplicate, string|nil err
 function ChopSession.MarkPart(id, partKey, src, opts)
     local s = Sessions[id]
     if not s or TERMINAL[s.state] then return false, false end
+    -- [v1.15 PR-D] FREEZE: entrada em READY_FOR_DISCARD = operação terminal em curso
+    -- (payout). Nenhuma peça nova pode entrar no meio da transação — senão a
+    -- contagem que autorizou o payout muda enquanto o adapter de cash yielda.
+    if s.state == 'READY_FOR_DISCARD' then return false, false, 'discarding' end
     if type(partKey) ~= 'string' then return false, false end
     if s.parts[partKey] then return true, true end   -- duplicate: metadata preservada
     local origin = (opts and opts.origin == 'advanced') and 'advanced' or 'base'
@@ -414,6 +421,8 @@ end
 function ChopSession.LockPart(id, partKey)
     local s = Sessions[id]
     if not s or TERMINAL[s.state] then return false end
+    -- [v1.15 PR-D] FREEZE: não iniciar nova ação física durante o payout terminal.
+    if s.state == 'READY_FOR_DISCARD' then return false, 'discarding' end
     local existing = s._partLocks[partKey]
     if existing and GetGameTimer() < existing.expiresAt then return false end
     local ttl = cfgNum('PartLockTtlMs', 60000)
@@ -528,6 +537,35 @@ function ChopSession.CleanupPlayer(src)
             end
         end
     end
+end
+
+--- [v1.15 PR-D hardening] SÓ p/ CLEANUP DESTRUTIVO (retry de DeleteEntity após
+--- discard, via SetTimeout). Identidade ESTRITA — mais forte que `vehicleStillValid`
+--- (que aceita fallback por netId+model quando não há marker nem ownedId; num
+--- veículo non-owned com netId reciclado no MESMO modelo isso deixaria passar
+--- OUTRO veículo). Aqui o marcador VSID server-local é OBRIGATÓRIO:
+---   1. sessão COMPLETED (único cenário de cleanup pós-discard);
+---   2. `fp.markerSet == true` — sem marcador confirmado no mint → NÃO auto-delete;
+---   3. entidade existe;
+---   4. modelo bate;
+---   5. `EntityAPI.marker(ent) == session.vehicle.identity` (o VSID exato).
+--- Qualquer falha → nil + reason. Melhor deixar um veículo aguardando cleanup
+--- (tombstone + cleanupPending + log) do que deletar a entidade errada.
+--- O delete INICIAL logo após o discard usa o handle original já resolvido no
+--- callback e não passa por aqui. Gameplay normal continua SEM Peek.
+---@param sessionId string
+---@return integer|nil entity, string|nil reason
+function ChopSession.ResolveBoundVehicleForCleanup(sessionId)
+    local s = Sessions[sessionId]
+    if not s then return nil, 'no_session' end
+    if s.state ~= 'COMPLETED' then return nil, 'not_tombstone' end
+    local fp = s.vehicle._fp
+    if fp.markerSet ~= true then return nil, 'identity_unproven' end
+    local ent = EntityAPI.get(fp.netId)
+    if not EntityAPI.exists(ent) then return nil, 'gone' end
+    if EntityAPI.model(ent) ~= fp.model then return nil, 'identity_mismatch' end
+    if EntityAPI.marker(ent) ~= s.vehicle.identity then return nil, 'identity_mismatch' end
+    return ent
 end
 
 ---@return table

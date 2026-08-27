@@ -43,8 +43,8 @@ function VPChopBaseState.markPart(src, netId, partKey)
         if not created then return false, false, err or 'session' end
         s = created
     end
-    local ok, dup = ChopSession.MarkPart(s.id, partKey, src, { origin = 'base' })
-    return ok, dup
+    local ok, dup, mErr = ChopSession.MarkPart(s.id, partKey, src, { origin = 'base' })
+    return ok, dup, mErr   -- mErr='discarding' se a sessão entrou em payout terminal (PR-D freeze)
 end
 
 --- @param netId integer

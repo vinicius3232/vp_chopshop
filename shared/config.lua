@@ -285,6 +285,12 @@ Config.PartPropCategory = {
 Config.Discard = {
     Enable = true,
     MinPartsToDiscard = 4,      -- mínimo de peças removidas para poder descartar
+                                -- [v1.15 PR-D] passa a comparar com o TOTAL (base+advanced) de peças.
+    --- [v1.15 PR-D] Política para veículo OWNED/persistido (framework detectou registro).
+    ---   'deny'    → descarte NEGADO (default release-safe: não destrói player vehicle por acidente).
+    ---   'destroy' → EXPERIMENTAL, QBox-only, sem compensação garantida: apaga o registro
+    ---               persistente + entidade. NÃO habilitar sem testes reais. (não implementado nesta PR)
+    OwnedPolicy = 'deny',
     DefaultPayout = 1500,       -- cash base ao descartar
     --- Bónus se houver polícias suficientes online.
     CopsBonus = {
