@@ -184,6 +184,8 @@ local Locales = {
         adv_carcass_done                = 'Carcass cut. Materials received.',
         err_hood_first                  = 'Remove the hood first.',
         err_engine_first                = 'Remove the engine first.',
+        err_not_raised                  = 'The vehicle must be on jack stands.',
+        err_not_participant             = 'You are not working on this vehicle.',
         err_no_screwdriver              = 'You need a screwdriver.',
         err_no_welder_adv               = 'No welder nearby.',
         -- Fence NPC ox_target labels
@@ -517,6 +519,8 @@ local Locales = {
         adv_carcass_done                = 'Carcaça cortada. Materiais recebidos.',
         err_hood_first                  = 'Remova o capô primeiro.',
         err_engine_first                = 'Remova o motor primeiro.',
+        err_not_raised                  = 'O veículo precisa estar no macaco.',
+        err_not_participant             = 'Você não está trabalhando neste veículo.',
         err_no_screwdriver              = 'Você precisa de uma chave de fenda.',
         err_no_welder_adv               = 'Sem soldadora perto.',
         -- Labels de ox_target do NPC fence

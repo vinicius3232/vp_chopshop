@@ -57,6 +57,10 @@ server_scripts {
     'server/session/chop_session.lua',
     'server/session/chop_session_spec.lua',  -- self-gated: só roda com convar vp_chopshop_selftest 1
     'server/session/jackstand.lua',
+    -- [v1.15 P1-1] gate de autoridade do advanced chop (VPChopAdvRequireRaisedSession);
+    -- antes de server/advanced_chop.lua.
+    'server/session/adv_gate.lua',
+    'server/session/adv_gate_spec.lua',      -- self-gated (vp_chopshop_selftest 1)
     'server/cooldown.lua',
     'server/discord.lua',
     'server/chop.lua',

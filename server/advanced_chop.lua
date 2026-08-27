@@ -28,6 +28,11 @@ AddEventHandler('playerDropped', function()
     AdvCooldown[src] = nil
 end)
 
+-- [v1.15 P1-1] O gate de autoridade do jackstand vive em server/session/adv_gate.lua
+-- (VPChopAdvRequireRaisedSession) — carregado antes deste arquivo e testável em
+-- isolamento. NÃO migra AdvState/AdvMutex/rewards — só SOMA o gate.
+local advRequireRaisedSession = VPChopAdvRequireRaisedSession
+
 local function getState(netId)
     if not AdvState[netId] then AdvState[netId] = {} end
     return AdvState[netId]
@@ -127,6 +132,11 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
         return { ok = false, err = 'part' }
     end
 
+    -- [v1.15 P1-1] Sessão ativa + participante + veículo levantado (antes das
+    -- validações legacy). Não substitui nenhuma delas.
+    local okS, errS, advSessionId = advRequireRaisedSession(src, netId)
+    if not okS then return { ok = false, err = errS } end
+
     -- Gate: parte já desmontada?
     if isChopped(netId, partKey) then return { ok = false, err = 'done' } end
 
@@ -162,6 +172,7 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
     end
 
     markChopped(netId, partKey)
+    if advSessionId then ChopSession.Touch(advSessionId) end  -- [v1.15 P1-1] só no sucesso
     advMarkCooldown(src)
     unlock(lockKey)
 
@@ -202,6 +213,10 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'net' } end
 
+    -- [v1.15 P1-1] Sessão ativa + participante + veículo levantado.
+    local okS, errS, advSessionId = advRequireRaisedSession(src, netId)
+    if not okS then return { ok = false, err = errS } end
+
     -- Capô deve estar removido
     if not isChopped(netId, 'bonnet') then return { ok = false, err = 'hood_first' } end
 
@@ -241,6 +256,7 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     end
 
     markChopped(netId, 'adv_engine')
+    if advSessionId then ChopSession.Touch(advSessionId) end  -- [v1.15 P1-1] só no sucesso
     advMarkCooldown(src)
     unlock(lockKey)
     -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 3). `vehCoords` validado acima.
@@ -261,6 +277,10 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
 
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'net' } end
+
+    -- [v1.15 P1-1] Sessão ativa + participante + veículo levantado.
+    local okS, errS, advSessionId = advRequireRaisedSession(src, netId)
+    if not okS then return { ok = false, err = errS } end
 
     -- Motor deve estar desmontado
     if not isChopped(netId, 'adv_engine') then return { ok = false, err = 'engine_first' } end
@@ -306,6 +326,7 @@ lib.callback.register('vp_chopshop:adv:chopCarcass', function(source, netId)
     end
 
     markChopped(netId, 'adv_carcass')
+    if advSessionId then ChopSession.Touch(advSessionId) end  -- [v1.15 P1-1] só no sucesso
     advMarkCooldown(src)
     unlock(lockKey)
     -- [AUDIT-FIX C2] Deixar vestígio + armar marca de pneu (Fase 4). `vehCoords` validado acima.
