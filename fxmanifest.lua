@@ -50,6 +50,13 @@ server_scripts {
     'bridge/evidence.lua',
     'server/db.lua',
     'server/validate.lua',
+    -- [v1.15 arch] ChopSession — fonte server-authoritative do estado de desmanche.
+    -- Depois de validate.lua (usa Validate*) e das bridges (IsValidSource, InvCount,
+    -- ServerPlayerIsReady); ANTES de chop.lua / advanced_chop.lua / main.lua (futuros
+    -- consumidores) e do jackstand server-side.
+    'server/session/chop_session.lua',
+    'server/session/chop_session_spec.lua',  -- self-gated: só roda com convar vp_chopshop_selftest 1
+    'server/session/jackstand.lua',
     'server/cooldown.lua',
     'server/discord.lua',
     'server/chop.lua',

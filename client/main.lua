@@ -1386,6 +1386,15 @@ end
 -- O fluxo vivo de roubo de pneu via jackstand é doJackstandTyreSteal (mais acima),
 -- acionado pelo target de cada roda.
 
+--- [v1.15 arch] Mapeia o err do callback de sessão do jackstand → locale existente.
+function VPChopSessionErr(err)
+    if err == 'no_item' then return L('jackstand_no_item') end
+    if err == 'cooldown' then return L('jackstand_busy') end
+    if err == 'already' or err == 'completed' then return L('jackstand_already_raised') end
+    if err == 'class' or err == 'vehicle' or err == 'net' or err == 'range' then return L('jackstand_no_car') end
+    return L('notify_generic_error')  -- player / disabled / session / not_participant
+end
+
 function VPChopJackstandRaiseCar()
     local jcfg = Config.Jackstand
     if not jcfg or not jcfg.Enable then return end
@@ -1420,11 +1429,23 @@ function VPChopJackstandRaiseCar()
     })
     destroyToolProp()
     if not ok then JackstandBusy = false; return end
+
+    -- [v1.15 arch] AUTORIDADE: o servidor cria/atualiza a ChopSession e marca raised.
+    -- Só aplicamos o visual (props + lift) se o servidor autorizar. O client deixa
+    -- de ser a verdade de "veículo levantado".
+    local netId = NetworkGetNetworkIdFromEntity(best)
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:session:requestRaise', false, netId)
+    if not cbOk or not res or not res.ok then
+        JackstandBusy = false
+        VPChopNotify(VPChopSessionErr(res and res.err), 'error')
+        return
+    end
+
     local props = spawnJackstandProps(best)
     local origZ = doLiftVehicle(best)
     Wait(950)   -- aguarda o levantamento completo (~900ms a 0.001/5ms) antes de fixar os cavaletes
     attachJackstandsToCar(best, props)
-    JackstandData[best] = { props = props, originalZ = origZ }
+    JackstandData[best] = { props = props, originalZ = origZ, sessionId = res.sessionId, vsid = res.vsid }
     JackstandBusy = false
     addRaisedCarTargets(best)
     VPChopNotify(L('jackstand_raised'), 'success')
@@ -1449,6 +1470,17 @@ function VPChopJackstandLowerCar(veh)
     })
     destroyToolProp()
     if not ok then JackstandBusy = false; return end
+
+    -- [v1.15 #6] O servidor é autoridade: só baixa o visual se ok==true OU stale==true
+    -- (sessão já sumiu). ok==false (ex.: não-participante) → mantém o visual + notifica.
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:session:requestLower', false,
+        NetworkGetNetworkIdFromEntity(veh))
+    if not cbOk or not res or (not res.ok and not res.stale) then
+        JackstandBusy = false
+        VPChopNotify(VPChopSessionErr(res and res.err), 'error')
+        return
+    end
+
     doLowerVehicle(veh, data.originalZ)
     for i = 1, #data.props do
         local prop = data.props[i]
