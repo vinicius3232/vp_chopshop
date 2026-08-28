@@ -119,3 +119,16 @@ lib.callback.register('vp_chopshop:session:isRaised', function(src, netId)
     if not netId then return { raised = false } end
     return { raised = ChopSession.IsRaised(netId) }
 end)
+
+-- ─── [v1.15 PR-F] getActive — READ-ONLY: sessionId ativo de um veículo ─────────
+-- Só p/ o client obter o sessionId antes de vp_chopshop:action:start. NUNCA cria
+-- sessão (payload cru). Devolve nil se não há sessão ativa / não-participante.
+lib.callback.register('vp_chopshop:session:getActive', function(src, netId)
+    if not ServerPlayerIsReady(src) then return { ok = false } end
+    netId = tonumber(netId)
+    if not netId then return { ok = false } end
+    local s = ChopSession.GetByVehicle(netId)                 -- ACTIVE lookup (terminal → nil)
+    if not s then return { ok = false } end
+    if not ChopSession.HasParticipant(s.id, src) then return { ok = false, err = 'not_participant' } end
+    return { ok = true, sessionId = s.id, raised = s.raised == true }
+end)

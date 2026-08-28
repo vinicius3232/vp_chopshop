@@ -383,6 +383,24 @@ ChopSession p/ STATE (só pula raised/participant).
   direto — precisa do mesmo hardening terminal da PR D (ownership gate +
   `BridgeDeleteWorldVehicle` + payment-result + transação idempotente). **NÃO** nesta PR.
 
-**Depois:** implementação da `ActionSession` (desenho já corrigido em `ACTION_SESSION_DESIGN.md`).
+**PR F — ActionSession foundation + base tyre vertical slice.** ✅ **FEITO** (PR #9).
+`server/session/action_session.lua` (`ActionSession`: START→OPEN, COMPLETE→
+COMMITTING→COMPLETED, replay idempotente, too_fast, expired, cancel, sweeper).
+`server/action/base_tyre.lua` (executor delega a `VPChopChopPartCommit` extraído de
+`main.lua`). Gate `action_required` no callback legacy p/ tyre quando
+`RequireBaseTyres=true`. `vp_chopshop:session:getActive` read-only. Client wheel flow
+migrado (getActive → action:start → UX → action:complete/cancel). `_nonce` removido.
+1 action OPEN/jogador. `ActionTtlMs` clampado < `PartLockTtlMs`; START recusa
+`misconfigured` se o TTL não comportar `MinDuration`. Detalhe em
+[`ACTION_SESSION_DESIGN.md`](ACTION_SESSION_DESIGN.md). `action_session_spec` 47
+asserts (AS1–AS24 + AT1–AT13 + clamp). Total harness **392**.
+- **NÃO migrado:** advanced chop · plate/VIN · engine/panel · Part Registry · Tool Registry.
+- Economia **não** alterada. `PART_CHOPPED` assinatura preservada.
+
+**Depois:** migrar AdvancedChop → ActionSession (após validação da vertical slice de wheel).
+
+**RELEASE DEBT** (registrada, não puxar p/ estas PRs): `vp_chopshop:fence:deliverCar`
+usa `DeleteEntity` direto — precisa do hardening terminal da PR D (ownership gate +
+`BridgeDeleteWorldVehicle` + payment-result + transação idempotente).
 
 Não avançar automaticamente — cada PR passa por revisão.

@@ -34,7 +34,14 @@ function Entity(h)
         { set = function(_, k, val) v[k] = val end },
         { __index = function(_, k) return v[k] end }) }
 end
-function ValidatePlayerNearVehicle(_, _, _) return true end   -- base chop: proximidade OK
+_G.NEAR = true                                                -- specs alternam p/ testar 'distance'
+function ValidatePlayerNearVehicle(_, _, _) return _G.NEAR ~= false end
+function ValidatePlayerNearPoint(_, _, _) return _G.NEAR ~= false end
+_G.HAS_TOOL = true                                            -- specs alternam p/ testar 'no_tool'
+function VPChopHasTool(_, _) return _G.HAS_TOOL ~= false end
+function VPChopConsumeTool(_, _) _G._TOOL_CONSUMED = (_G._TOOL_CONSUMED or 0) + 1; return true end
+function ServerPlayerIsReady(src) return src ~= nil and GetPlayerName(src) ~= nil end
+_G.lib = { callback = { register = function() end } }         -- action_session.lua registra callbacks
 
 -- [PR-D] Stubs de resource/export p/ bridge/server_vehicle.lua (discard ownership).
 _G.FAKE_RESOURCES = { qbx_core = 'started', qbx_vehicles = 'started' }
@@ -65,6 +72,12 @@ _G.Config = {
         CopsBonus = { Enable = false },
     },
     TyreSelling = { Enable = true, MaxTyresInTruck = 4 },   -- [PR-E]
+    ActionSession = {                                       -- [PR-F]
+        Enable = true, RequireBaseTyres = true,
+        ActionTtlMs = 45000, MinDurationMs = { tyre = 1500 },
+        StartRateLimitMs = 0, CompleteRateLimitMs = 0,
+        SweepIntervalMs = 5000, RetentionMs = 120000, Debug = false,
+    },
     CarPartRewards = {
         wheel_lf = { rubber = { amount = 2, chance = 1.0 } },
         wheel_rf = { rubber = { amount = 2, chance = 1.0 } },
@@ -89,18 +102,23 @@ dofile(base .. '/server/session/discard_state.lua')   -- [PR-D] provê VPChopDis
 dofile(base .. '/bridge/server_vehicle.lua')          -- [PR-D] provê BridgeResolveVehiclePersistence / BridgeDeleteWorldVehicle
 dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreEntitlement
 dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
+dofile(base .. '/server/session/action_session.lua')     -- [PR-F] provê ActionSession
 dofile(base .. '/server/chop.lua')                    -- provê VPChopServerTryPart etc. (delega a base_state)
+
+-- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
+-- no-op) — nunca rodar. Só os corpos dos specs, registrados a partir daqui.
+local specStart = #threads + 1
+
 dofile(base .. '/server/session/chop_session_spec.lua')
 dofile(base .. '/server/session/adv_gate_spec.lua')
 dofile(base .. '/server/session/base_state_spec.lua')
 dofile(base .. '/server/session/advanced_state_spec.lua')
 dofile(base .. '/server/session/discard_state_spec.lua')  -- [PR-D]
 dofile(base .. '/server/logistics/tyre_entitlement_spec.lua')  -- [PR-E]
+dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F]
 
--- threads[1] é o sweeper do módulo (loop infinito com Wait no-op) — pulado.
--- threads[2..N] são os corpos dos specs.
 local anyFail = false
-for i = 2, #threads do
+for i = specStart, #threads do
     local ok, err = pcall(threads[i])
     if not ok then print('THREAD ERROR: ' .. tostring(err)); anyFail = true end
 end

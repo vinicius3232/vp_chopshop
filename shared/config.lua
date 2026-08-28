@@ -28,6 +28,28 @@ Config.ChopSession = {
     EnforceRaised   = true,
 }
 
+--- [v1.15 PR-F] ActionSession — autorização TEMPORAL + commit server-authoritative
+--- de uma ação física. START trava a peça (ChopSession.LockPart) e cria a sessão;
+--- COMPLETE revalida TUDO e executa o domínio UMA vez (idempotente por replay).
+--- ⚠ ActionSession NÃO é prova de minigame honesto / input humano — um executor
+--- ainda pode start → esperar MinDurationMs → complete. É autorização + commit.
+Config.ActionSession = {
+    Enable     = true,
+    --- Base tyre (wheel_*) passa OBRIGATORIAMENTE pela ActionSession. false =
+    --- kill-switch de compat: o callback legacy vp_chopshop:chopPart volta a
+    --- processar tyre direto (ChopSession + TyreEntitlement seguem sendo verdade).
+    RequireBaseTyres = true,
+    ActionTtlMs = 45000,           -- TTL de uma ActionSession OPEN. DEVE ser < PartLockTtlMs (clamp automático).
+    MinDurationMs = {
+        tyre = 1500,               -- tempo mínimo entre START e COMPLETE (só tyre nesta PR)
+    },
+    StartRateLimitMs    = 500,
+    CompleteRateLimitMs = 500,
+    SweepIntervalMs     = 5000,
+    RetentionMs = 120000,   -- quanto uma sessão terminal fica p/ replay antes de coletada
+    Debug = false,
+}
+
 --- Distâncias
 Config.InteractDistance = 2.4
 Config.MaxPlaceDistance = 5.0
