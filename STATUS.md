@@ -3,7 +3,7 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-08-28
-**Branch de integração:** `pr-h/v1.15-delivercar-terminal-hardening` @ `866abae`
+**Branch de integração:** `pr-h/v1.15-delivercar-terminal-hardening` @ `3dc9652`
 **`main`:** `v1.14.3` (intocado — nada de v1.16 foi pro main)
 **Harness:** `lua tools/run_spec.lua .` → **566 PASS / 0 FAIL**
 
@@ -16,6 +16,7 @@ Fase 0 — base + dores da QA            ✅ CÓDIGO COMPLETO   (#14 #15 #16)
 Fase 1 — Part Registry vira autoridade ✅ CÓDIGO COMPLETO   (#17 #18 #19 #20 #21 #22)
 P2.1   — client sai de ChopParts       ✅ CÓDIGO COMPLETO   (#23)
 Checkpoint de QA                       ✅ escrito           (#24 → docs/audit/V116_INTEGRATION_QA.md)
+Docs de contexto (AGENTS/STATUS/plano) ✅                   (#25)
 ─────────────────────────────────────────────────────────────────────────
 Fase 2 — Wheels V2 / condition / motor ⏸  BLOQUEADO até a QA validar Fase 0+1
 Fase 3 — processamento de peça         ⏸
@@ -49,6 +50,7 @@ isolada, mesmo fluxo.
 | #22 | P1.6 / FASE F — 11 sites server saem de `ChopParts` → `VPChopPartGtaClass` | refator puro |
 | #23 | P2.1 enxuto — 6 sites client saem de `ChopParts`; `chop_parts.lua` → `part_class.lua` | refator client |
 | #24 | checkpoint de QA (`docs/audit/V116_INTEGRATION_QA.md`) | doc |
+| #25 | `AGENTS.md` + `STATUS.md` + plano mestre no repo | doc |
 
 ## Decisão de fase (2026-08-28)
 
