@@ -302,8 +302,7 @@ function VPChopChopPartCommit(source, netId, partKey)
     -- Falha da emissão NÃO derruba o chop — a peça já está committed.
     local tyreEntitlementId
     do
-        local pdef = ChopParts and ChopParts[partKey]
-        if pdef and pdef.kind == 'tyre' then
+        if VPChopPartGtaClass(partKey) == 'tyre' then
             local s = ChopSession.GetByVehicle(netId)
             if s then
                 local teId = TyreEntitlement.Issue(s.id, source, partKey)
@@ -460,11 +459,8 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     -- [v1.15 PR-F/G] BASE TYRE passa OBRIGATORIAMENTE pela ActionSession quando o
     -- modo está ativo (VPChopActionModeTyre). Um executor NÃO bypassa start/complete
     -- chamando este callback direto p/ wheel_*. Kill-switch: RequireBaseTyres=false.
-    if VPChopActionModeTyre() then
-        local pdef = ChopParts and ChopParts[partKey]
-        if pdef and pdef.kind == 'tyre' then
-            return { ok = false, err = 'action_required' }
-        end
+    if VPChopActionModeTyre() and VPChopPartGtaClass(partKey) == 'tyre' then
+        return { ok = false, err = 'action_required' }
     end
 
     local res = VPChopChopPartCommit(source, netId, partKey)

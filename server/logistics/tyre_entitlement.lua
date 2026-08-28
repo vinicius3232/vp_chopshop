@@ -38,8 +38,7 @@ local function dbg(...)
 end
 
 local function isTyrePart(partKey)
-    local def = ChopParts and ChopParts[partKey]
-    return def ~= nil and def.kind == 'tyre'
+    return VPChopPartGtaClass(partKey) == 'tyre'
 end
 
 -- ─── Emissão ───────────────────────────────────────────────────────────────────
