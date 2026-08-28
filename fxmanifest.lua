@@ -78,6 +78,10 @@ server_scripts {
     -- base+advanced, BEGIN/ROLLBACK/COMPLETE). Antes de server/main.lua (discard).
     'server/session/discard_state.lua',
     'server/session/discard_state_spec.lua',  -- self-gated
+    -- [v1.15 PR-H] utilitários testáveis do terminal hardening de fence:deliverCar
+    -- (marcador server-local + retry de deleção). ANTES de server/fence.lua.
+    'server/session/deliver_car_util.lua',
+    'server/session/deliver_car_spec.lua',    -- [v1.15 PR-H] self-gated (fence:deliverCar hardening)
     -- [v1.15 PR-E] logística física de pneu: entitlement por peça real + storage do
     -- truck com identidade própria. Depois da ChopSession (usa GetPartState/Origin);
     -- antes de server/fence.lua (loadToTruck/sellTyres) e server/main.lua (Issue no chop).

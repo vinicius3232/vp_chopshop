@@ -420,6 +420,12 @@ function deliverCar()
     elseif res and res.err == 'cooldown' then
         local mins = math.ceil(res.wait / 60)
         lib.notify({ description=L('fence_car_wait_fmt', mins), type='error' })
+    elseif res and (res.err == 'owned' or res.err == 'already_delivered' or res.err == 'identity') then
+        lib.notify({ description=L('err_' .. res.err), type='error' })
+    elseif res and res.err == 'cooldown_race' then
+        lib.notify({ description=L('err_cooldown'), type='error' })
+    elseif res and res.err == 'payment' then
+        lib.notify({ description=L('err_payment'), type='error' })
     else
         lib.notify({ description=L('fence_car_refused'), type='error' })
     end

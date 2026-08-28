@@ -927,6 +927,9 @@ Config.Fence = {
     WholeCarCooldownMin = 20,
     --- Cash base ao entregar carro inteiro.
     WholeCarBasePayout  = 8000,
+    --- [v1.15 PR-H] Política p/ carro OWNED/persistido na entrega inteira.
+    --- 'deny' (default, release-safe): entrega NEGADA. 'destroy' não implementado.
+    DeliverCarOwnedPolicy = 'deny',
     --- Dias sem aparecer antes de perder 1 nível de trust.
     TrustDecayDays      = 7,
     --- XP de trust ganho por entrega concluída.

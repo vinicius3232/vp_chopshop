@@ -12,7 +12,18 @@ local TrustCache = {} ---@type table<number, {trust_level:integer, trust_xp:inte
 --- Mutex para geração de ordens (previne dois pedidos simultâneos por jogador)
 local OrderGenBusy  = {} ---@type table<string, boolean>
 --- Mutex para entrega de carro inteiro (previne double-call no cooldown DB check)
-local DeliveryBusy  = {} ---@type table<string, boolean>
+local DeliveryBusy  = {} ---@type table<string, boolean>   playerKey → true
+--- [v1.15 PR-H] Guard por VEÍCULO na entrega inteira (previne dois jogadores
+--- entregarem a MESMA entidade) + tombstone que bloqueia re-entrega do mesmo netId
+--- enquanto a entidade não sumir de fato (ex.: BridgeDeleteWorldVehicle falhou).
+local DeliverCarBusy      = {} ---@type table<integer, string>   netId → playerKey
+local DeliveredTombstone  = {} ---@type table<integer, { model:integer, mark:string, at:integer }>
+--- [PR-H] Nesta ordem transacional (reserva de cooldown ANTES do pagamento) o
+--- dinheiro só entra depois de reserva + marcador confirmados. Se algo falha
+--- depois disso, ou o dinheiro nunca entrou (rollback simples) ou a entrega
+--- ocorreu de fato (cleanupPending). Não há mais janela "pago sem barreira" →
+--- a quarentena econômica de deliverCar deixou de ser necessária.
+local _deliverMarkSeq = 0
 --- Mutex para venda de pneus (previne double-payout por double-fire simultâneo)
 local SellTyresBusy = {} ---@type table<number, boolean>
 --- [v1.15 PR-E hardening] Quarentena econômica: pagamento CONFIRMADO + CommitSold
@@ -589,7 +600,32 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     return release({ ok=true, count=count, total=total })
 end)
 
+--- [v1.15 PR-H] Retries de deleção de mundo — IDENTIDADE ESTRITA por MARCADOR
+--- server-local. A tentativa em si é `VPChopDeliverCar.tryDeleteCleanupOnce`
+--- (sem timer, testável direto); aqui só agendamos e reagendamos.
+local function scheduleCarDeleteRetry(netId, mark, expectedFw, attemptsLeft)
+    attemptsLeft = attemptsLeft or 5
+    SetTimeout(2500, function()
+        local res = VPChopDeliverCar.tryDeleteCleanupOnce(DeliveredTombstone[netId], netId, mark, expectedFw)
+        if res.aborted then
+            print(('[vp_chopshop][deliverCar] retry ABORTADA netId %s: %s. Sem auto-delete.'):format(netId, res.reason or '?'))
+            return
+        end
+        if res.done then return end
+        if res.retryable and attemptsLeft > 1 then
+            scheduleCarDeleteRetry(netId, mark, expectedFw, attemptsLeft - 1)
+        else
+            print(('[vp_chopshop][deliverCar] netId %s: deleção de mundo pendente (method=%s) após retries — jogador JÁ pago, tombstone mantido.'):format(netId, res.method))
+        end
+    end)
+end
+
 -- Entregar carro inteiro (Tier 4 + trust 4)
+-- [v1.15 PR-H] ORDEM TERMINAL (a reserva de cooldown é a AUTORIDADE, vem ANTES do dinheiro):
+--   guards → entity/range → MARCADOR (barreira de entrada) → ownership gate →
+--   cooldown SELECT (só p/ `wait`) → RESERVA de cooldown condicional (affectedRows==1) →
+--   marcador write+readback → BridgeAddCash → tombstone → BridgeDeleteWorldVehicle →
+--   trust → FENCE_DELIVERY.
 lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
     if not IsValidSource(src) then return { ok=false } end
     local trust = VPChopFenceGetTrust(src)
@@ -598,42 +634,74 @@ lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
     local prog = VPChopGetProgression(src)
     if prog.tier < 4 then return { ok=false, err='tier' } end
 
-    -- [FIX M-3] Mutex por jogador: previne dois deliverCar simultâneos passarem pelo cooldown check
     local key = ServerChopPlayerKey(src)
+
+    -- [FIX M-3] Mutex por jogador: previne dois deliverCar simultâneos passarem pelo cooldown check
     if DeliveryBusy[key] then return { ok=false, err='processing' } end
     DeliveryBusy[key] = true
+    local function release(res) DeliveryBusy[key] = nil; return res end
 
-    -- [FIX M-2] Cooldown comparado inteiramente no MySQL para eliminar risco de clock skew
-    -- entre os relógios do servidor FiveM (os.time) e do servidor MySQL (UNIX_TIMESTAMP).
+    netId = tonumber(netId) or 0
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then
+        return release({ ok=false, err='vehicle' })
+    end
+    if not ValidatePlayerNearVehicle(src, veh, 6.0) then
+        return release({ ok=false, err='range' })
+    end
+
+    -- Guard por veículo (dois jogadores não entregam a MESMA entidade em paralelo).
+    if DeliverCarBusy[netId] then return release({ ok=false, err='processing' }) end
+    DeliverCarBusy[netId] = key
+    local function releaseAll(res) DeliverCarBusy[netId] = nil; return release(res) end
+
+    -- [PR-H] MARCADOR = BARREIRA DE ENTRADA. É a autoridade de identidade da
+    -- entidade viva já entregue: sobrevive a resource restart enquanto a carcaça
+    -- não some do mundo. Resultado distinguível:
+    --   leitura FALHOU        → 'identity' (fail-closed, não sabemos se já foi entregue)
+    --   marcador PRESENTE     → 'already_delivered'
+    --   marcador AUSENTE      → segue (o tombstone por si só, sem marcador, NÃO bloqueia:
+    --                            netId reciclado p/ outra entidade é identidade nova)
+    local mrok, curMark = VPChopDeliverCar.readMark(veh)
+    if not mrok then
+        return releaseAll({ ok=false, err='identity' })
+    end
+    if curMark ~= nil then
+        return releaseAll({ ok=false, err='already_delivered' })
+    end
+
+    -- [PR-H] OWNERSHIP GATE — carro persistido (player vehicle) NÃO é entregável.
+    -- BridgeResolveVehiclePersistence só LÊ; dúvida ⇒ 'unknown' ⇒ fail-closed.
+    -- `DeliverCarOwnedPolicy` (default 'deny'): 'destroy' NÃO implementado → owned|unknown
+    -- resulta SEMPRE em DENY (preferimos negar a destruir um player vehicle).
+    local ownedPolicy = (Config.Fence and Config.Fence.DeliverCarOwnedPolicy) or 'deny'
+    local persistence = BridgeResolveVehiclePersistence(veh, 'deliver_car')
+    if persistence.status ~= 'not_owned' then
+        if persistence.status == 'unknown' or Config.Debug then
+            print(('[vp_chopshop][deliverCar] netId %s: persistence=%s (src=%s, policy=%s) → DENY'):format(
+                netId, persistence.status, persistence.source, tostring(ownedPolicy)))
+        end
+        return releaseAll({ ok=false, err='owned', persistence=persistence.status })
+    end
+
+    -- [FIX M-2] Cooldown SELECT — só p/ devolver um `wait` amigável e o valor
+    -- anterior de last_car_delivery (p/ rollback). O UPDATE abaixo é a autoridade.
     local cooldownSec = ((Config.Fence and Config.Fence.WholeCarCooldownMin) or 20) * 60
     local cdRow = MySQL.single.await(
-        'SELECT GREATEST(0, ? - TIMESTAMPDIFF(SECOND, last_car_delivery, NOW())) as wait_sec FROM vp_chop_progression WHERE identifier=?',
+        'SELECT GREATEST(0, ? - TIMESTAMPDIFF(SECOND, last_car_delivery, NOW())) as wait_sec, '..
+        'UNIX_TIMESTAMP(last_car_delivery) as prev_ts FROM vp_chop_progression WHERE identifier=?',
         {cooldownSec, key}
     )
     if cdRow and (cdRow.wait_sec or 0) > 0 then
-        DeliveryBusy[key] = nil
-        return { ok=false, err='cooldown', wait=cdRow.wait_sec }
+        return releaseAll({ ok=false, err='cooldown', wait=cdRow.wait_sec })
     end
-
-    local veh = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
-    if not veh or veh == 0 or not DoesEntityExist(veh) then
-        DeliveryBusy[key] = nil
-        return { ok=false, err='vehicle' }
-    end
-    if not ValidatePlayerNearVehicle(src, veh, 6.0) then
-        DeliveryBusy[key] = nil
-        return { ok=false, err='range' }
-    end
+    local prevCdTs = cdRow and cdRow.prev_ts or nil
 
     local plate = GetVehicleNumberPlateText(veh):gsub('%s+', '')
-
-    -- [M1 FIX] Calcular label uma vez (VPChopHeatCalc tem SQL query interna).
-    -- VPChopHeatGetLabel + VPChopHeatGetPriceMult chamariam VPChopHeatCalc 2×; mapeamos localmente.
     local heatLabel = VPChopHeatGetLabel(plate)
-    if heatLabel == 'queimando' then
-        DeliveryBusy[key] = nil
-        return { ok=false, err='too_hot' }
-    end
+    if heatLabel == 'queimando' then return releaseAll({ ok=false, err='too_hot' }) end
+
+    -- Payout (INALTERADO — esta PR não é balance)
     local _heatLabelToMult = { frio=1.0, morno=0.90, quente=0.75, queimando=0.0 }
     local heatMult  = _heatLabelToMult[heatLabel] or 1.0
     local tierMult  = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.10
@@ -641,29 +709,94 @@ lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
     local nightM    = getNightBonusMultiplier()
     local base      = (Config.Fence and Config.Fence.WholeCarBasePayout) or 8000
     local payout    = math.floor(base * trustM * tierMult * heatMult * nightM)
-
-    -- Sanity cap: entrega de carro não deve exceder 5× o WholeCarBasePayout
-    local maxCarPayout = math.floor(((Config.Fence and Config.Fence.WholeCarBasePayout) or 8000) * 5)
+    local maxCarPayout = math.floor(base * 5)
     payout = math.min(payout, maxCarPayout)
 
-    -- Persistir cooldown ANTES de pagar (garante que falha de DB não permite spam)
-    local cdOk = pcall(function()
-        MySQL.query.await('UPDATE vp_chop_progression SET last_car_delivery=NOW() WHERE identifier=?', {key})
+    -- [PR-H] 1) RESERVA DE COOLDOWN CONDICIONAL — autoridade terminal, ANTES do dinheiro.
+    -- UPDATE atômico: só grava se o cooldown continua liberado. affectedRows==1
+    -- obrigatório. Query lançou erro / affected nil / affected ~= 1 ⇒ NÃO pagar.
+    local reserveOk, affected = pcall(function()
+        return MySQL.update.await(
+            'UPDATE vp_chop_progression SET last_car_delivery=NOW() WHERE identifier=? AND '..
+            '(last_car_delivery IS NULL OR TIMESTAMPDIFF(SECOND, last_car_delivery, NOW()) >= ?)',
+            {key, cooldownSec}
+        )
     end)
-    if not cdOk then
-        DeliveryBusy[key] = nil
-        return { ok=false, err='db' }
+    if not reserveOk or affected ~= 1 then
+        -- affected==0 → outro caminho reservou primeiro (race) ou linha ausente;
+        -- erro na query → 'db'. Nenhum dos dois paga.
+        return releaseAll({ ok=false, err = (reserveOk and 'cooldown_race' or 'db') })
     end
 
-    -- Deletar veículo e pagar
-    DeleteEntity(veh)
-    BridgeAddCash(src, payout, 'fence_car')
+    -- [RC-FIX-1a] Rollback da reserva: restaura last_car_delivery ao valor anterior
+    -- (ou NULL). Só é CONFIRMADO com affectedRows==1 — `pcall==true` prova apenas
+    -- que a query não lançou. query error / nil / false / 0 / >1 ⇒ NÃO confirmado
+    -- ⇒ fail-closed (jogador pode ficar com cooldown indevido; preferível a abrir
+    -- janela de payout). Nenhuma compensação automática adicional.
+    local function rollbackCooldown()
+        local ok, affected = pcall(function()
+            if prevCdTs then
+                return MySQL.update.await('UPDATE vp_chop_progression SET last_car_delivery=FROM_UNIXTIME(?) WHERE identifier=?', {prevCdTs, key})
+            end
+            return MySQL.update.await('UPDATE vp_chop_progression SET last_car_delivery=NULL WHERE identifier=?', {key})
+        end)
+        return ok == true and affected == 1
+    end
+
+    -- [PR-H] 2) MARCADOR write+readback ANTES de qualquer dinheiro. Não confirmou
+    -- ⇒ rollback da reserva + 'identity' (o dinheiro ainda não entrou).
+    _deliverMarkSeq = _deliverMarkSeq + 1
+    local mark = ('dcm:%d'):format(_deliverMarkSeq)
+    if not VPChopDeliverCar.writeMark(veh, mark) then
+        if not rollbackCooldown() then
+            LogSuspicious(src, 'fence:deliverCar',
+                ('SEVERE: marcador não confirmado + rollback de cooldown FALHOU — player %s (sem perda monetária; cooldown fail-closed)'):format(key))
+        end
+        return releaseAll({ ok=false, err='identity' })
+    end
+
+    -- [PR-H] 3) PAGAR. Falha ⇒ limpar marcador + rollback da reserva (dinheiro não entrou).
+    if not BridgeAddCash(src, payout, 'fence_car') then
+        -- [RC-FIX-1b] clearMark pode falhar — se falhar, o veículo permanece
+        -- fail-closed como already_delivered (nova entrega dele é NEGADA), sem
+        -- perda econômica. Não forçar limpeza por outro mecanismo — só registrar.
+        local markCleared = VPChopDeliverCar.clearMark(veh)
+        if not markCleared then
+            LogSuspicious(src, 'fence:deliverCar',
+                ('SEVERE: pagamento falhou e marcador de entrega NÃO pôde ser removido — player %s, netId %s; veículo pode permanecer fail-closed como already_delivered; nenhum dinheiro foi pago.'):format(key, tostring(netId)))
+        end
+        if not rollbackCooldown() then
+            LogSuspicious(src, 'fence:deliverCar',
+                ('pagamento falhou + rollback de cooldown FALHOU — player %s (sem perda monetária; cooldown fail-closed)'):format(key))
+        end
+        return releaseAll({ ok=false, err='payment' })
+    end
+
+    -- [PR-H] 4) tombstone + deleção de mundo. Marcador já gravado → a retry só
+    -- deleta ESTA entidade.
+    DeliveredTombstone[netId] = { model = GetEntityModel(veh), mark = mark, at = os.time() }
+    local del = BridgeDeleteWorldVehicle(veh, { expectedFramework = persistence.framework })
 
     addTrustXp(src, (Config.Fence and Config.Fence.XpOrderBonus) or 80)
     TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, payout, 'car')
 
-    DeliveryBusy[key] = nil
-    return { ok=true, payout=payout }
+    if del.existsAfter then
+        -- Carro não sumiu. Jogador JÁ pago + cooldown reservado; o marcador bloqueia
+        -- re-entrega. NÃO estornar (a entrega ocorreu). Retries com identidade estrita.
+        print(('[vp_chopshop][deliverCar] netId %s: BridgeDeleteWorldVehicle não removeu o carro (method=%s) — jogador pago, cleanupPending.'):format(netId, del.method))
+        scheduleCarDeleteRetry(netId, mark, persistence.framework)
+        return releaseAll({ ok=true, payout=payout, cleanupPending=true })
+    end
+
+    return releaseAll({ ok=true, payout=payout })
+end)
+
+-- [v1.15 PR-H] Limpeza do guard/tombstone de entrega quando o carro enfim sai do mundo.
+AddEventHandler('entityRemoved', function(entity)
+    local nid = NetworkGetNetworkIdFromEntity(entity)
+    if not nid or nid == 0 then return end
+    DeliverCarBusy[nid] = nil
+    DeliveredTombstone[nid] = nil
 end)
 
 -- Retornar nível de trust do jogador (usado pelo cliente para montar targets)

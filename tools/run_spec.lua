@@ -127,6 +127,7 @@ dofile(base .. '/bridge/server_vehicle.lua')          -- [PR-D] provê BridgeRes
 dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreEntitlement
 dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
 dofile(base .. '/server/session/action_session.lua')     -- [PR-F] provê ActionSession
+dofile(base .. '/server/session/deliver_car_util.lua')   -- [PR-H] provê VPChopDeliverCar (marker + retry)
 dofile(base .. '/server/chop.lua')                    -- provê VPChopServerTryPart etc. (delega a base_state)
 dofile(base .. '/server/advanced_chop.lua')           -- [PR-G] provê VPChopAdv{Door,Engine,Carcass}Commit + VPChopWelderNearVehicle
 dofile(base .. '/server/action/base_tyre.lua')        -- [PR-F] registra kind/executor 'tyre' (spec sobrescreve o executor)
@@ -142,7 +143,8 @@ dofile(base .. '/server/session/base_state_spec.lua')
 dofile(base .. '/server/session/advanced_state_spec.lua')
 dofile(base .. '/server/session/discard_state_spec.lua')  -- [PR-D]
 dofile(base .. '/server/logistics/tyre_entitlement_spec.lua')  -- [PR-E]
-dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F]
+dofile(base .. '/server/session/deliver_car_spec.lua')         -- [PR-H]
+dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F/G]
 
 local anyFail = false
 for i = specStart, #threads do
