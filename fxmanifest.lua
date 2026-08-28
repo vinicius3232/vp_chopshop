@@ -121,16 +121,14 @@ server_scripts {
     'server/action/advanced_chop.lua',
 }
 
-data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'
-data_file 'DLC_ITYP_REQUEST' 'stream/lr_supermod_garage_int.ytyp'
--- [P0.2 / RC-FINDING-01] wheel_spacer.ytyp + bolt.ydr eram o parafuso 3D do minigame,
--- vindos do pacote pago `ls_bolt_minigame`. Removidos do repo (IP de terceiros; o repo
--- vai a público). O minigame roda em MODO MARCADOR (DrawMarker) — não precisa de asset.
+-- [P0.2b] stream/ removido por completo. Continha só:
+--   · bolt.ydr + wheel_spacer.ytyp — parafuso 3D do minigame, do pacote PAGO
+--     `ls_bolt_minigame` (o minigame roda em modo marcador, DrawMarker, sem asset);
+--   · nacelle.* + lr_supermod_* — props do ELEVADOR, removido do sistema há tempo
+--     (só o macaco `imp_prop_axel_stand_01a`, base game, é usado — Config.Jackstand).
+-- Nenhum é referenciado no código. Repo vai a público → sem IP de terceiros.
 
 files {
     'installation/ox_items_snippet.txt',
-    'stream/*.ydr',
-    'stream/*.ytyp',
-    'stream/*.ybn',
     'sounds/*.ogg',
 }
