@@ -459,4 +459,18 @@ Total harness **436**.
   marker gate, resource-restart sim, same-model netId reuse, retry REAL, rollback
   affectedRows, clearMark failure seam). Total harness **493**.
 
+**Estado:** HEAD `99371e4` (branch `pr-h/v1.15-delivercar-terminal-hardening`,
+base `pr-g/...` = `46c1713`). PR #11 aberta, mergeável, **NÃO mergeada**.
+Aprovada estruturalmente + RC-FIX-1a/1b. Merge condicionado à validação runtime
+(ver `V115_RELEASE_CANDIDATE.md`).
+
+---
+
+## v1.15 — CODE FREEZE
+
+A partir de `99371e4` a fase de implementação arquitetural v1.15 está **ENCERRADA**.
+Stack #2→#11, nada mergeado. Não iniciar feature nova; não fazer hardening
+especulativo. Próximo movimento = RELEASE CANDIDATE / REAL QBOX INTEGRATION
+VALIDATION (`V115_RELEASE_CANDIDATE.md`).
+
 Não avançar automaticamente — cada PR passa por revisão.
