@@ -109,13 +109,10 @@ _G.Config = {
         boot     = { steel  = { amount = 3, chance = 1.0 } },
     },
 }
--- [P1.2] ChopParts/ChopPartOrder deixam de ser stub hardcoded — vêm da projeção
--- REAL do registry (shared/chop_parts.lua), carregada logo abaixo.
-
 local base = arg[1] or '.'
 dofile(base .. '/shared/registry/tools.lua')          -- [P1.1] VPChopToolRegistry
 dofile(base .. '/shared/registry/parts.lua')          -- [P1.1] VPChopPartRegistry
-dofile(base .. '/shared/chop_parts.lua')              -- [P1.2] ChopParts/Order = projeção do registry
+dofile(base .. '/shared/part_class.lua')              -- [P2.1] VPChopPartGtaClass
 dofile(base .. '/shared/action_gate.lua')             -- [PR-G] VPChopActionMode{Tyre,Advanced}
 dofile(base .. '/server/session/chop_session.lua')   -- provê ChopSession (+ sweeper thread [1])
 dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequireRaisedSession
