@@ -117,6 +117,8 @@ _G.ChopParts = {
 }
 
 local base = arg[1] or '.'
+dofile(base .. '/shared/registry/tools.lua')          -- [SPIKE PR-I] VPChopToolRegistry (inerte)
+dofile(base .. '/shared/registry/parts.lua')          -- [SPIKE PR-I] VPChopPartRegistry (inerte)
 dofile(base .. '/shared/action_gate.lua')             -- [PR-G] VPChopActionMode{Tyre,Advanced}
 dofile(base .. '/server/session/chop_session.lua')   -- provê ChopSession (+ sweeper thread [1])
 dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequireRaisedSession
@@ -147,6 +149,7 @@ dofile(base .. '/server/logistics/tyre_entitlement_spec.lua')  -- [PR-E]
 dofile(base .. '/server/session/deliver_car_spec.lua')         -- [PR-H]
 dofile(base .. '/server/session/carcass_ledger_spec.lua')      -- [P0.4]
 dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F/G]
+dofile(base .. '/shared/registry/registry_spec.lua')          -- [SPIKE PR-I]
 
 local anyFail = false
 for i = specStart, #threads do
