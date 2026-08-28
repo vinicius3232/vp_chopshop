@@ -158,7 +158,7 @@ local function ambushSpawnOne(src, netId, cfg)
                         if not GetPlayerName(src) then return end
                         exports.ox_inventory:AddItem(src, 'fence_referral', 1)
                         TriggerClientEvent('ox_lib:notify', src, {
-                            title='Dica', description='Encontrou algo no bolso do cara. Verifique o inventário.', type='inform', duration=5000
+                            title=L('ambush_pocket_loot_title'), description=L('ambush_pocket_loot'), type='inform', duration=5000
                         })
                         return
                     end

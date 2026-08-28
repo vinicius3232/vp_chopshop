@@ -98,7 +98,7 @@ local function giveReward(src, netId, reward)
         and VPChopAddStolenCarParts(src, netId, reward.amount)
         or  InvAdd(src, reward.item, reward.amount)
     if not ok then
-        TriggerClientEvent('ox_lib:notify', src, { type = 'warning', description = 'Inventário cheio — item de recompensa perdido.' })
+        TriggerClientEvent('ox_lib:notify', src, { type = 'warning', description = L('reward_inv_full_engine') })
     end
 end
 
@@ -184,7 +184,7 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
         end
     end
     if anyFull then
-        TriggerClientEvent('ox_lib:notify', src, { type = 'warning', description = 'Inventário cheio — alguns itens de carcaça perdidos.' })
+        TriggerClientEvent('ox_lib:notify', src, { type = 'warning', description = L('reward_inv_full_carcass') })
     end
 
     local vehCoords = getVehCoords(netId)

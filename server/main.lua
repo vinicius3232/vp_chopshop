@@ -327,7 +327,7 @@ function VPChopChopPartCommit(source, netId, partKey)
     if invFull then
         TriggerClientEvent('ox_lib:notify', source, {
             type = 'warning',
-            description = 'Inventário cheio — parte da recompensa foi perdida.',
+            description = L('reward_inv_full'),
         })
     end
 
