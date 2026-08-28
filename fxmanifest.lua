@@ -123,11 +123,9 @@ server_scripts {
 
 data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'
 data_file 'DLC_ITYP_REQUEST' 'stream/lr_supermod_garage_int.ytyp'
--- [FIX] wheel_spacer.ytyp É o archetype do bolt.ydr (o parafuso do minigame). O arquivo está
--- em stream/, mas a linha de registro abaixo havia sido removida → o archetype 'bolt' nunca
--- registrava, RequestModel('bolt') falhava e o minigame caía no modo marcador. Registrado de
--- volta: agora o parafuso 3D carrega. (O modo marcador continua como fallback automático.)
-data_file 'DLC_ITYP_REQUEST' 'stream/wheel_spacer.ytyp'
+-- [P0.2 / RC-FINDING-01] wheel_spacer.ytyp + bolt.ydr eram o parafuso 3D do minigame,
+-- vindos do pacote pago `ls_bolt_minigame`. Removidos do repo (IP de terceiros; o repo
+-- vai a público). O minigame roda em MODO MARCADOR (DrawMarker) — não precisa de asset.
 
 files {
     'installation/ox_items_snippet.txt',
