@@ -56,7 +56,11 @@ ActionSession.RegisterKind('adv_door', {
     distance  = 6.0,
     validate  = function(v)
         -- [P1.3 / FASE C] fast-path do registry só p/ bonnet; hardcode é o fallback
-        -- (boot / door_*, e bonnet também se o registry não estiver carregado).
+        -- (boot / door_*, e bonnet também se o registry sumir OU tiver enabled=false).
+        -- O fallback é sempre viável: projectChopParts() filtra por gtaIndex, NÃO por
+        -- enabled → ChopParts.bonnet existe mesmo com o def desabilitado. E p/ bonnet
+        -- as duas rotas dão o MESMO veredito (toolClass='cut' ≡ VPChopHasTool(src,false)
+        -- → no_saw), então um flip de enabled entre START e COMPLETE não muda o resultado.
         if v.action == 'bonnet' and VPChopPartRegistry and VPChopPartRegistry.isEnabled('bonnet') then
             return registryValidate(v)
         end
