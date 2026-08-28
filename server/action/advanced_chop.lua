@@ -8,11 +8,11 @@
 --  ESTES executores delegam ao DOMÍNIO já existente (VPChopAdv{Door,Engine,Carcass}
 --  Commit em server/advanced_chop.lua) — SEM duplicar gameplay/economia.
 --
---  [v1.16 P1.4 / FASE D] Cada `validate` roda no START e na revalidação do
---  COMPLETE e agora é DERIVADO DO PART REGISTRY para TODAS as peças avançadas
---  (bonnet/boot/door_* · adv_engine · adv_carcass). Cada kind mantém um FALLBACK
---  hardcoded, usado só quando o registry não está carregado / a peça não consta
---  (fxmanifest fora de ordem, def removido). A FASE E remove os fallbacks.
+--  [v1.16 P1.5 / FASE E] O `validate` de cada kind (roda no START e na revalidação
+--  do COMPLETE) é DERIVADO DO PART REGISTRY, sem fallback hardcoded. O registry é
+--  obrigatório — se não carregar, este arquivo aborta o resource (igual a
+--  shared/chop_parts.lua). Mapeamento de erro idêntico ao antigo hardcode; parity
+--  garantida por registry_spec + a bateria ADV-* do action_session_spec.
 --    adv_door    → serra                        (registry: toolClass='cut')
 --    adv_engine  → capô removido + chave de fenda (registry: requires=bonnet, toolClass='screw')
 --    adv_carcass → motor removido + soldadora     (registry: requires=adv_engine, gates.welder)
@@ -22,17 +22,21 @@
 
 if not (ActionSession and ActionSession.RegisterKind) then return end
 
+if not (VPChopPartRegistry and VPChopPartRegistry.get) then
+    error('[vp_chopshop] server/action/advanced_chop.lua exige VPChopPartRegistry — '
+        .. 'conferir a ordem no fxmanifest (shared/registry/parts.lua ANTES).')
+end
+
 -- ═══ Validação derivada do Part Registry (shared/registry/parts.lua) ══════════
---  Deriva de VPChopPartRegistry.get(action) — mapeamento de erro IDÊNTICO ao
---  hardcode legado (parity garantida por registry_spec + os asserts ADV-* do
---  action_session_spec):
---    requires[]  → VPChopAdvancedState.wasRemoved(sessionId, part)  (hood_first / engine_first)
---    toolClass   → VPChopHasTool(src, wantDrill)                    (no_saw / no_screwdriver)
+--  Deriva de VPChopPartRegistry.get(action):
+--    d.enabled ~= true                                              → 'part' (peça desligada)
+--    requires[] → VPChopAdvancedState.wasRemoved(sessionId, part)   (hood_first / engine_first)
+--    toolClass  → VPChopHasTool(src, wantDrill)                     (no_saw / no_screwdriver)
 --    gates.welder→ VPChopWelderNearVehicle(netId)                   (no_welder_adv)
 ---@param v { src:integer, sessionId:string, netId:integer, action:string }
 ---@return string|nil err
 local function registryValidate(v)
-    local d = VPChopPartRegistry and VPChopPartRegistry.get(v.action)
+    local d = VPChopPartRegistry.get(v.action)
     if not d or d.enabled ~= true then return 'part' end
 
     for _, req in ipairs(d.requires or {}) do
@@ -50,34 +54,17 @@ local function registryValidate(v)
     return nil
 end
 
---- Envolve o `validate` de um kind: registry quando a peça está registrada+enabled,
---- senão o `fallback` hardcoded (registry ausente / def removido).
----@param fallback fun(v: table): string|nil
----@return fun(v: table): string|nil
-local function withRegistry(fallback)
-    return function(v)
-        if VPChopPartRegistry and VPChopPartRegistry.isEnabled(v.action) then
-            return registryValidate(v)
-        end
-        return fallback(v)
-    end
-end
-
 -- ─── adv_door ────────────────────────────────────────────────────────────────
--- adv_door NÃO usa withRegistry() puro: mantém o guard de tipo do hardcode legado.
--- StartAdvanced só roteia parts com ChopParts[part].kind=='door' p/ este kind, mas
--- o COMPLETE revalida por act.action — reconferir o tipo é defense-in-depth barato
--- e preserva paridade exata (o registryValidate genérico não checa gtaClass).
+-- Guard de tipo (defense-in-depth): StartAdvanced só roteia parts door-kind p/ cá,
+-- mas o COMPLETE revalida por act.action e o registryValidate genérico não checa
+-- gtaClass. adv_engine/adv_carcass dispensam (StartAdvanced casa o kind por nome).
 ActionSession.RegisterKind('adv_door', {
     minDurKey = 'door',
     distance  = 6.0,
     validate  = function(v)
         local pdef = ChopParts and ChopParts[v.action]
         if not pdef or pdef.kind ~= 'door' then return 'part' end
-        if VPChopPartRegistry and VPChopPartRegistry.isEnabled(v.action) then
-            return registryValidate(v)
-        end
-        if not VPChopHasTool(v.src, false) then return 'no_saw' end   -- fallback: registry off
+        return registryValidate(v)
     end,
 })
 ActionSession.RegisterExecutor('adv_door', function(act)
@@ -91,10 +78,7 @@ end)
 ActionSession.RegisterKind('adv_engine', {
     minDurKey = 'engine',
     distance  = 6.0,
-    validate  = withRegistry(function(v)
-        if not VPChopAdvancedState.wasRemoved(v.sessionId, 'bonnet') then return 'hood_first' end
-        if not VPChopHasTool(v.src, true) then return 'no_screwdriver' end
-    end),
+    validate  = registryValidate,   -- requires=[bonnet] · toolClass='screw'
 })
 ActionSession.RegisterExecutor('adv_engine', function(act)
     if type(VPChopAdvEngineCommit) ~= 'function' then return { ok = false, err = 'internal' } end
@@ -107,10 +91,7 @@ end)
 ActionSession.RegisterKind('adv_carcass', {
     minDurKey = 'carcass',
     distance  = 8.0,
-    validate  = withRegistry(function(v)
-        if not VPChopAdvancedState.wasRemoved(v.sessionId, 'adv_engine') then return 'engine_first' end
-        if not VPChopWelderNearVehicle(v.netId) then return 'no_welder_adv' end
-    end),
+    validate  = registryValidate,   -- requires=[adv_engine] · gates.welder=true · toolClass=nil
 })
 ActionSession.RegisterExecutor('adv_carcass', function(act)
     if type(VPChopAdvCarcassCommit) ~= 'function' then return { ok = false, err = 'internal' } end

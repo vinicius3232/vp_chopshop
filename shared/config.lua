@@ -416,7 +416,6 @@ Config.Alarm = {
     DisarmDistance      = 6.0,  -- distância máxima (m) do ox_target de desarme
 
     --- Item necessário para iniciar o desarme do alarme.
-    --- Use o mesmo item de Config.AdvancedChop.ScrewdriverItem para consistência.
     DisarmItem = 'screwdriver',
 
     --- Minigame de desarme: lib.skillCheck. `false` = desligado (desarme instantâneo).
@@ -781,11 +780,10 @@ Config.TyreMission = {
 Config.AdvancedChop = {
     Enable = true,
 
-    --- Item necessário para desmontar portas/capô/porta-malas (Fase 2).
-    SawItem = 'metal_saw',
-
-    --- Item necessário para desmontar o motor (Fase 3).
-    ScrewdriverItem = 'screwdriver',
+    -- [v1.16 P1.5 / FASE E] SawItem/ScrewdriverItem REMOVIDOS — eram config morta
+    -- (só citados num comentário). A ferramenta exigida por peça vem do Part
+    -- Registry (shared/registry/parts.lua: toolClass 'cut'/'screw') e a checagem
+    -- real é VPChopHasTool, que itera Config.Tools (saw_cheap/saw_pro/mechanic_drill).
 
     --- Raio máximo (m) para detetar soldadora perto do veículo (Fase 4).
     WelderRadius = 8.0,
