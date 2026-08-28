@@ -109,16 +109,13 @@ _G.Config = {
         boot     = { steel  = { amount = 3, chance = 1.0 } },
     },
 }
-_G.ChopParts = {
-    wheel_lf = { kind = 'tyre', index = 0 }, wheel_rf = { kind = 'tyre', index = 1 },
-    wheel_lr = { kind = 'tyre', index = 4 }, wheel_rr = { kind = 'tyre', index = 5 },
-    bonnet = { kind = 'door', index = 4 }, boot = { kind = 'door', index = 5 },
-    door_dside_f = { kind = 'door', index = 0 },
-}
+-- [P1.2] ChopParts/ChopPartOrder deixam de ser stub hardcoded — vêm da projeção
+-- REAL do registry (shared/chop_parts.lua), carregada logo abaixo.
 
 local base = arg[1] or '.'
-dofile(base .. '/shared/registry/tools.lua')          -- [SPIKE PR-I] VPChopToolRegistry (inerte)
-dofile(base .. '/shared/registry/parts.lua')          -- [SPIKE PR-I] VPChopPartRegistry (inerte)
+dofile(base .. '/shared/registry/tools.lua')          -- [P1.1] VPChopToolRegistry
+dofile(base .. '/shared/registry/parts.lua')          -- [P1.1] VPChopPartRegistry
+dofile(base .. '/shared/chop_parts.lua')              -- [P1.2] ChopParts/Order = projeção do registry
 dofile(base .. '/shared/action_gate.lua')             -- [PR-G] VPChopActionMode{Tyre,Advanced}
 dofile(base .. '/server/session/chop_session.lua')   -- provê ChopSession (+ sweeper thread [1])
 dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequireRaisedSession

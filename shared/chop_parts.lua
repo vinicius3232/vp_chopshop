@@ -1,25 +1,29 @@
+-- shared/chop_parts.lua
+-- ═══════════════════════════════════════════════════════════════════════════════
+--  [v1.16 P1.2 / FASE B] ChopParts / ChopPartOrder são a PROJEÇÃO do Part Registry.
+--
+--  A definição RICA da peça (bones, tool, deps, gates, carry, reward, minigame…)
+--  vive em shared/registry/parts.lua. Este arquivo é só a FACHADA LEGADA
+--  `{ labelKey, kind, index }` que o resto do código ainda consome hoje
+--  (client/main.lua, server/chop.lua, server/action/advanced_chop.lua, …).
+--
+--  A migração das FASEs C→F troca esses consumidores, um por vez, para lerem o
+--  registry direto. Quando o último sair, este arquivo some.
+--
+--  Carregar como shared_script DEPOIS de shared/registry/parts.lua.
+--  A paridade byte-a-byte (projeção == estas 10 peças) é provada por
+--  shared/registry/registry_spec.lua.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
 ---@class ChopPartDef
----@field labelKey string locale key in shared/locale.lua
+---@field labelKey string  locale key em shared/locale.lua
 ---@field kind 'door'|'tyre'
----@field index integer
+---@field index integer    índice de porta / roda GTA
 
---- Dismantlable parts: GTA natives (doors / tyres). Labels via `L(def.labelKey)`.
-ChopParts = {
-    bonnet = { labelKey = 'part_bonnet', kind = 'door', index = 4 },
-    boot = { labelKey = 'part_boot', kind = 'door', index = 5 },
-    door_dside_f = { labelKey = 'part_door_dside_f', kind = 'door', index = 0 },
-    door_pside_f = { labelKey = 'part_door_pside_f', kind = 'door', index = 1 },
-    door_dside_r = { labelKey = 'part_door_dside_r', kind = 'door', index = 2 },
-    door_pside_r = { labelKey = 'part_door_pside_r', kind = 'door', index = 3 },
-    wheel_lf = { labelKey = 'part_wheel_lf', kind = 'tyre', index = 0 },
-    wheel_rf = { labelKey = 'part_wheel_rf', kind = 'tyre', index = 1 },
-    wheel_lr = { labelKey = 'part_wheel_lr', kind = 'tyre', index = 4 },
-    wheel_rr = { labelKey = 'part_wheel_rr', kind = 'tyre', index = 5 },
-}
+if not (VPChopPartRegistry and VPChopPartRegistry.projectChopParts) then
+    error('[vp_chopshop] shared/chop_parts.lua exige VPChopPartRegistry — conferir a ordem '
+        .. 'no fxmanifest (shared/registry/parts.lua ANTES de shared/chop_parts.lua)')
+end
 
---- Lista estável para menus (ordem de exibição).
-ChopPartOrder = {
-    'bonnet', 'boot',
-    'door_dside_f', 'door_pside_f', 'door_dside_r', 'door_pside_r',
-    'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr',
-}
+--- `ChopParts`: table<string, ChopPartDef> · `ChopPartOrder`: string[] (ordem de menu)
+ChopParts, ChopPartOrder = VPChopPartRegistry.projectChopParts()
