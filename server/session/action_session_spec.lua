@@ -461,20 +461,26 @@ CreateThread(function()
     check('ADV-D4 adv_carcass sem welder → no_welder_adv (registry)', ActionSession.StartAdvanced(1, sid, 'adv_carcass').err == 'no_welder_adv')
     _G.WELDER_NEAR = true
 
-    -- ADV-D5 · registry OFF p/ adv_engine → fallback hardcode ainda dá hood_first
+    -- ADV-E1 · [FASE E] peça DESLIGADA no registry (enabled=false) → 'part'.
+    -- Sem mais fallback hardcoded: desligar a peça no registry a torna inchopável.
     fresh(); spawn(10, 111); sid = legitRaise(10, 1)
     VPChopPartRegistry.defs.adv_engine.enabled = false
-    check('ADV-D5 registry OFF → adv_engine fallback → hood_first',
-        ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'hood_first')
+    check('ADV-E1 adv_engine desligado no registry → part',
+        ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'part')
     VPChopPartRegistry.defs.adv_engine.enabled = true
 
-    -- ADV-D6 · registry OFF p/ bonnet → fallback hardcode → START ok
+    -- ADV-E2 · bonnet desligado no registry → 'part' (guard de tipo passa; registryValidate barra)
     fresh(); spawn(10, 111); sid = legitRaise(10, 1)
     VPChopPartRegistry.defs.bonnet.enabled = false
-    local ad6 = ActionSession.StartAdvanced(1, sid, 'bonnet')
-    check('ADV-D6 registry OFF → bonnet fallback → START ok',
-        ad6.ok == true and ActionSession._test._all()[ad6.actionId].kind == 'adv_door')
+    check('ADV-E2 bonnet desligado no registry → part',
+        ActionSession.StartAdvanced(1, sid, 'bonnet').err == 'part')
     VPChopPartRegistry.defs.bonnet.enabled = true
+
+    -- ADV-E3 · reativar → volta a funcionar normalmente
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    local ae3 = ActionSession.StartAdvanced(1, sid, 'bonnet')
+    check('ADV-E3 bonnet reativado → START ok',
+        ae3.ok == true and ActionSession._test._all()[ae3.actionId].kind == 'adv_door')
 
     -- ═══ RATE-LIMIT REAL (500ms) NÃO QUEBRA REPLAY ════════════════════════════
     Config.ActionSession.StartRateLimitMs = 500
