@@ -66,8 +66,7 @@ ActionSession.RegisterKind('adv_door', {
     minDurKey = 'door',
     distance  = 6.0,
     validate  = function(v)
-        local pdef = ChopParts and ChopParts[v.action]
-        if not pdef or pdef.kind ~= 'door' then return 'part' end
+        if VPChopPartGtaClass(v.action) ~= 'door' then return 'part' end
         if not VPChopHasTool(v.src, false) then return 'no_saw' end
         return registryValidate(v)
     end,

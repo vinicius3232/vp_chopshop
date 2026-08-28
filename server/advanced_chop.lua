@@ -111,8 +111,7 @@ end
 
 ---@return { ok:boolean, err:string|nil }
 function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
-    local partDef = ChopParts[partKey]
-    if not partDef or partDef.kind ~= 'door' then return { ok = false, err = 'part' } end
+    if VPChopPartGtaClass(partKey) ~= 'door' then return { ok = false, err = 'part' } end
     if VPChopAdvancedState.wasRemoved(sessionId, partKey) then return { ok = false, err = 'done' } end
     if not consumeSaw(src) then return { ok = false, err = 'no_saw' } end
 
@@ -217,8 +216,7 @@ lib.callback.register('vp_chopshop:adv:chopPart', function(source, netId, partKe
     local okS, errS, sessionId = advGate(src, netId)
     if not okS then return { ok = false, err = errS } end
 
-    local partDef = ChopParts[partKey]
-    if not partDef or partDef.kind ~= 'door' then return { ok = false, err = 'part' } end
+    if VPChopPartGtaClass(partKey) ~= 'door' then return { ok = false, err = 'part' } end
 
     local vehCoords = getVehCoords(netId)
     if not vehCoords then return { ok = false, err = 'vehicle' } end

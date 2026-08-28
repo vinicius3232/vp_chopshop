@@ -248,8 +248,7 @@ end
 --- ativo (RequireBaseTyres=false) — nesse modo só o callback legacy processa tyre.
 function ActionSession.StartBaseTyre(src, sessionId, partKey)
     if not VPChopActionModeTyre() then return { ok = false, err = 'action_disabled' } end
-    local pdef = ChopParts and ChopParts[partKey]
-    if not pdef or pdef.kind ~= 'tyre' then return { ok = false, err = 'part' } end
+    if VPChopPartGtaClass(partKey) ~= 'tyre' then return { ok = false, err = 'part' } end
     return startCore(src, sessionId, partKey, 'tyre')
 end
 
@@ -267,9 +266,7 @@ function ActionSession.StartAdvanced(src, sessionId, partKey)
     local kind
     if partKey == 'adv_engine' then kind = 'adv_engine'
     elseif partKey == 'adv_carcass' then kind = 'adv_carcass'
-    else
-        local pdef = ChopParts and ChopParts[partKey]
-        if pdef and pdef.kind == 'door' then kind = 'adv_door' end
+    elseif VPChopPartGtaClass(partKey) == 'door' then kind = 'adv_door'
     end
     if not kind then return { ok = false, err = 'part' } end
     return startCore(src, sessionId, partKey, kind)
@@ -465,11 +462,11 @@ lib.callback.register('vp_chopshop:action:start', function(src, payload)
     if action == 'adv_engine' or action == 'adv_carcass' then
         return ActionSession.StartAdvanced(src, payload.sessionId, action)
     end
-    local pdef = ChopParts and ChopParts[action]
-    if pdef and pdef.kind == 'tyre' then
+    local gtaClass = VPChopPartGtaClass(action)
+    if gtaClass == 'tyre' then
         return ActionSession.StartBaseTyre(src, payload.sessionId, action)
     end
-    if pdef and pdef.kind == 'door' then
+    if gtaClass == 'door' then
         return ActionSession.StartAdvanced(src, payload.sessionId, action)
     end
     return { ok = false, err = 'part' }
