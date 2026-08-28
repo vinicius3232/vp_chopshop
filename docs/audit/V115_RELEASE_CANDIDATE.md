@@ -139,10 +139,34 @@ Fallbacks confirmados no código: `client/plates.lua:110-118` (plate) e `client/
 - Q2: "placa fora do quadro" = os marcadores do minigame, ou o mesh da placa está deslocado no modelo do veículo? Qual veículo?
 - Q3: "não apareceu ação com ferramentas" — qual ação (levantar macaco / desmanche / roubo de placa)? O carro estava levantado? O que mirou com o ox_target? Qual item equipado?
 
-**Status:** RC-FIX-2 **APLICADA** (`shared/config.lua` — `Config.Plates.Bolt3D.Enable=false` :436,
-`Config.Jackstand.Minigame.Bolt3D.Enable=false` :906). Config-only, zero código. Q1-Q3 ainda
+**Status:** RC-FIX-2 **APLICADA** (`6aa49f9` — `shared/config.lua`: `Config.Plates.Bolt3D.Enable=false` :440,
+`Config.Jackstand.Minigame.Bolt3D.Enable=false` :909). Config-only, zero código. Q1-Q3 ainda
 abertas — se a QA responder que há problema ALÉM do minigame 3D (steal não completa / mesh da
 placa deslocado / ação ausente com carro levantado), abrir finding separado.
+
+**QA (2º relato):** "a orientação do minigame também não funcionou" — além dos parafusos fora da
+placa e da câmera fixa na traseira, o giro/rotação dos parafusos (baseRot / cursor→turn) também
+não respondeu. Confirma que o subsistema `runBoltSurface` inteiro precisa de rework, não patch →
+mantida a decisão de desligar (RC-FIX-2) e tratar como rework pós-RC (§6).
+
+### Pós-RC — rework do minigame 3D de parafusos (`runBoltSurface` + `VPChopPlateBoltMinigame` + `VPChopBoltMinigame`)
+Só depois do RC real passar. Escopo:
+1. **Front/rear-aware (placa):** `client/plates.lua` `onSelect(data)` decide frente vs traseira por
+   `GetOffsetFromEntityGivenWorldCoords(veh, playerCoords).y > 0` ⇒ frente. Passa `isRear` para
+   `VPChopPlateBoltMinigame(veh, isRear)`.
+   - `yPlate = isRear and (vmin.y - off) or (vmax.y + off)`
+   - `outward` (normal da face) e `camPos` no lado correspondente
+   - `baseRot.z` → `vehHeading + (isRear and 180.0 or 0.0)`
+   - **Design:** é UMA placa (o servidor resolve `GetVehicleNumberPlateText`, seta as duas pontas,
+     limpa a visível p/ todos). Frente/traseira é só o enquadramento — não são 2 placas roubáveis.
+     Server-side INALTERADO.
+2. **Calibrar geometria:** `PlateZFrac / PlateYOffset / PlateHalfWidth / PlateHalfHeight` (placa) e os
+   equivalentes da roda — hoje placeholders que jogam os parafusos fora do alvo.
+3. **Orientação/giro:** revisar `baseRot`, o `SetEntityRotation` incremental dos bolts e o mapeamento
+   cursor→`turn` em `runBoltSurface` (QA: não respondeu).
+4. **Asset pago:** substituir/remover `stream/bolt.ydr` + `stream/wheel_spacer.ytyp` (`ls_bolt_minigame`,
+   P3 da auditoria). O modo marcador (`DrawMarker`) já funciona sem o asset e serve de base.
+5. Só reativar `Config.*.Bolt3D.Enable` depois de 1–4 validados in-game.
 
 ---
 
