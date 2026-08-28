@@ -55,15 +55,20 @@ local function registryValidate(v)
 end
 
 -- ─── adv_door ────────────────────────────────────────────────────────────────
--- Guard de tipo (defense-in-depth): StartAdvanced só roteia parts door-kind p/ cá,
--- mas o COMPLETE revalida por act.action e o registryValidate genérico não checa
--- gtaClass. adv_engine/adv_carcass dispensam (StartAdvanced casa o kind por nome).
+-- adv_door tem 2 invariantes NÃO delegados ao registryValidate genérico:
+--   · guard de tipo — StartAdvanced só roteia parts door-kind p/ cá, mas o COMPLETE
+--     revalida por act.action e o registryValidate não checa gtaClass;
+--   · porta SEMPRE exige serra — última linha de defesa se um def door vier com
+--     toolClass ausente/errado (registryValidate só checa quando toolClass=='cut').
+-- adv_engine/adv_carcass dispensam ambos (kind casado por nome exato; tool/deps/welder
+-- são justamente o que o registry descreve por peça).
 ActionSession.RegisterKind('adv_door', {
     minDurKey = 'door',
     distance  = 6.0,
     validate  = function(v)
         local pdef = ChopParts and ChopParts[v.action]
         if not pdef or pdef.kind ~= 'door' then return 'part' end
+        if not VPChopHasTool(v.src, false) then return 'no_saw' end
         return registryValidate(v)
     end,
 })
