@@ -431,6 +431,32 @@ CreateThread(function()
     check('ADV16 door completou', ActionSession.Complete(1, a16.actionId).ok == true)
     check('ADV16 START advanced imediato → processing (cooldown)', ActionSession.StartAdvanced(1, sid, 'boot').err == 'processing')
 
+    -- ═══ [P1.3 / FASE C] bonnet valida via Part Registry — paridade c/ o hardcode ══
+    -- ADV-C1 · bonnet sem serra → no_saw (via registryValidate; toolClass='cut').
+    --   Antes só `boot` (hardcode) cobria no_saw (ADV9).
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
+    check('ADV-C1 bonnet sem serra → no_saw (registry)', ActionSession.StartAdvanced(1, sid, 'bonnet').err == 'no_saw')
+    _G.HAS_TOOL = true
+
+    -- ADV-C2 · bonnet com serra → START ok, kind adv_door (== ADV1, agora pelo registry)
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    local ac2 = ActionSession.StartAdvanced(1, sid, 'bonnet')
+    check('ADV-C2 bonnet com serra → OPEN adv_door (registry)',
+        ac2.ok == true and ActionSession._test._all()[ac2.actionId].kind == 'adv_door')
+
+    -- ADV-C3 · o slice NÃO vaza: boot continua no hardcode (no_saw sem serra)
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
+    check('ADV-C3 boot ainda hardcode → no_saw', ActionSession.StartAdvanced(1, sid, 'boot').err == 'no_saw')
+    _G.HAS_TOOL = true
+
+    -- ADV-C4 · registry OFF (isEnabled('bonnet')=false) → bonnet cai no fallback hardcode
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    VPChopPartRegistry.defs.bonnet.enabled = false
+    local ac4 = ActionSession.StartAdvanced(1, sid, 'bonnet')
+    check('ADV-C4 registry OFF → bonnet via hardcode → START ok',
+        ac4.ok == true and ActionSession._test._all()[ac4.actionId].kind == 'adv_door')
+    VPChopPartRegistry.defs.bonnet.enabled = true
+
     -- ═══ RATE-LIMIT REAL (500ms) NÃO QUEBRA REPLAY ════════════════════════════
     Config.ActionSession.StartRateLimitMs = 500
     Config.ActionSession.CompleteRateLimitMs = 500

@@ -18,11 +18,52 @@
 
 if not (ActionSession and ActionSession.RegisterKind) then return end
 
+-- ═══ [v1.16 P1.3 / FASE C] Validação derivada do Part Registry ════════════════
+--  Vertical slice: só `bonnet` valida por aqui nesta fase. Os demais adv_door
+--  (boot / door_*), adv_engine e adv_carcass seguem no hardcode abaixo até a
+--  FASE D generalizar. A paridade byte-a-byte (registry == hardcode p/ bonnet) é
+--  garantida por shared/registry/registry_spec.lua + os asserts ADV-C do
+--  action_session_spec. Mapeamento de erro IDÊNTICO ao hardcode.
+--
+--  Deriva de VPChopPartRegistry.get(action):
+--    requires[]  → VPChopAdvancedState.wasRemoved(sessionId, part)  (hood_first / engine_first)
+--    toolClass   → VPChopHasTool(src, wantDrill)                    (no_saw / no_screwdriver)
+--    gates.welder→ VPChopWelderNearVehicle(netId)                   (no_welder_adv)
+---@param v { src:integer, sessionId:string, netId:integer, action:string }
+---@return string|nil err
+local function registryValidate(v)
+    local d = VPChopPartRegistry and VPChopPartRegistry.get(v.action)
+    if not d or d.enabled ~= true then return 'part' end
+
+    for _, req in ipairs(d.requires or {}) do
+        if req.state == 'REMOVED' and not VPChopAdvancedState.wasRemoved(v.sessionId, req.part) then
+            return (req.part == 'bonnet') and 'hood_first' or 'engine_first'
+        end
+    end
+
+    if d.toolClass == 'cut'   and not VPChopHasTool(v.src, false) then return 'no_saw' end
+    if d.toolClass == 'screw' and not VPChopHasTool(v.src, true)  then return 'no_screwdriver' end
+
+    if d.gates and d.gates.welder == true and not VPChopWelderNearVehicle(v.netId) then
+        return 'no_welder_adv'
+    end
+    return nil
+end
+
 -- ─── adv_door ────────────────────────────────────────────────────────────────
 ActionSession.RegisterKind('adv_door', {
     minDurKey = 'door',
     distance  = 6.0,
     validate  = function(v)
+        -- [P1.3 / FASE C] fast-path do registry só p/ bonnet; hardcode é o fallback
+        -- (boot / door_*, e bonnet também se o registry sumir OU tiver enabled=false).
+        -- O fallback é sempre viável: projectChopParts() filtra por gtaIndex, NÃO por
+        -- enabled → ChopParts.bonnet existe mesmo com o def desabilitado. E p/ bonnet
+        -- as duas rotas dão o MESMO veredito (toolClass='cut' ≡ VPChopHasTool(src,false)
+        -- → no_saw), então um flip de enabled entre START e COMPLETE não muda o resultado.
+        if v.action == 'bonnet' and VPChopPartRegistry and VPChopPartRegistry.isEnabled('bonnet') then
+            return registryValidate(v)
+        end
         local pdef = ChopParts and ChopParts[v.action]
         if not pdef or pdef.kind ~= 'door' then return 'part' end
         if not VPChopHasTool(v.src, false) then return 'no_saw' end
