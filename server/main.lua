@@ -584,6 +584,23 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
                                 base = counts.base, advanced = counts.advanced })
     end
 
+    -- [v1.16 P0.4] BARREIRA PERSISTENTE anti re-discard pós-restart de resource.
+    -- O tombstone da ChopSession é in-memory: `ensure vp_chopshop` o apaga e a MESMA
+    -- carcaça poderia ser re-chopada (sessão nova) e descartada de novo → 2º payout.
+    -- O ledger no DB lembra por (net_id, model) dentro do TTL. Fail-OPEN: erro de
+    -- MySQL não bloqueia — a dupe que isto fecha é rara (mesma carcaça, pós-restart).
+    if (Config.RestartRecovery or {}).Enable ~= false
+        and VPChopCarcassLedger and VPChopCarcassLedger.ready() then
+        local already, prevOp = VPChopCarcassLedger.alreadyProcessed(netId, GetEntityModel(veh))
+        if already then
+            if Config.Debug then
+                print(('[vp_chopshop][discard] netId %s: já consta no ledger (op=%s) → DENY already_discarded')
+                    :format(netId, tostring(prevOp)))
+            end
+            return releaseDiscard({ ok = false, err = 'already_discarded' })
+        end
+    end
+
     -- Calcular payout (INALTERADO — esta PR não é balance de economia)
     local model  = GetEntityModel(veh)
     local payout = math.floor(tonumber((Config.Discard or {}).DefaultPayout) or 1500)
@@ -651,6 +668,17 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     -- CAR_DISCARDED: 1×, SÓ após o terminal commit.
     TriggerEvent(VPChopEvt.CAR_DISCARDED, source, netId, plate, payout)
 
+    -- [v1.16 P0.4] persiste no ledger. cleanup_pending = a carcaça ficou no mundo
+    -- (del falhou). Se foi deletada agora, a linha ainda serve de barreira até o TTL
+    -- (protege contra um netId reciclado rápido no MESMO frame de spawn — improvável,
+    -- mas barato). É limpa em entityRemoved / no sweep de boot.
+    if (Config.RestartRecovery or {}).Enable ~= false
+        and VPChopCarcassLedger and VPChopCarcassLedger.ready() then
+        local okv, vsid = pcall(function() return Entity(veh).state.vpChopVsid end)
+        VPChopCarcassLedger.mark(netId, model, (okv and vsid) or nil, 'discard',
+            ('src:%s'):format(source), del.existsAfter == true)
+    end
+
     if del.existsAfter then
         -- Entidade não sumiu. Jogador JÁ foi pago; sessão JÁ é COMPLETED (tombstone).
         -- Não é retry-able discard. Retries de CLEANUP vinculadas à identidade da sessão.
@@ -676,6 +704,12 @@ AddEventHandler('entityRemoved', function(entity)
             DiscardQuarantine[sid] = nil
             print(('[vp_chopshop][discard] session %s: quarentena liberada (entidade removida).'):format(sid))
         end
+    end
+    -- [v1.16 P0.4] carcaça saiu do mundo → sai do ledger (barreira não é mais necessária).
+    -- CreateThread: o handler de entityRemoved não é coroutine; MySQL.await precisa de
+    -- contexto de yield. O DELETE é best-effort — se falhar, o TTL expira a linha.
+    if VPChopCarcassLedger and VPChopCarcassLedger.ready() then
+        CreateThread(function() VPChopCarcassLedger.clear(nid, nil) end)
     end
 end)
 

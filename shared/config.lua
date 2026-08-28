@@ -332,6 +332,29 @@ Config.Discard = {
     PayoutByModel = {},
 }
 
+--- ─────────────────────────────────────────────────────────────────────────────
+--- [v1.16 P0.4] RESTART RECOVERY — ledger persistente de carcaças (vp_chop_carcass)
+--- ─────────────────────────────────────────────────────────────────────────────
+--- A ChopSession (tombstone de discard) e o statebag vpChopDeliveredMark são
+--- in-memory / server-local. Depois de `ensure vp_chopshop`, a ChopSession some;
+--- sem o ledger, um jogador re-chopa a MESMA carcaça e descarta de novo (2º pgto).
+--- Este bloco liga a barreira de discard no DB + o sweep de boot que re-dirige o
+--- cleanup de carcaças presas no mundo (o retry timer morre no restart).
+Config.RestartRecovery = {
+    --- Barreira de discard no DB + sweep de boot. Kill-switch de segurança.
+    Enable = true,
+    --- Janela (s) em que uma linha do ledger conta como barreira e é varrida no
+    --- boot. Curta porque net_id é RECICLÁVEL — depois disso o retry já rodou ou
+    --- a carcaça já foi limpa. 1800 = 30 min.
+    CarcassTtlSeconds = 1800,
+    --- O sweep de boot pode RE-DELETAR carcaças pendentes (identidade = net_id +
+    --- model). É a retomada da operação já paga — não um delete novo. false = só
+    --- limpa linhas órfãs, não toca no mundo.
+    BootSweepDelete = true,
+    --- Espera (ms) após dbReady antes do sweep (deixa o OneSync popular o pool).
+    BootSweepDelayMs = 5000,
+}
+
 --- Sons durante o desmanche (requer xsound iniciado).
 Config.ChopSounds = {
     Enable = true,

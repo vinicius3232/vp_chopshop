@@ -777,6 +777,17 @@ lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
     DeliveredTombstone[netId] = { model = GetEntityModel(veh), mark = mark, at = os.time() }
     local del = BridgeDeleteWorldVehicle(veh, { expectedFramework = persistence.framework })
 
+    -- [v1.16 P0.4] persiste no ledger — SÓ para o sweep de boot re-dirigir o cleanup
+    -- se a carcaça ficar presa (o retry timer morre num `ensure vp_chopshop`). A
+    -- BARREIRA de pagamento do deliverCar continua sendo o statebag vpChopDeliveredMark
+    -- acima (ele sobrevive ao restart de resource, o único em que a carcaça sobrevive).
+    if (Config.RestartRecovery or {}).Enable ~= false
+        and VPChopCarcassLedger and VPChopCarcassLedger.ready() then
+        local okv, vsid = pcall(function() return Entity(veh).state.vpChopVsid end)
+        VPChopCarcassLedger.mark(netId, GetEntityModel(veh), (okv and vsid) or nil, 'deliver',
+            tostring(key), del.existsAfter == true)
+    end
+
     addTrustXp(src, (Config.Fence and Config.Fence.XpOrderBonus) or 80)
     TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, payout, 'car')
 
