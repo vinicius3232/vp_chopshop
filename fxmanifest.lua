@@ -20,6 +20,9 @@ shared_scripts {
     'shared/config.lua',
     'shared/locale.lua',
     'shared/chop_parts.lua',
+    -- [SPIKE PR-I] registries INERTES (nada consome ainda). Tool antes de Part.
+    'shared/registry/tools.lua',
+    'shared/registry/parts.lua',
     'shared/action_gate.lua',   -- [v1.15 PR-G] predicate ActionSession vs legacy (client+server)
 }
 
@@ -99,6 +102,8 @@ server_scripts {
     -- depois). O executor de domínio (base_tyre) carrega DEPOIS de main.lua.
     'server/session/action_session.lua',
     'server/session/action_session_spec.lua',  -- self-gated
+    -- [SPIKE PR-I] self-test dos registries (shared/registry/*.lua). Self-gated.
+    'shared/registry/registry_spec.lua',
     'server/cooldown.lua',
     'server/discord.lua',
     'server/chop.lua',
