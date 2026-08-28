@@ -457,11 +457,10 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
         return { ok = false, err = 'no_saw' }
     end
 
-    -- [v1.15 PR-F] BASE TYRE passa OBRIGATORIAMENTE pela ActionSession. Um executor
-    -- NÃO pode bypassar start/complete chamando este callback direto p/ wheel_*.
-    -- Kill-switch: Config.ActionSession.RequireBaseTyres = false volta ao legacy.
-    if Config.ActionSession and Config.ActionSession.Enable ~= false
-       and Config.ActionSession.RequireBaseTyres ~= false then
+    -- [v1.15 PR-F/G] BASE TYRE passa OBRIGATORIAMENTE pela ActionSession quando o
+    -- modo está ativo (VPChopActionModeTyre). Um executor NÃO bypassa start/complete
+    -- chamando este callback direto p/ wheel_*. Kill-switch: RequireBaseTyres=false.
+    if VPChopActionModeTyre() then
         local pdef = ChopParts and ChopParts[partKey]
         if pdef and pdef.kind == 'tyre' then
             return { ok = false, err = 'action_required' }

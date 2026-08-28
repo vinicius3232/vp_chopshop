@@ -991,7 +991,7 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
     JackstandBusy = true
     CreateThread(function()
         local netId = NetworkGetNetworkIdFromEntity(veh)
-        local useAction = Config.ActionSession and Config.ActionSession.Enable ~= false
+        local useAction = VPChopActionModeTyre()   -- [PR-G] exclusivo: ActionSession OU legacy
         local tyreEntitlementId
 
         if useAction then
@@ -1090,103 +1090,125 @@ RegisterNetEvent('vp_chopshop:adv:breakDoor', function(netId, partKey, doorIndex
     advMarkChopped(netId, partKey)
 end)
 
-local function doAdvChopPart(veh, netId, partKey)
-    if JackstandBusy then return end
-    local tName, tCfg = getPlayerTool()
-    if not tName then
-        VPChopNotify(L('notify_no_saw'), 'error')
-        return
-    end
-    JackstandBusy = true
-    local ms      = (Config.AdvancedChop and Config.AdvancedChop.DoorProgressMs) or 6000
-    local sawAnim = Config.AdvancedChop and Config.AdvancedChop.SawAnim
-    spawnToolProp(sawAnim and sawAnim.prop)
+--- [v1.15 PR-G] UX de uma fase avançada (tool prop + alarm dispatch + progress bar).
+--- Retorna true se o jogador concluiu; false se cancelou/falhou.
+local function runAdvUx(veh, tCfg, label, ms, anim, defaultDict, defaultClip, defaultFlag)
+    spawnToolProp(anim and anim.prop)
     VPChopCheckAlarmAndDispatch(veh, tCfg)
     local ok = lib.progressBar({
-        duration = math.floor(ms * (tCfg.speedMult or 1.0)), label = L('adv_progress_door'),
+        duration = math.floor(ms * ((tCfg and tCfg.speedMult) or 1.0)), label = label,
         useWhileDead = false, canCancel = true,
         disable = { move = true, car = true, combat = true },
         anim = {
-            dict = (sawAnim and sawAnim.dict) or 'anim@scripted@heist@ig16_glass_cut@male@',
-            clip = (sawAnim and sawAnim.clip) or 'cutting_loop',
-            flag = (sawAnim and sawAnim.flag) or 1,
+            dict = (anim and anim.dict) or defaultDict,
+            clip = (anim and anim.clip) or defaultClip,
+            flag = (anim and anim.flag) or defaultFlag,
         },
     })
     destroyToolProp()
-    if not ok then JackstandBusy = false; return end
-    local cbOk, result = pcall(lib.callback.await, 'vp_chopshop:adv:chopPart', false, netId, partKey)
-    JackstandBusy = false
-    if not cbOk or not result then VPChopNotify(L('notify_generic_error'), 'error'); return end
-    if not result.ok then VPChopNotify(VPChopLocaleErr(result.err), 'error'); return end
-    -- state is also updated via the breakDoor broadcast, but mark locally for instant canInteract
-    advMarkChopped(netId, partKey)
-    VPChopNotify(L('adv_part_removed'), 'success')
+    return ok == true
+end
+
+--- [v1.15 PR-G] Fluxo genérico de uma fase avançada via ActionSession:
+--- getActive → action:start → UX → action:complete/cancel. Kill-switch
+--- (Config.ActionSession.Enable == false) cai no callback legacy adv:*.
+--- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk }
+local function doAdvAction(veh, netId, tCfg, opts)
+    CreateThread(function()
+        local useAction = VPChopActionModeAdvanced()   -- [PR-G] exclusivo: ActionSession OU legacy
+        local function ux() return runAdvUx(veh, tCfg, opts.label, opts.ms, opts.anim, opts.dict, opts.clip, opts.flag) end
+
+        if useAction then
+            local sOk, sess = pcall(lib.callback.await, 'vp_chopshop:session:getActive', false, netId)
+            if not sOk or not sess or not sess.ok or not sess.sessionId then
+                JackstandBusy = false
+                VPChopNotify(L('notify_chop_failed_fmt', VPChopActionErr(sess and sess.err or 'no_session')), 'error')
+                return
+            end
+            local stOk, st = pcall(lib.callback.await, 'vp_chopshop:action:start', false,
+                { sessionId = sess.sessionId, action = opts.action })
+            if not stOk or not st or not st.ok then
+                JackstandBusy = false
+                VPChopNotify(L('notify_chop_failed_fmt', VPChopActionErr(st and st.err)), 'error')
+                return
+            end
+            local actionId = st.actionId
+            if not ux() then
+                pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
+                JackstandBusy = false
+                return
+            end
+            local cOk, res = pcall(lib.callback.await, 'vp_chopshop:action:complete', false, actionId)
+            if cOk and res and res.err == 'too_fast' then
+                Wait((res.waitMs or 500) + 50)
+                cOk, res = pcall(lib.callback.await, 'vp_chopshop:action:complete', false, actionId)
+            end
+            JackstandBusy = false
+            if not cOk or not res or not res.ok then
+                VPChopNotify(L('notify_chop_failed_fmt', VPChopActionErr(res and res.err)), 'error')
+                return
+            end
+        else
+            if not ux() then JackstandBusy = false; return end
+            local cbOk, result = pcall(lib.callback.await, opts.legacyEvent, false, netId, opts.action)
+            JackstandBusy = false
+            if not cbOk or not result or not result.ok then
+                VPChopNotify(VPChopLocaleErr(result and result.err) or L('notify_generic_error'), 'error')
+                return
+            end
+        end
+
+        advMarkChopped(netId, opts.action)
+        VPChopNotify(L(opts.notifyOk), 'success')
+    end)
+end
+
+local function doAdvChopPart(veh, netId, partKey)
+    if JackstandBusy then return end
+    local tName, tCfg = getPlayerTool()
+    if not tName then VPChopNotify(L('notify_no_saw'), 'error'); return end
+    JackstandBusy = true
+    doAdvAction(veh, netId, tCfg, {
+        action = partKey, legacyEvent = 'vp_chopshop:adv:chopPart',
+        label = L('adv_progress_door'),
+        ms = (Config.AdvancedChop and Config.AdvancedChop.DoorProgressMs) or 6000,
+        anim = Config.AdvancedChop and Config.AdvancedChop.SawAnim,
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1,
+        notifyOk = 'adv_part_removed',
+    })
 end
 
 local function doAdvChopEngine(veh, netId)
     if JackstandBusy then return end
-    local tName, tCfg = getPlayerTool('drill')
-    local speedMult = tCfg and tCfg.speedMult or 1.0
+    local _, tCfg = getPlayerTool('drill')
     JackstandBusy = true
-    local ms      = (Config.AdvancedChop and Config.AdvancedChop.EngineProgressMs) or 8000
-    local engAnim = Config.AdvancedChop and Config.AdvancedChop.EngineAnim
-    spawnToolProp(engAnim and engAnim.prop)
-    VPChopCheckAlarmAndDispatch(veh, tCfg)
-    local ok = lib.progressBar({
-        duration = math.floor(ms * speedMult), label = L('adv_progress_engine'),
-        useWhileDead = false, canCancel = true,
-        disable = { move = true, car = true, combat = true },
-        anim = {
-            dict = (engAnim and engAnim.dict) or 'mini@repair',
-            clip = (engAnim and engAnim.clip) or 'fixing_a_player',
-            flag = (engAnim and engAnim.flag) or 1,
-        },
+    doAdvAction(veh, netId, tCfg, {
+        action = 'adv_engine', legacyEvent = 'vp_chopshop:adv:chopEngine',
+        label = L('adv_progress_engine'),
+        ms = (Config.AdvancedChop and Config.AdvancedChop.EngineProgressMs) or 8000,
+        anim = Config.AdvancedChop and Config.AdvancedChop.EngineAnim,
+        dict = 'mini@repair', clip = 'fixing_a_player', flag = 1,
+        notifyOk = 'adv_engine_removed',
     })
-    destroyToolProp()
-    if not ok then JackstandBusy = false; return end
-    local cbOk, result = pcall(lib.callback.await, 'vp_chopshop:adv:chopEngine', false, netId)
-    JackstandBusy = false
-    if not cbOk or not result then VPChopNotify(L('notify_generic_error'), 'error'); return end
-    if not result.ok then VPChopNotify(VPChopLocaleErr(result.err), 'error'); return end
-    advMarkChopped(netId, 'adv_engine')
-    VPChopNotify(L('adv_engine_removed'), 'success')
 end
 
 local function doAdvChopCarcass(veh, netId)
     if JackstandBusy then return end
     local welderRadius = (Config.AdvancedChop and Config.AdvancedChop.WelderRadius) or 8.0
     if not hasNearbyWelder(GetEntityCoords(veh), welderRadius) then
-        VPChopNotify(L('err_no_welder_adv'), 'error')
-        return
+        VPChopNotify(L('err_no_welder_adv'), 'error'); return
     end
     local tName, tCfg = getPlayerTool()
-    if not tName then
-        VPChopNotify(L('notify_no_saw'), 'error')
-        return
-    end
+    if not tName then VPChopNotify(L('notify_no_saw'), 'error'); return end
     JackstandBusy = true
-    local ms       = (Config.AdvancedChop and Config.AdvancedChop.CarcassProgressMs) or 10000
-    local carcAnim = Config.AdvancedChop and Config.AdvancedChop.CarcassAnim
-    spawnToolProp(carcAnim and carcAnim.prop)
-    VPChopCheckAlarmAndDispatch(veh, tCfg)
-    local ok = lib.progressBar({
-        duration = math.floor(ms * (tCfg.speedMult or 1.0)), label = L('adv_progress_carcass'),
-        useWhileDead = false, canCancel = true,
-        disable = { move = true, car = true, combat = true },
-        anim = {
-            dict = (carcAnim and carcAnim.dict) or 'mini@repair',
-            clip = (carcAnim and carcAnim.clip) or 'fixing_a_player',
-            flag = (carcAnim and carcAnim.flag) or 49,
-        },
+    doAdvAction(veh, netId, tCfg, {
+        action = 'adv_carcass', legacyEvent = 'vp_chopshop:adv:chopCarcass',
+        label = L('adv_progress_carcass'),
+        ms = (Config.AdvancedChop and Config.AdvancedChop.CarcassProgressMs) or 10000,
+        anim = Config.AdvancedChop and Config.AdvancedChop.CarcassAnim,
+        dict = 'mini@repair', clip = 'fixing_a_player', flag = 49,
+        notifyOk = 'adv_carcass_done',
     })
-    destroyToolProp()
-    if not ok then JackstandBusy = false; return end
-    local cbOk, result = pcall(lib.callback.await, 'vp_chopshop:adv:chopCarcass', false, netId)
-    JackstandBusy = false
-    if not cbOk or not result then VPChopNotify(L('notify_generic_error'), 'error'); return end
-    if not result.ok then VPChopNotify(VPChopLocaleErr(result.err), 'error'); return end
-    advMarkChopped(netId, 'adv_carcass')
-    VPChopNotify(L('adv_carcass_done'), 'success')
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────

@@ -1,7 +1,8 @@
-# ActionSession — FOUNDATION + BASE TYRE VERTICAL SLICE (v1.15 PR-F)
+# ActionSession — FOUNDATION + BASE TYRE (PR-F) + ADVANCED (PR-G)
 
-**Implementado** (PR #9). Vertical slice: só **BASE TYRE (wheel_*)**. Advanced,
-plate/VIN, engine/panel **NÃO** migrados. `_nonce` do desenho antigo **removido**
+**PR-F** (PR #9): base tyre (wheel_*). **PR-G** (PR #10): desmanche AVANÇADO
+(door/engine/carcass). Plate/VIN, Part/Tool Registry **NÃO** migrados.
+`_nonce` do desenho antigo **removido**
 (YAGNI — segredo que nunca sai do servidor não acrescenta nada sobre
 `actionId + src ownership + server state`; `actionId` é ID opaco, não segredo).
 
@@ -78,6 +79,38 @@ server-authoritative.
   `act.result.tyreEntitlementId` → replay devolve o MESMO id, nunca novo.
 - `PART_CHOPPED(src, netId, partKey, 1)` — assinatura preservada, 1×, replay = 0.
 
+## PR-G — Advanced (door / engine / carcass)
+
+Core generalizado: `ActionSession.RegisterKind(kind, { minDurKey, distance, validate })`
++ `RegisterExecutor(kind, fn)`. `startCore(src, sessionId, partKey, kind)` faz a
+validação COMUM (ChopSession ativa · participante · raised · not READY_FOR_DISCARD ·
+entidade · distância do kind · `GetPartState==nil`) e chama `spec.validate`; a
+`revalidate` do COMPLETE re-roda `spec.validate`.
+
+| kind | partKey | minDur | dist | validate (START + revalidate) |
+|---|---|---|---|---|
+| `tyre` | wheel_* | 1500 | ~7 | serra |
+| `adv_door` | bonnet/boot/door_* (kind='door') | 1500 | 6 | serra |
+| `adv_engine` | `adv_engine` | 2000 | 6 | `bonnet` REMOVED (hood_first) + chave de fenda |
+| `adv_carcass` | `adv_carcass` | 2500 | 8 | `adv_engine` REMOVED (engine_first) + `VPChopWelderNearVehicle` |
+
+- **Kind derivado 100% server-side** (`vp_chopshop:action:start` roteia: `adv_engine`/
+  `adv_carcass` → special; `ChopParts.kind=='tyre'` → tyre; `=='door'` → adv_door).
+- **Executores** (`server/action/advanced_chop.lua`) delegam a
+  `VPChopAdv{Door,Engine,Carcass}Commit` (extraídos de `server/advanced_chop.lua`) —
+  consume tool → `markPart` (commit ANTES de reward) → `advMarkCooldown` → reward →
+  trace → `PART_CHOPPED(src, netId, part, 2|3|4)` → (door) breakDoor broadcast.
+- **Legacy gate:** `Config.ActionSession.RequireAdvanced` (default true) → os 3
+  callbacks `adv:*` retornam `action_required`. Kill-switch = false. Peça base
+  não-tyre (bonnet/boot com AdvancedChop OFF) segue legacy (`chopPart`).
+- **Lock unificado:** `VPChopAdvancedState.lockPart` **É** `ChopSession.LockPart` — o
+  fluxo legacy e a ActionSession disputam o MESMO mutex de peça (interlock correto).
+- **AdvCooldown (3s)** preservado: `StartAdvanced` checa `VPChopAdvOnCooldown` no
+  START; o executor marca via `advMarkCooldown`.
+- **1 action OPEN/jogador** cobre tyre + advanced juntos (não pode ter door OPEN e
+  tyre OPEN ao mesmo tempo).
+- `COMMIT_MAX_MS` 30s → **60s** (folga p/ inventory ops sob carga).
+
 ## Hardening (revisão adversarial OmniRoute)
 
 9 vetores. 5 refutados (race OPEN→COMMITTING — FiveM Lua é single-thread cooperativo,
@@ -97,7 +130,35 @@ idempotente por `(sessionId,partKey)`; config-flip do gate legacy — `ChopInPro
    1ª OPEN → `busy` (cancelar/concluir a atual primeiro).
 4. **`RetentionMs`** 90s → 120s (janela de replay mais folgada p/ retry lento).
 
-## Testes — AS1–AS24 + AT1–AT13 + clamp (`action_session_spec`, 47 asserts)
+## PR-G follow-up — 4 hardenings no core
+
+1. **`EnforceRaised=false` preservado.** Predicate único `shared/action_gate.lua`:
+   `VPChopActionModeAdvanced()` = `Enable ~= false AND RequireAdvanced ~= false AND
+   NOT (ChopSession.EnforceRaised == false)`. Quando false → **modo legacy compat**:
+   client advanced usa o callback legacy · o callback legacy **não** gate
+   `action_required` · `ActionSession.StartAdvanced` → `action_disabled`. O contrato
+   PR-C (advGate compat → `ensureSession` → ChopSession state) segue funcionando.
+   **`EnforceRaised=false` REDUZ a proteção temporal da ActionSession p/ advanced —
+   é compatibility/emergency mode.**
+2. **Kill-switch EXCLUSIVO.** Nunca ActionSession + legacy ativos juntos.
+   `VPChopActionModeTyre()` = `Enable ~= false AND RequireBaseTyres ~= false`.
+   Client `useAction`, gates legacy (`chopPart`/`adv:*`) e `StartBaseTyre`/
+   `StartAdvanced` (→ `action_disabled`) usam o MESMO predicate.
+3. **Replay idempotente ANTES do rate-limit.** START: `OpenByKey` (replay) → depois
+   `StartRate`. COMPLETE: `COMPLETED`(replay)/`COMMITTING`(processing)/terminal(closed)
+   → depois `CompleteRate`. Um retry idêntico em <500ms nunca vira `processing`.
+4. **COMMITTING FAIL-CLOSED.**
+   - `ChopSession.PinPartLock(sessionId, partKey, token)` → o lock deixa de expirar
+     por TTL. `Complete` faz PIN **antes** de COMMITTING; pin falha → `FAILED lock_lost`,
+     domínio NÃO roda.
+   - Sweeper: COMMITTING > `COMMIT_MAX_MS` → **NÃO libera** (a coroutine pode voltar
+     → dois commits). Continua COMMITTING · `commitStalled=true` · log SEVERE 1×. A
+     peça fica presa até o executor retornar / restart / admin futuro.
+   - `OpenBySrc`/`OpenByKey`: **OPEN OU COMMITTING** = ocupado (`busy`/`processing`),
+     índice NÃO limpo.
+   - `_test.reset` limpa `OpenBySrc`.
+
+## Testes — AS1–AS23 + AS-C1–4 + AS-R1/R3/R4 + AT1–AT13 + ADV1–ADV20 + clamp (`action_session_spec`, 91 asserts)
 
 START (AS1–AS9): OPEN · replay mesmo id · outro player→processing · fake session ·
 nonparticipant · raised=false · non-tyre · no_tool · distance. COMPLETE/timing

@@ -37,11 +37,26 @@ end
 _G.NEAR = true                                                -- specs alternam p/ testar 'distance'
 function ValidatePlayerNearVehicle(_, _, _) return _G.NEAR ~= false end
 function ValidatePlayerNearPoint(_, _, _) return _G.NEAR ~= false end
-_G.HAS_TOOL = true                                            -- specs alternam p/ testar 'no_tool'
-function VPChopHasTool(_, _) return _G.HAS_TOOL ~= false end
+_G.HAS_TOOL = true                                            -- serra (wantDrill=false)
+_G.HAS_DRILL = true                                           -- chave de fenda (wantDrill=true)
+function VPChopHasTool(_, wantDrill)
+    if wantDrill == true then return _G.HAS_DRILL ~= false end
+    return _G.HAS_TOOL ~= false
+end
 function VPChopConsumeTool(_, _) _G._TOOL_CONSUMED = (_G._TOOL_CONSUMED or 0) + 1; return true end
 function ServerPlayerIsReady(src) return src ~= nil and GetPlayerName(src) ~= nil end
 _G.lib = { callback = { register = function() end } }         -- action_session.lua registra callbacks
+-- [PR-G] stubs p/ server/advanced_chop.lua (commit helpers + kind specs advanced)
+_G.ServerWelders = {}
+function GetPlayers() return {} end
+function GetPlayerPed(_) return 0 end
+function GetEntityCoords(_) return { x = 0, y = 0, z = 0 } end
+function TriggerClientEvent(_, _, ...) end
+function VPChopAddStolenCarParts(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
+function InvAdd(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
+function VPChopLeaveEvidence(_, _, _, _) end
+function VPChopArmTyreWindow(_, _) end
+function VPChopChopPartCommit(_, _, _) return { ok = true } end  -- overridden pelo spec de tyre
 
 -- [PR-D] Stubs de resource/export p/ bridge/server_vehicle.lua (discard ownership).
 _G.FAKE_RESOURCES = { qbx_core = 'started', qbx_vehicles = 'started' }
@@ -72,11 +87,18 @@ _G.Config = {
         CopsBonus = { Enable = false },
     },
     TyreSelling = { Enable = true, MaxTyresInTruck = 4 },   -- [PR-E]
-    ActionSession = {                                       -- [PR-F]
-        Enable = true, RequireBaseTyres = true,
-        ActionTtlMs = 45000, MinDurationMs = { tyre = 1500 },
+    ActionSession = {                                       -- [PR-F / PR-G]
+        Enable = true, RequireBaseTyres = true, RequireAdvanced = true,
+        ActionTtlMs = 45000,
+        MinDurationMs = { tyre = 1500, door = 1500, engine = 2000, carcass = 2500 },
         StartRateLimitMs = 0, CompleteRateLimitMs = 0,
         SweepIntervalMs = 5000, RetentionMs = 120000, Debug = false,
+    },
+    AdvancedChop = {                                        -- [PR-G] default OFF (base_state_spec
+        Enable = false, WelderRadius = 8.0,                 -- roda door via base chop); action_session_spec liga.
+        DoorReward = { item = 'car_parts', amount = 1 },
+        EngineReward = { item = 'car_parts', amount = 5 },
+        CarcassRewards = { { item = 'car_parts', amount = 3, chance = 1.0 } },
     },
     CarPartRewards = {
         wheel_lf = { rubber = { amount = 2, chance = 1.0 } },
@@ -88,12 +110,14 @@ _G.Config = {
     },
 }
 _G.ChopParts = {
-    wheel_lf = { kind = 'tyre' }, wheel_rf = { kind = 'tyre' },
-    wheel_lr = { kind = 'tyre' }, wheel_rr = { kind = 'tyre' },
-    bonnet = { kind = 'door' }, boot = { kind = 'door' },
+    wheel_lf = { kind = 'tyre', index = 0 }, wheel_rf = { kind = 'tyre', index = 1 },
+    wheel_lr = { kind = 'tyre', index = 4 }, wheel_rr = { kind = 'tyre', index = 5 },
+    bonnet = { kind = 'door', index = 4 }, boot = { kind = 'door', index = 5 },
+    door_dside_f = { kind = 'door', index = 0 },
 }
 
 local base = arg[1] or '.'
+dofile(base .. '/shared/action_gate.lua')             -- [PR-G] VPChopActionMode{Tyre,Advanced}
 dofile(base .. '/server/session/chop_session.lua')   -- provê ChopSession (+ sweeper thread [1])
 dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequireRaisedSession
 dofile(base .. '/server/session/base_state.lua')      -- provê VPChopBaseState
@@ -104,6 +128,9 @@ dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreE
 dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
 dofile(base .. '/server/session/action_session.lua')     -- [PR-F] provê ActionSession
 dofile(base .. '/server/chop.lua')                    -- provê VPChopServerTryPart etc. (delega a base_state)
+dofile(base .. '/server/advanced_chop.lua')           -- [PR-G] provê VPChopAdv{Door,Engine,Carcass}Commit + VPChopWelderNearVehicle
+dofile(base .. '/server/action/base_tyre.lua')        -- [PR-F] registra kind/executor 'tyre' (spec sobrescreve o executor)
+dofile(base .. '/server/action/advanced_chop.lua')    -- [PR-G] registra kinds/executores adv_*
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
 -- no-op) — nunca rodar. Só os corpos dos specs, registrados a partir daqui.

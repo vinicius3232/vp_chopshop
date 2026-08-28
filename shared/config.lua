@@ -39,9 +39,15 @@ Config.ActionSession = {
     --- kill-switch de compat: o callback legacy vp_chopshop:chopPart volta a
     --- processar tyre direto (ChopSession + TyreEntitlement seguem sendo verdade).
     RequireBaseTyres = true,
+    --- [PR-G] Advanced (door/engine/carcass) passa OBRIGATORIAMENTE pela ActionSession.
+    --- false = kill-switch: os callbacks legacy adv:* voltam a processar direto.
+    RequireAdvanced = true,
     ActionTtlMs = 45000,           -- TTL de uma ActionSession OPEN. DEVE ser < PartLockTtlMs (clamp automático).
     MinDurationMs = {
-        tyre = 1500,               -- tempo mínimo entre START e COMPLETE (só tyre nesta PR)
+        tyre    = 1500,            -- tempo mínimo entre START e COMPLETE por tipo de ação
+        door    = 1500,
+        engine  = 2000,
+        carcass = 2500,
     },
     StartRateLimitMs    = 500,
     CompleteRateLimitMs = 500,
