@@ -82,6 +82,12 @@ server_scripts {
     -- (marcador server-local + retry de deleção). ANTES de server/fence.lua.
     'server/session/deliver_car_util.lua',
     'server/session/deliver_car_spec.lua',    -- [v1.15 PR-H] self-gated (fence:deliverCar hardening)
+    -- [v1.16 P0.4] ledger persistente de carcaças (discard/deliver) + sweep de boot.
+    -- carcass_ledger DEPOIS de server/db.lua (usa VPChopDbCarcass*); restart_recovery
+    -- DEPOIS de carcass_ledger e bridge/server_vehicle.lua. ANTES de fence.lua/main.lua.
+    'server/session/carcass_ledger.lua',
+    'server/session/carcass_ledger_spec.lua', -- self-gated (vp_chopshop_selftest 1)
+    'server/session/restart_recovery.lua',
     -- [v1.15 PR-E] logística física de pneu: entitlement por peça real + storage do
     -- truck com identidade própria. Depois da ChopSession (usa GetPartState/Origin);
     -- antes de server/fence.lua (loadToTruck/sellTyres) e server/main.lua (Issue no chop).
