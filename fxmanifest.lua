@@ -83,6 +83,11 @@ server_scripts {
     'server/logistics/tyre_entitlement.lua',
     'server/logistics/truck_storage.lua',
     'server/logistics/tyre_entitlement_spec.lua',  -- self-gated
+    -- [v1.15 PR-F] ActionSession core (autorização temporal + commit). Depois da
+    -- ChopSession; usa VPChopHasTool/VPChopChopPartCommit em runtime (main.lua carrega
+    -- depois). O executor de domínio (base_tyre) carrega DEPOIS de main.lua.
+    'server/session/action_session.lua',
+    'server/session/action_session_spec.lua',  -- self-gated
     'server/cooldown.lua',
     'server/discord.lua',
     'server/chop.lua',
@@ -103,6 +108,9 @@ server_scripts {
     'server/tyremarks.lua',
     'server/advanced_chop.lua',
     'server/main.lua',
+    -- [v1.15 PR-F] executor de domínio da ActionSession p/ BASE TYRE. DEPOIS de
+    -- main.lua (usa VPChopChopPartCommit) e de action_session.lua (RegisterExecutor).
+    'server/action/base_tyre.lua',
 }
 
 data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'

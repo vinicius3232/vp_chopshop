@@ -279,33 +279,15 @@ end
 -- (_chopPartRateLimit declarado no topo do arquivo — forward declaration para o playerDropped)
 local CHOP_PART_MIN_INTERVAL_MS = 2000  -- mínimo 2s entre chamadas por jogador
 
-lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
-    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
-
-    -- Rate limit de segurança (anti-flood independente do cooldown configurável)
-    local now = GetGameTimer()
-    if _chopPartRateLimit[source] and now < _chopPartRateLimit[source] then
-        LogSuspicious(source, 'chopPart', 'Rate limit excedido (flood de callback)')
-        return { ok = false, err = 'cooldown', wait = 2 }
-    end
-    _chopPartRateLimit[source] = now + CHOP_PART_MIN_INTERVAL_MS
-
-    netId = tonumber(netId)
-    if not netId or netId <= 0 then return { ok = false, err = 'net' } end
-
-    -- Validar tipo e comprimento de partKey (rejeita payloads malformados de lua executor)
-    if type(partKey) ~= 'string' or #partKey > 32 or #partKey < 3 then
-        return { ok = false, err = 'part' }
-    end
-
-    local cd = VPChopChopCooldownRemaining(source)
-    if cd > 0 then return { ok = false, err = 'cooldown', wait = cd } end
-
-    -- Validar ferramenta de desmanche
-    if not VPChopHasTool(source, false) then
-        return { ok = false, err = 'no_saw' }
-    end
-
+--- [v1.15 PR-F] Corpo de DOMÍNIO do chop de peça — extraído do callback legacy p/
+--- ser reutilizado pelo executor da ActionSession (server/action/base_tyre.lua).
+--- Assume: `source` pronto, `netId`/`partKey` já validados (tipo/tamanho), ferramenta
+--- já verificada, cooldown já checado pelo chamador. Faz: cooldown mark → commit
+--- (VPChopServerTryPart) → tool durability → TyreEntitlement.Issue (tyre) → rewards
+--- → ambush → PART_CHOPPED → discord → breakPart broadcast → evidence/tyre window
+--- → alarm. Sem rate-limit / sem gate de action (isso é do chamador).
+--- @return { ok:boolean, err:string|nil, tyreEntitlementId:string|nil }
+function VPChopChopPartCommit(source, netId, partKey)
     -- Marcar cooldown ANTES do yield em VPChopServerTryPart para evitar race condition
     VPChopChopCooldownMark(source)
 
@@ -448,6 +430,47 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     end
 
     return { ok = true, tyreEntitlementId = tyreEntitlementId }
+end
+
+lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+
+    -- Rate limit de segurança (anti-flood independente do cooldown configurável)
+    local now = GetGameTimer()
+    if _chopPartRateLimit[source] and now < _chopPartRateLimit[source] then
+        LogSuspicious(source, 'chopPart', 'Rate limit excedido (flood de callback)')
+        return { ok = false, err = 'cooldown', wait = 2 }
+    end
+    _chopPartRateLimit[source] = now + CHOP_PART_MIN_INTERVAL_MS
+
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return { ok = false, err = 'net' } end
+
+    if type(partKey) ~= 'string' or #partKey > 32 or #partKey < 3 then
+        return { ok = false, err = 'part' }
+    end
+
+    local cd = VPChopChopCooldownRemaining(source)
+    if cd > 0 then return { ok = false, err = 'cooldown', wait = cd } end
+
+    if not VPChopHasTool(source, false) then
+        return { ok = false, err = 'no_saw' }
+    end
+
+    -- [v1.15 PR-F] BASE TYRE passa OBRIGATORIAMENTE pela ActionSession. Um executor
+    -- NÃO pode bypassar start/complete chamando este callback direto p/ wheel_*.
+    -- Kill-switch: Config.ActionSession.RequireBaseTyres = false volta ao legacy.
+    if Config.ActionSession and Config.ActionSession.Enable ~= false
+       and Config.ActionSession.RequireBaseTyres ~= false then
+        local pdef = ChopParts and ChopParts[partKey]
+        if pdef and pdef.kind == 'tyre' then
+            return { ok = false, err = 'action_required' }
+        end
+    end
+
+    local res = VPChopChopPartCommit(source, netId, partKey)
+    if not res.ok then return { ok = false, err = res.err } end
+    return { ok = true, tyreEntitlementId = res.tyreEntitlementId }
 end)
 
 -- Rate-limit de segurança para benchCraft (_benchCraftRateLimit declarado no topo)

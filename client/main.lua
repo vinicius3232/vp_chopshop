@@ -967,46 +967,87 @@ local function findNearestMountedWheel(veh)
     return bestCoords, bestDist, bestIdx, boneNames[idx1], true
 end
 
--- Executa o roubo de uma roda: progress bar → validação server → visual remove + prop
+--- [v1.15 PR-F] Roda o UX visual da remoção de roda (minigame + progress). Retorna
+--- true se o jogador concluiu, false se cancelou/falhou.
+local function runWheelUx(veh, wheelIdx)
+    local mg = Config.Jackstand and Config.Jackstand.Minigame and Config.Jackstand.Minigame.Bolt3D
+    if mg and mg.Enable then
+        if not VPChopBoltMinigame(veh, wheelIdx) then return false end
+    end
+    return lib.progressBar({
+        duration     = 4000,
+        label        = L('tyremission_pulling_tyre'),
+        useWhileDead = false, canCancel = true,
+        disable      = { move = true, car = true, combat = true },
+        anim         = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
+    }) == true
+end
+
+--- Executa o roubo de uma roda. BASE TYRE passa pela ActionSession (PR-F):
+--- getActive → action:start → UX → action:complete/cancel → visual + carry prop.
+--- Kill-switch: se Config.ActionSession.Enable == false, cai no callback legacy.
 local function doJackstandTyreSteal(veh, wheelIdx, partKey)
     if JackstandBusy then return end
     JackstandBusy = true
     CreateThread(function()
-        -- Minigame de parafusos 3D (estilo filo): gate antes de puxar o pneu.
-        -- Server-side continua sendo a fonte de verdade — isto é só UX no client;
-        -- a validação/recompensa só ocorre no callback vp_chopshop:chopPart abaixo.
-        local mg = Config.Jackstand and Config.Jackstand.Minigame and Config.Jackstand.Minigame.Bolt3D
-        if mg and mg.Enable then
-            local passed = VPChopBoltMinigame(veh, wheelIdx)
-            if not passed then JackstandBusy = false; return end
-        end
-
-        -- Progress bar: puxando o pneu
-        local okp = lib.progressBar({
-            duration     = 4000,
-            label        = L('tyremission_pulling_tyre'),
-            useWhileDead = false, canCancel = true,
-            disable      = { move = true, car = true, combat = true },
-            anim         = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
-        })
-        if not okp then JackstandBusy = false; return end
-
-        -- Validação server + recompensa pendente
         local netId = NetworkGetNetworkIdFromEntity(veh)
-        local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:chopPart', false, netId, partKey)
-        if not cbOk then res = nil end
+        local useAction = Config.ActionSession and Config.ActionSession.Enable ~= false
+        local tyreEntitlementId
 
-        JackstandBusy = false
-
-        if not res or not res.ok then
-            if res and res.err == 'cooldown' and res.wait then
-                VPChopNotify(L('notify_cooldown_fmt', res.wait), 'error')
-            else
-                VPChopNotify(
-                    (res and res.err) and L('notify_chop_failed_fmt', VPChopLocaleErr(res.err))
-                    or L('notify_generic_error'), 'error')
+        if useAction then
+            -- 1) sessionId server-authoritative (read-only; nunca cria sessão)
+            local sOk, sess = pcall(lib.callback.await, 'vp_chopshop:session:getActive', false, netId)
+            if not sOk or not sess or not sess.ok or not sess.sessionId then
+                JackstandBusy = false
+                VPChopNotify(L('notify_chop_failed_fmt', VPChopLocaleErr(sess and sess.err or 'no_session')), 'error')
+                return
             end
-            return
+
+            -- 2) START
+            local stOk, st = pcall(lib.callback.await, 'vp_chopshop:action:start', false,
+                { sessionId = sess.sessionId, action = partKey })
+            if not stOk or not st or not st.ok then
+                JackstandBusy = false
+                VPChopNotify(L('notify_chop_failed_fmt', VPChopActionErr(st and st.err)), 'error')
+                return
+            end
+            local actionId = st.actionId
+
+            -- 3) UX
+            local uxOk = runWheelUx(veh, wheelIdx)
+            if not uxOk then
+                pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
+                JackstandBusy = false
+                return
+            end
+
+            -- 4) COMPLETE (com 1 retry curto se too_fast)
+            local cOk, res = pcall(lib.callback.await, 'vp_chopshop:action:complete', false, actionId)
+            if cOk and res and res.err == 'too_fast' then
+                Wait((res.waitMs or 500) + 50)
+                cOk, res = pcall(lib.callback.await, 'vp_chopshop:action:complete', false, actionId)
+            end
+            JackstandBusy = false
+            if not cOk or not res or not res.ok then
+                VPChopNotify(L('notify_chop_failed_fmt', VPChopActionErr(res and res.err)), 'error')
+                return
+            end
+            tyreEntitlementId = res.result and res.result.tyreEntitlementId
+        else
+            -- Kill-switch: fluxo legacy direto (ActionSession desligada).
+            local uxOk = runWheelUx(veh, wheelIdx)
+            if not uxOk then JackstandBusy = false; return end
+            local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:chopPart', false, netId, partKey)
+            JackstandBusy = false
+            if not cbOk or not res or not res.ok then
+                if res and res.err == 'cooldown' and res.wait then
+                    VPChopNotify(L('notify_cooldown_fmt', res.wait), 'error')
+                else
+                    VPChopNotify(L('notify_chop_failed_fmt', VPChopLocaleErr(res and res.err) or L('notify_generic_error')), 'error')
+                end
+                return
+            end
+            tyreEntitlementId = res.tyreEntitlementId
         end
 
         -- wheelIdx é 0-3 sequencial (FL=0, FR=1, RL=2, RR=3) — correto para SetVehicleWheelXOffset
@@ -1021,10 +1062,11 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
         -- Prop nas mãos + reiniciar carry animation (igual ao PutWheelInHands do wheel_theft)
         local wheelProp = VPTyreSpawnWheelPropInHand(partKey)
         VPChopDropCarryPart()
-        -- [v1.15 PR-E] guarda o entitlementId do pneu (nunca gerado client-side).
+        -- [v1.15 PR-E/F] guarda o entitlementId do pneu (nunca gerado client-side —
+        -- vem do RESULTADO terminal da ActionSession, ou do callback legacy).
         VPChopCarryingPart = {
             partKey = partKey, propHandle = wheelProp, isTyre = true,
-            entitlementId = res.tyreEntitlementId,
+            entitlementId = tyreEntitlementId,
         }
 
         -- [PERF] TextUI exibida UMA vez (persiste até hideTextUI). Antes havia uma thread
@@ -1514,6 +1556,22 @@ end)
 
 --- [v1.15 #1] Mapeia o err do callback loadToTruck para uma mensagem localizada
 --- (usa apenas chaves de locale já existentes — sem tocar shared/locale.lua).
+--- [v1.15 PR-F] Mapa de erro dos callbacks vp_chopshop:action:*
+function VPChopActionErr(err)
+    if err == nil then return L('notify_generic_error') end
+    if err == 'not_raised'      then return L('jackstand_no_car') end
+    if err == 'not_participant' then return L('err_not_participant') end
+    if err == 'no_tool'         then return L('notify_no_saw') end
+    if err == 'distance'        then return L('err_distance') end
+    if err == 'done'            then return L('err_done') end
+    if err == 'discarding'      then return L('err_discarding') end
+    if err == 'expired'         then return L('action_expired') end
+    if err == 'too_fast'        then return L('action_too_fast') end
+    if err == 'processing' or err == 'closed' then return L('err_cooldown') end
+    if err == 'action_required' then return L('action_required') end
+    return L('err_' .. tostring(err))   -- no_session / vehicle / owner / invalid / disabled …
+end
+
 function VPChopTyreLoadErr(err)
     if err == 'truck_full' then return L('tyre_truck_full') end
     if err == 'no_truck' or err == 'range' or err == 'bad_truck' then return L('tyre_no_truck_nearby') end
