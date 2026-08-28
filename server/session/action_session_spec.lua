@@ -444,9 +444,14 @@ CreateThread(function()
     check('ADV-D2 door_pside_r sem serra → no_saw (registry)', ActionSession.StartAdvanced(1, sid, 'door_pside_r').err == 'no_saw')
     _G.HAS_TOOL = true
 
-    -- ADV-D3 · adv_engine via registry: sem bonnet → hood_first (requires=[bonnet])
+    -- ADV-D3 · o registry TEM defs p/ adv_engine/adv_carcass (peças sintéticas) →
+    -- withRegistry realmente roteia por registryValidate (não é sempre fallback)
+    check('ADV-D3 registry cobre adv_engine + adv_carcass',
+        VPChopPartRegistry.isEnabled('adv_engine') == true and VPChopPartRegistry.isEnabled('adv_carcass') == true)
+
+    -- ADV-D3b · adv_engine via registry: sem bonnet → hood_first (requires=[bonnet])
     fresh(); spawn(10, 111); sid = legitRaise(10, 1)
-    check('ADV-D3 adv_engine sem capô → hood_first (registry)', ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'hood_first')
+    check('ADV-D3b adv_engine sem capô → hood_first (registry)', ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'hood_first')
 
     -- ADV-D4 · adv_carcass via registry: engine ok mas sem welder → no_welder_adv (gates.welder)
     fresh(); spawn(10, 111); sid = legitRaise(10, 1)

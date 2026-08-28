@@ -64,14 +64,21 @@ local function withRegistry(fallback)
 end
 
 -- ─── adv_door ────────────────────────────────────────────────────────────────
+-- adv_door NÃO usa withRegistry() puro: mantém o guard de tipo do hardcode legado.
+-- StartAdvanced só roteia parts com ChopParts[part].kind=='door' p/ este kind, mas
+-- o COMPLETE revalida por act.action — reconferir o tipo é defense-in-depth barato
+-- e preserva paridade exata (o registryValidate genérico não checa gtaClass).
 ActionSession.RegisterKind('adv_door', {
     minDurKey = 'door',
     distance  = 6.0,
-    validate  = withRegistry(function(v)
+    validate  = function(v)
         local pdef = ChopParts and ChopParts[v.action]
         if not pdef or pdef.kind ~= 'door' then return 'part' end
-        if not VPChopHasTool(v.src, false) then return 'no_saw' end
-    end),
+        if VPChopPartRegistry and VPChopPartRegistry.isEnabled(v.action) then
+            return registryValidate(v)
+        end
+        if not VPChopHasTool(v.src, false) then return 'no_saw' end   -- fallback: registry off
+    end,
 })
 ActionSession.RegisterExecutor('adv_door', function(act)
     if type(VPChopAdvDoorCommit) ~= 'function' then return { ok = false, err = 'internal' } end
