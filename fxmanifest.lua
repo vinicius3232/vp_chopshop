@@ -77,6 +77,12 @@ server_scripts {
     -- base+advanced, BEGIN/ROLLBACK/COMPLETE). Antes de server/main.lua (discard).
     'server/session/discard_state.lua',
     'server/session/discard_state_spec.lua',  -- self-gated
+    -- [v1.15 PR-E] logística física de pneu: entitlement por peça real + storage do
+    -- truck com identidade própria. Depois da ChopSession (usa GetPartState/Origin);
+    -- antes de server/fence.lua (loadToTruck/sellTyres) e server/main.lua (Issue no chop).
+    'server/logistics/tyre_entitlement.lua',
+    'server/logistics/truck_storage.lua',
+    'server/logistics/tyre_entitlement_spec.lua',  -- self-gated
     'server/cooldown.lua',
     'server/discord.lua',
     'server/chop.lua',

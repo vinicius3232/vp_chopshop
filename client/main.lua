@@ -1021,7 +1021,11 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
         -- Prop nas mãos + reiniciar carry animation (igual ao PutWheelInHands do wheel_theft)
         local wheelProp = VPTyreSpawnWheelPropInHand(partKey)
         VPChopDropCarryPart()
-        VPChopCarryingPart = { partKey = partKey, propHandle = wheelProp, isTyre = true }
+        -- [v1.15 PR-E] guarda o entitlementId do pneu (nunca gerado client-side).
+        VPChopCarryingPart = {
+            partKey = partKey, propHandle = wheelProp, isTyre = true,
+            entitlementId = res.tyreEntitlementId,
+        }
 
         -- [PERF] TextUI exibida UMA vez (persiste até hideTextUI). Antes havia uma thread
         -- repetindo showTextUI a cada 200ms (5 roundtrips NUI/s sem mudar nada).
@@ -1514,7 +1518,10 @@ function VPChopTyreLoadErr(err)
     if err == 'truck_full' then return L('tyre_truck_full') end
     if err == 'no_truck' or err == 'range' or err == 'bad_truck' then return L('tyre_no_truck_nearby') end
     if err == 'cooldown' or err == 'processing' or err == 'truck_busy' then return L('err_cooldown') end
-    return L('notify_generic_error')  -- no_stock / net / disabled / invalid
+    if err == 'already_stored' then return L('tyre_already_stored') end
+    if err == 'owner' or err == 'entitlement' or err == 'bad_state' then return L('tyre_entitlement_invalid') end
+    if err == 'storage_identity' then return L('tyre_storage_identity') end
+    return L('notify_generic_error')  -- net / disabled / invalid
 end
 
 --- Coloca o prop da mão no chão: desanexa, raycast para Z correto, congela.
@@ -1523,6 +1530,8 @@ local function placeTyreHandPropOnGround()
     if not VPChopCarryingPart or not VPChopCarryingPart.isTyre then return end
 
     local handProp = VPChopCarryingPart.propHandle
+    -- [PR-E] capturar o entitlementId ANTES de limpar o carry — segue com o prop de chão.
+    local groundEntitlementId = VPChopCarryingPart.entitlementId
     -- Anular propHandle ANTES de chamar VPChopDropCarryPart para que a função
     -- não delete o prop — queremos reutilizá-lo como prop de chão.
     VPChopCarryingPart.propHandle = nil
@@ -1557,7 +1566,7 @@ local function placeTyreHandPropOnGround()
                 -- [v1.15 #1] Request/response: só remove o prop e notifica sucesso se o
                 -- servidor confirmou (ok==true). count vem do servidor, nunca de cur+1.
                 local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
-                    NetworkGetNetworkIdFromEntity(t))
+                    NetworkGetNetworkIdFromEntity(t), groundEntitlementId)
                 if not cbOk or not res or not res.ok then
                     VPChopNotify(VPChopTyreLoadErr(res and res.err), 'error')
                     return
@@ -1600,9 +1609,10 @@ RegisterCommand('+vp_tyre_options', function()
                 if not VPChopCarryingPart or not VPChopCarryingPart.isTyre then return end
                 local t2 = VPChopFindNearestTruck(5.0)
                 if not t2 then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
-                -- [v1.15 #1] Request/response: encerra o carry só se o servidor confirmou.
+                local carryEntId = VPChopCarryingPart.entitlementId
+                -- [v1.15 #1/PR-E] Request/response: encerra o carry só se o servidor confirmou.
                 local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
-                    NetworkGetNetworkIdFromEntity(t2))
+                    NetworkGetNetworkIdFromEntity(t2), carryEntId)
                 if not cbOk or not res or not res.ok then
                     VPChopNotify(VPChopTyreLoadErr(res and res.err), 'error')
                     return

@@ -315,6 +315,21 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
     -- Consumir durabilidade da ferramenta
     VPChopConsumeTool(source, false)
 
+    -- [v1.15 PR-E] Roda: emitir o TYRE ENTITLEMENT logo após o commit (idempotente
+    -- por sessão+peça). O id volta ao client SÓ p/ tyres; o resto continua compat.
+    -- Falha da emissão NÃO derruba o chop — a peça já está committed.
+    local tyreEntitlementId
+    do
+        local pdef = ChopParts and ChopParts[partKey]
+        if pdef and pdef.kind == 'tyre' then
+            local s = ChopSession.GetByVehicle(netId)
+            if s then
+                local teId = TyreEntitlement.Issue(s.id, source, partKey)
+                if teId then tyreEntitlementId = teId end
+            end
+        end
+    end
+
     -- [GAMEPLAY unificação] Recompensa IMEDIATA (igual às fases 2-4 em advanced_chop.lua):
     -- itens caem no inventário na hora. Se o inventário estiver cheio, notificar e seguir —
     -- a peça já foi marcada como chopped (MarkChopped em VPChopServerTryPart), NÃO fazer rollback.
@@ -432,7 +447,7 @@ lib.callback.register('vp_chopshop:chopPart', function(source, netId, partKey)
         end
     end
 
-    return { ok = true }
+    return { ok = true, tyreEntitlementId = tyreEntitlementId }
 end)
 
 -- Rate-limit de segurança para benchCraft (_benchCraftRateLimit declarado no topo)

@@ -370,6 +370,17 @@ function ChopSession.GetPartState(id, partKey)
     return p and p.state or nil
 end
 
+--- [v1.15 PR-E] `origin` da peça ('base'|'advanced') — consumido pelo tyre
+--- entitlement (só emite de peça `origin='base'`). Não expõe o resto da metadata.
+---@param id string
+---@param partKey string
+---@return string|nil
+function ChopSession.GetPartOrigin(id, partKey)
+    local s = Sessions[id]
+    local p = s and s.parts[partKey]
+    return p and p.origin or nil
+end
+
 --- Idempotente: marcar peça já removida devolve (true, true) sem duplicar nem
 --- sobrescrever metadata existente.
 --- ⚠ DEVE permanecer SEM YIELD: o FREEZE de READY_FOR_DISCARD (PR-D) só é atômico

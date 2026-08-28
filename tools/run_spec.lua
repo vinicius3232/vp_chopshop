@@ -64,6 +64,7 @@ _G.Config = {
         OwnedPolicy = 'deny', PayoutByModel = {},
         CopsBonus = { Enable = false },
     },
+    TyreSelling = { Enable = true, MaxTyresInTruck = 4 },   -- [PR-E]
     CarPartRewards = {
         wheel_lf = { rubber = { amount = 2, chance = 1.0 } },
         wheel_rf = { rubber = { amount = 2, chance = 1.0 } },
@@ -86,12 +87,15 @@ dofile(base .. '/server/session/base_state.lua')      -- provê VPChopBaseState
 dofile(base .. '/server/session/advanced_state.lua')  -- provê VPChopAdvancedState
 dofile(base .. '/server/session/discard_state.lua')   -- [PR-D] provê VPChopDiscardState
 dofile(base .. '/bridge/server_vehicle.lua')          -- [PR-D] provê BridgeResolveVehiclePersistence / BridgeDeleteWorldVehicle
+dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreEntitlement
+dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
 dofile(base .. '/server/chop.lua')                    -- provê VPChopServerTryPart etc. (delega a base_state)
 dofile(base .. '/server/session/chop_session_spec.lua')
 dofile(base .. '/server/session/adv_gate_spec.lua')
 dofile(base .. '/server/session/base_state_spec.lua')
 dofile(base .. '/server/session/advanced_state_spec.lua')
 dofile(base .. '/server/session/discard_state_spec.lua')  -- [PR-D]
+dofile(base .. '/server/logistics/tyre_entitlement_spec.lua')  -- [PR-E]
 
 -- threads[1] é o sweeper do módulo (loop infinito com Wait no-op) — pulado.
 -- threads[2..N] são os corpos dos specs.

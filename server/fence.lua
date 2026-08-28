@@ -15,13 +15,15 @@ local OrderGenBusy  = {} ---@type table<string, boolean>
 local DeliveryBusy  = {} ---@type table<string, boolean>
 --- Mutex para venda de pneus (previne double-payout por double-fire simultâneo)
 local SellTyresBusy = {} ---@type table<number, boolean>
+--- [v1.15 PR-E hardening] Quarentena econômica: pagamento CONFIRMADO + CommitSold
+--- parcial + estorno FALHOU → o jogador ficou com dinheiro a mais. Nenhuma nova
+--- venda de pneu até limpeza explícita (admin/futuro — não nesta PR). Keyed por
+--- ServerChopPlayerKey (estável entre reconexões). value = valor não recuperado.
+local TyreSaleQuarantine = {} ---@type table<string, integer>
 
---- [H1 FIX] Contagem server-side de pneus por veículo (netId → count).
---- Substitui leitura do state bag do cliente, que era manipulável.
---- [v1.15 P0-1] Fonte única de verdade para o payout de sellTyres. Só é incrementada
---- pelo handler 'vp_chopshop:tyre:loadToTruck' (abaixo), que consome um crédito
---- PlayerTyreStock ganho ao remover uma roda legítima via chopPart.
-ServerTyreCounts    = {} ---@type table<integer, integer>  netId → count
+-- [v1.15 PR-E] `ServerTyreCounts` REMOVIDO. A contagem de pneus no truck agora é
+-- DERIVADA de `TruckStorage.Count(storageId)` (nº de tyre entitlements STORED).
+-- O state bag `chopTyreCount` continua só p/ UX (nunca autoridade).
 local TruckLoadCooldown   = {} ---@type table<number, number>    src  → expiry GetGameTimer
 
 -- ─── Helpers de trust ────────────────────────────────────────────────────────
@@ -227,25 +229,14 @@ end)
 --   server/main.lua) foram unificados no handler único 'vp_chopshop:tyre:loadToTruck'
 --   abaixo, que CONSOME um crédito de pneu ganho ao remover uma roda legítima.
 --
--- Fluxo autoritativo: chopPart(wheel_*) [single-use por wheel/netId, server-side]
---   → listener PART_CHOPPED credita PlayerTyreStock[src] += 1
---   → loadToTruck consome 1 crédito e incrementa ServerTyreCounts[truckNetId]
---   → sellTyres paga por ServerTyreCounts[truckNetId].
--- Sem crédito → sem incremento. O contador do truck nunca sobe por evento não lastreado.
-
---- Crédito de pneus por jogador (ganho ao remover uma roda; consumido ao carregar no truck).
-local PlayerTyreStock = {} ---@type table<number, integer>
-local function tyreStockCap()
-    return math.max(4, math.floor(tonumber(Config.TyreSelling and Config.TyreSelling.MaxPlayerTyreStock) or 12))
-end
-
-AddEventHandler(VPChopEvt.PART_CHOPPED, function(src, netId, partKey, phase)
-    if not (Config.TyreSelling and Config.TyreSelling.Enable) then return end
-    local def = ChopParts and ChopParts[partKey]
-    if not def or def.kind ~= 'tyre' then return end
-    if not IsValidSource(src) then return end
-    PlayerTyreStock[src] = math.min((PlayerTyreStock[src] or 0) + 1, tyreStockCap())
-end)
+-- [v1.15 PR-E] Fluxo autoritativo por ENTITLEMENT (substitui `PlayerTyreStock`):
+--   chopPart(wheel_*) → peça committed (origin='base', kind='tyre')
+--     → TyreEntitlement.Issue (server-side, imediato, idempotente) → 'te:<n>' (REMOVED)
+--   loadToTruck(src, truckNetId, entitlementId) → TruckStorage.Load → entitlement STORED
+--   sellTyres(truck) → paga pelos entitlements STORED → SOLD
+-- O listener PART_CHOPPED que creditava `PlayerTyreStock` foi REMOVIDO — a emissão
+-- do entitlement é EXPLÍCITA no callback de chop (server/main.lua), p/ devolver o
+-- id ao client. PART_CHOPPED segue para progression/heat/outros listeners.
 
 --- Set de hashes de modelos de pickup truck aceites (resolvido 1× server-side).
 local _truckHashSet
@@ -261,23 +252,28 @@ end
 
 local TRUCK_LOAD_COOLDOWN_MS = 1500
 local TruckLoadBusy = {} ---@type table<number, boolean>   src   → carga em curso
---- [v1.15 #2] Lock econômico por truck: nenhum increment/venda concorrente do MESMO storage.
-local TruckStorageBusy = {} ---@type table<integer, boolean>  netId → operação em curso
+--- [v1.15 PR-E] Lock econômico por STORAGE IDENTITY (não netId cru): carga E venda
+--- do mesmo storage compartilham este lock. Nenhuma venda enquanto entra pneu;
+--- nenhum load enquanto vende. Cada handler libera o próprio lock em TODO return.
+local TruckStorageBusy = {} ---@type table<string, boolean>  storageId → operação em curso
 
 local function truckMaxTyres()
     return math.max(1, math.floor(tonumber(Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4))
 end
 
---- [v1.15 P0-1 / #1] Carga autenticada de pneu no truck — REQUEST/RESPONSE.
---- O cliente só remove o prop / encerra o carry / notifica sucesso se ok==true.
---- O novo contador (`count`) é SEMPRE o valor server-side; o cliente nunca o calcula.
-lib.callback.register('vp_chopshop:tyre:loadToTruck', function(src, netId)
+--- [v1.15 PR-E] Carga de UM tyre entitlement no truck — REQUEST/RESPONSE.
+--- Contrato NOVO: (src, truckNetId, entitlementId). O client SEMPRE envia o id
+--- específico do pneu que está carregando — nunca "qualquer crédito do player".
+--- O cliente só remove o prop / encerra o carry se ok==true. `count` é server-side.
+--- Em QUALQUER deny o entitlement continua REMOVED (client mantém prop/carry).
+lib.callback.register('vp_chopshop:tyre:loadToTruck', function(src, netId, entitlementId)
     if not IsValidSource(src) then return { ok = false, err = 'invalid' } end
     if not (Config.TyreSelling and Config.TyreSelling.Enable) then return { ok = false, err = 'disabled' } end
     netId = tonumber(netId)
     if not netId then return { ok = false, err = 'net' } end
+    if type(entitlementId) ~= 'string' then return { ok = false, err = 'entitlement' } end
 
-    -- Mutex por jogador: impede double-fire concorrente consumir 1 crédito e somar 2
+    -- Mutex por jogador: impede double-fire concorrente do mesmo entitlement
     if TruckLoadBusy[src] then return { ok = false, err = 'processing' } end
     TruckLoadBusy[src] = true
     local function release(res) TruckLoadBusy[src] = nil; return res end
@@ -288,11 +284,18 @@ lib.callback.register('vp_chopshop:tyre:loadToTruck', function(src, netId)
     end
     TruckLoadCooldown[src] = now + TRUCK_LOAD_COOLDOWN_MS
 
-    -- Precisa ter removido uma roda legítima antes (crédito server-side)
-    if (PlayerTyreStock[src] or 0) < 1 then
-        LogSuspicious(src, 'tyre:loadToTruck', 'Sem crédito de pneu (nenhuma roda removida)')
-        return release({ ok = false, err = 'no_stock' })
+    -- Entitlement: existe + é do jogador + ainda REMOVED (não STORED/SOLD/LOST)
+    local ent = TyreEntitlement.Get(entitlementId)
+    if not ent then
+        LogSuspicious(src, 'tyre:loadToTruck', 'entitlementId inválido: ' .. tostring(entitlementId))
+        return release({ ok = false, err = 'entitlement' })
     end
+    if ent.removedBy ~= src then
+        LogSuspicious(src, 'tyre:loadToTruck', 'entitlement ' .. entitlementId .. ' pertence a outro jogador')
+        return release({ ok = false, err = 'owner' })
+    end
+    if ent.state == 'STORED' then return release({ ok = false, err = 'already_stored' }) end
+    if ent.state ~= 'REMOVED' then return release({ ok = false, err = 'bad_state' }) end
 
     -- Truck: entidade + modelo + proximidade (trust-no-client)
     local truck = NetworkGetEntityFromNetworkId(netId)
@@ -307,41 +310,40 @@ lib.callback.register('vp_chopshop:tyre:loadToTruck', function(src, netId)
         return release({ ok = false, err = 'range' })
     end
 
-    -- [v1.15 #2] Lock por storage: serializa TODA operação no mesmo truck (carga OU venda).
-    -- Hoje o trecho read→write abaixo é síncrono (sem yield), mas o lock garante o
-    -- comportamento se alguma validação futura passar a ceder — dois carregamentos
-    -- concorrentes no mesmo truck nunca leem o mesmo `cur`.
-    if TruckStorageBusy[netId] then return release({ ok = false, err = 'truck_busy' }) end
-    TruckStorageBusy[netId] = true
-    local function releaseAll(res) TruckStorageBusy[netId] = nil; return release(res) end
+    -- [PR-E] Identidade do storage (cunha no 1º load + marcador WRITE+READBACK).
+    -- Fail-closed: marcador não-confirmável ⇒ 'storage_identity'.
+    local storageId, sErr = TruckStorage.Resolve(netId)
+    if not storageId then return release({ ok = false, err = sErr or 'storage_identity' }) end
 
-    local maxTyres = truckMaxTyres()
-    local cur = ServerTyreCounts[netId] or 0
-    if cur >= maxTyres then return releaseAll({ ok = false, err = 'truck_full' }) end
+    -- Lock por STORAGE (carga OU venda do mesmo storage serializadas).
+    if TruckStorageBusy[storageId] then return release({ ok = false, err = 'truck_busy' }) end
+    TruckStorageBusy[storageId] = true
+    local function releaseAll(res) TruckStorageBusy[storageId] = nil; return release(res) end
 
-    -- Consumir crédito e incrementar o contador autoritativo
-    PlayerTyreStock[src] = PlayerTyreStock[src] - 1
-    local newCount = cur + 1
-    ServerTyreCounts[netId] = newCount
-    Entity(truck).state:set('chopTyreCount', newCount, true)
-    return releaseAll({ ok = true, count = newCount, max = maxTyres })
+    -- Atômico: capacidade + REMOVED→STORED + insere o id no storage.
+    local ok, countOrErr = TruckStorage.Load(storageId, entitlementId)
+    if not ok then return releaseAll({ ok = false, err = countOrErr }) end   -- entitlement segue REMOVED
+
+    return releaseAll({ ok = true, count = countOrErr, max = truckMaxTyres() })
+end)
+
+--- [PR-E] Recuperação/diagnóstico: entitlements REMOVED do jogador ainda não
+--- stored/sold/lost. READ-ONLY — não cria entitlement, não recompensa.
+lib.callback.register('vp_chopshop:tyre:getPendingEntitlements', function(src)
+    if not IsValidSource(src) then return {} end
+    return TyreEntitlement.GetPendingForPlayer(src, 12)
 end)
 
 AddEventHandler('playerDropped', function()
     local src = source
-    PlayerTyreStock[src]   = nil
     TruckLoadBusy[src]     = nil
     TruckLoadCooldown[src] = nil
+    -- Entitlements REMOVED do jogador → LOST: TyreEntitlement.CleanupPlayer (próprio hook).
 end)
 
--- Limpar contador de pneus do truck ao destruir a entidade
-AddEventHandler('entityRemoved', function(entity)
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-    if netId and netId ~= 0 then
-        ServerTyreCounts[netId] = nil
-        TruckStorageBusy[netId] = nil
-    end
-end)
+-- [PR-E] O estado econômico do truck (entitlements STORED → LOST) é tratado pelo
+-- hook entityRemoved de server/logistics/truck_storage.lua (TruckStorage.OnTruckRemoved).
+-- `TruckStorageBusy` (por storageId) é sempre liberado pelo próprio handler.
 
 -- ─── Callbacks de interação ───────────────────────────────────────────────────
 
@@ -483,6 +485,12 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
         return release({ ok=false, err='invalid_type' })
     end
 
+    -- [PR-E hardening] Quarentena econômica de venda de pneu (estorno falhou antes).
+    local qKey = ServerChopPlayerKey(src)
+    if TyreSaleQuarantine[qKey] then
+        return release({ ok=false, err='transaction_locked' })
+    end
+
     local trust = VPChopFenceGetTrust(src)
     if trust < 1 then return release({ ok=false, err='no_trust' }) end
 
@@ -501,22 +509,24 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     local xpPerTyre = math.floor(((Config.Fence and Config.Fence.XpPerDelivery) or 20) * 0.5)
 
     if source_type == 'truck' and truckNetId then
-        -- Truck: contador server-side é a verdade (nunca o state bag do cliente).
         local nid = tonumber(truckNetId)
         if not nid then return release({ ok=false, err='no_truck' }) end
 
-        -- [v1.15 #2] Lock econômico por truck: dois jogadores não vendem o mesmo storage
-        -- simultaneamente, e nenhuma carga (loadToTruck) entra durante a venda.
-        -- releaseTruck() encadeia release() do player → libera AMBOS os locks em todo return.
-        if TruckStorageBusy[nid] then return release({ ok=false, err='truck_busy' }) end
-        TruckStorageBusy[nid] = true
-        local function releaseTruck(res) TruckStorageBusy[nid] = nil; return release(res) end
+        -- [PR-E] Identidade do storage (read-only — não cunha). netId reciclado /
+        -- marcador não bate ⇒ 'storage_identity'.
+        local storageId, sErr = TruckStorage.Peek(nid)
+        if not storageId then return release({ ok=false, err = sErr or 'no_tyres' }) end
+
+        -- Lock por STORAGE: dois vendedores não vendem o mesmo storage, e nenhuma
+        -- carga entra durante a venda. releaseTruck() encadeia release() do player.
+        if TruckStorageBusy[storageId] then return release({ ok=false, err='truck_busy' }) end
+        TruckStorageBusy[storageId] = true
+        local function releaseTruck(res) TruckStorageBusy[storageId] = nil; return release(res) end
 
         local truck = NetworkGetEntityFromNetworkId(nid)
         if not truck or truck == 0 or not DoesEntityExist(truck) then
             return releaseTruck({ ok=false, err='no_truck' })
         end
-        -- [v1.15 P0-2] Validar modelo + proximidade ao truck (antes só checava existência).
         if not isPickupTruckModel(GetEntityModel(truck)) then
             LogSuspicious(src, 'fence:sellTyres', 'Veículo alvo não é pickup truck')
             return releaseTruck({ ok=false, err='bad_truck' })
@@ -525,19 +535,38 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
             return releaseTruck({ ok=false, err='truck_range' })
         end
 
-        local count = ServerTyreCounts[nid] or 0
+        -- Contagem DERIVADA + snapshot ANTES do pagamento.
+        local ids   = TruckStorage.SnapshotStored(storageId)
+        local count = #ids
         if count <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
 
-        -- [v1.15 P0-2] Pagar ANTES de zerar o contador; se o pagamento falhar, nada é perdido.
+        -- Pagar ANTES de comprometer SOLD; se falhar, os entitlements seguem STORED.
         local total = unitPrice * count
         if not BridgeAddCash(src, total, 'fence_tyres') then
             return releaseTruck({ ok=false, err='payment' })
         end
-        ServerTyreCounts[nid] = nil
-        Entity(truck).state:set('chopTyreCount', 0, true)
-        addTrustXp(src, xpPerTyre * count)
+        -- Commit SOLD (idempotente por entitlement; SOLD nunca volta p/ STORED).
+        local sold = TruckStorage.CommitSold(storageId, ids)
+        if sold < count then
+            -- [PR-E hardening] Algum entitlement do snapshot deixou de estar STORED
+            -- durante o yield do pagamento (ex.: truck sumiu → OnTruckRemoved → LOST).
+            -- Estornar a diferença — o jogador foi pago por count, só `sold` foram vendidos.
+            local refund = unitPrice * (count - sold)
+            if not BridgeRemoveCash(src, refund, 'fence_tyres_rollback') then
+                -- Estorno FALHOU: o jogador ficou com $refund a mais. Fail-closed
+                -- econômico — nenhuma nova venda de pneu até limpeza explícita.
+                -- NÃO mexer no ledger SOLD/LOST (a venda parcial em si está correta).
+                TyreSaleQuarantine[qKey] = (TyreSaleQuarantine[qKey] or 0) + refund
+                LogSuspicious(src, 'fence:sellTyres',
+                    ('SEVERE: venda parcial player=%s storage=%s count=%d sold=%d refund_esperado=$%d NÃO RECUPERADO — QUARANTINED'):format(
+                        qKey, tostring(storageId), count, sold, refund))
+            end
+            total = unitPrice * sold
+        end
+        if sold <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
+        addTrustXp(src, xpPerTyre * sold)
         TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
-        return releaseTruck({ ok=true, count=count, total=total })
+        return releaseTruck({ ok=true, count=sold, total=total })
     end
 
     -- Inventário: chopshop_tyre items
