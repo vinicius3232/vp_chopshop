@@ -1,9 +1,15 @@
-# PR-I — checklist de nascimento (pós-RC)
+# PR-I / Part Registry — migração FASE A→F
+
+> **STATUS (2026-08-28): FASE A–F CONCLUÍDAS.** O Part Registry é a autoridade da
+> definição de peça (server + client). Nenhum código lê mais `ChopParts`/`ChopPartOrder`.
+> PRs: A/inerte #17 · B #18 · C #19 · D #20 · E #21 · F #22 · client #23.
+> Drift check (§Drift) foi feito no #17: **zero drift**.
+> O texto abaixo é o registro histórico do processo — mantido como referência.
+> Roadmap adiante: [`MASTER_IMPLEMENTATION_PLAN.md`](MASTER_IMPLEMENTATION_PLAN.md).
 
 **Status do artefato:** `PR-I.patch` está **CONGELADO** contra `dd1ee9f` (tip de `pr-h` em 2026-08-28).
-Schema v2. Não editar mais o spike — qualquer mudança de forma reabre a review adversarial.
-
-**Gate para começar:** RC das 26 fases verde **E** stack `#2→#11` estabilizada/mergeada no `main`.
+Schema v2. Os 3 arquivos `shared/registry/*.lua` **não são editados** — qualquer mudança de forma
+reabre a review adversarial.
 
 ---
 
