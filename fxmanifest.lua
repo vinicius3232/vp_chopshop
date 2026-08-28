@@ -22,8 +22,8 @@ shared_scripts {
     -- [P1.1] Part/Tool Registry — fonte da definição de peça. Tool antes de Part.
     'shared/registry/tools.lua',
     'shared/registry/parts.lua',
-    -- [P1.2 / FASE B] chop_parts.lua é PROJEÇÃO do registry → DEPOIS de registry/parts.lua.
-    'shared/chop_parts.lua',
+    -- [P2.1] VPChopPartGtaClass — acessor legado sobre o registry. DEPOIS de registry/parts.lua.
+    'shared/part_class.lua',
     'shared/action_gate.lua',   -- [v1.15 PR-G] predicate ActionSession vs legacy (client+server)
 }
 

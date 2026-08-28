@@ -68,14 +68,14 @@ end)
 RegisterNetEvent('vp_chopshop:client:breakPart', function(netId, partKey)
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh == 0 or not DoesEntityExist(veh) then return end
-    local def = ChopParts[partKey]
-    if not def then return end
-    if def.kind == 'door' then
-        SetVehicleDoorBroken(veh, def.index, true)
-    elseif def.kind == 'tyre' then
+    local def = VPChopPartRegistry.get(partKey)
+    if not def or def.gtaIndex == nil then return end
+    if def.gtaClass == 'door' then
+        SetVehicleDoorBroken(veh, def.gtaIndex, true)
+    elseif def.gtaClass == 'tyre' then
         -- Burst index (0,1,4,5) → sequential wheel index (0,1,2,3) para SetVehicleWheelXOffset
         local seqMap = { [0]=0, [1]=1, [4]=2, [5]=3 }
-        local seqIdx = seqMap[def.index]
+        local seqIdx = seqMap[def.gtaIndex]
         if seqIdx ~= nil then SetVehicleWheelXOffset(veh, seqIdx, 9999999.0) end
     end
 end)
@@ -246,13 +246,12 @@ local function spawnAndAttachPart(partKey, veh)
 end
 
 local function getPartAnimAndSound(partKey)
-    local def = ChopParts[partKey]
     local cfg  = Config.ChopAnimations or {}
     local defaultAnim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 }
     if partKey == 'bonnet' or partKey == 'boot' then
         return cfg.grinder or defaultAnim, 'grinder'
     end
-    if def and def.kind == 'tyre' then
+    if VPChopPartGtaClass(partKey) == 'tyre' then
         return cfg.pneumatic or defaultAnim, 'pneumatic'
     end
     return cfg.door or defaultAnim, 'grinder'
@@ -335,10 +334,10 @@ local function hasVehicleKeys(vehicle)
 end
 
 local function isPartMissing(vehicle, def)
-    if def.kind == 'door' then
-        return IsVehicleDoorDamaged(vehicle, def.index)
+    if def.gtaClass == 'door' then
+        return IsVehicleDoorDamaged(vehicle, def.gtaIndex)
     end
-    return IsVehicleTyreBurst(vehicle, def.index, false)
+    return IsVehicleTyreBurst(vehicle, def.gtaIndex, false)
 end
 
 local function openJackstandChopMenu(veh)
@@ -358,12 +357,14 @@ local function openJackstandChopMenu(veh)
     end
     local netId = NetworkGetNetworkIdFromEntity(veh)
     local options = {}
-    for _, partKey in ipairs(ChopPartOrder) do
-        local def = ChopParts[partKey]
+    for _, partKey in ipairs(VPChopPartRegistry.order) do
+        local def = VPChopPartRegistry.get(partKey)
+        -- só as 10 peças GTA-native (gtaIndex nil = adv_engine/adv_carcass sintéticas)
+        local native = def and def.gtaIndex ~= nil
         -- Quando advanced chop está activo, portas/capô/porta-malas são exclusivas da Fase 2.
-        local advOwns = Config.AdvancedChop and Config.AdvancedChop.Enable and def and def.kind == 'door'
+        local advOwns = native and Config.AdvancedChop and Config.AdvancedChop.Enable and def.gtaClass == 'door'
         -- Pneus são tratados pelo sistema de proximidade (wheel_theft pattern) — não aparecem aqui.
-        if def and not isPartMissing(veh, def) and not advOwns and def.kind ~= 'tyre' then
+        if native and not isPartMissing(veh, def) and not advOwns and def.gtaClass ~= 'tyre' then
             local partLabel = L(def.labelKey)
             options[#options + 1] = {
                 title = partLabel,
@@ -1274,7 +1275,7 @@ local function addRaisedCarTargets(veh)
             local aBone = ap.bone
             -- Ignorar se o bone não existe neste veículo
             if GetEntityBoneIndexByName(veh, aBone) ~= -1 then
-                local def = ChopParts[aKey]
+                local def = VPChopPartRegistry.get(aKey)
                 local lbl = def and L(def.labelKey) or aKey
                 targets[#targets + 1] = {
                     name     = 'vp_adv_chop_' .. aKey .. '_' .. tostring(veh),
@@ -1396,7 +1397,7 @@ local function addRaisedCarTargets(veh)
         local tKey    = ts.key
         local tBone   = ts.bone
         local tSeqIdx = ts.seqIdx
-        local def     = ChopParts[tKey]
+        local def     = VPChopPartRegistry.get(tKey)
         if def then
             local lbl = L(def.labelKey)
             targets[#targets + 1] = {
