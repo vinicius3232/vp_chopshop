@@ -354,8 +354,34 @@ ChopSession p/ STATE (só pula raised/participant).
 - **Pendente RELEASE:** testes reais QBox (owned vs NPC, fake plate + owned,
   `DisablePersistence` real, delete-fail, 2–4 players, `resmon`).
 
-**PR E — tyre entitlement.** `PlayerTyreStock` → `session.parts[wheel_*]` com ciclo
-`REMOVED→CARRIED→STORED→SOLD`; `loadToTruck`/`sellTyres` consomem por `sessionId+partId`.
+**PR E — tyre entitlement / physical logistics foundation.** ✅ **FEITO** (PR #8).
+`PlayerTyreStock` + `ServerTyreCounts` **REMOVIDOS**. Detalhe em
+[`TYRE_ENTITLEMENT.md`](TYRE_ENTITLEMENT.md).
+- **`server/logistics/tyre_entitlement.lua`** (`TyreEntitlement`): ledger INDEPENDENTE
+  da ChopSession — cada roda committed (`origin='base'`, `kind='tyre'`) emite UM
+  `te:<n>` single-use. Ciclo `REMOVED → STORED → SOLD` (`→ LOST` em player-drop /
+  truck-removed). Idempotente por `(sessionId, partKey)`. Sobrevive ao sumiço do
+  veículo de origem (`ChopSession.CleanupVehicle` NÃO toca entitlements).
+- **`server/logistics/truck_storage.lua`** (`TruckStorage`): `ts:<n>` + marcador
+  server-local `vpChopTyreStorageId` (WRITE+READBACK, fail-closed → `storage_identity`).
+  Contagem **DERIVADA** (`Count` = nº de entitlements STORED). `chopTyreCount` state
+  bag = só UX. `entityRemoved` → STORED → LOST.
+- `chopPart(wheel)` → `TyreEntitlement.Issue` explícito (server/main.lua), id volta
+  no callback (`{ ok=true, tyreEntitlementId }`) só p/ tyres.
+- `loadToTruck(src, truckNetId, entitlementId)` — contrato NOVO. Valida owner + state
+  REMOVED + truck + `TruckStorage.Resolve` + lock `TruckStorageBusy[storageId]`. Deny
+  ⇒ entitlement segue REMOVED.
+- `sellTyres` truck path: `TruckStorage.Peek` → snapshot STORED → pay → `CommitSold`.
+  Pay-fail ⇒ entitlements intactos.
+- `PART_CHOPPED` assinatura preservada; o listener que creditava `PlayerTyreStock`
+  foi removido. `AdvCooldown`/inventory-tyre path/economia inalterados.
+- `ChopSession.GetPartOrigin(id, partKey)` novo (consumido pelo Issue).
+- Testes: `tyre_entitlement_spec` 54 asserts (E1–E28 + E20b/c — venda parcial:
+  estorno OK → rollback, estorno FALHA → `TyreSaleQuarantine` fail-closed
+  (`transaction_locked`, sem novo payout)). Total harness **345**.
+- **RELEASE DEBT registrada:** `vp_chopshop:fence:deliverCar` ainda usa `DeleteEntity`
+  direto — precisa do mesmo hardening terminal da PR D (ownership gate +
+  `BridgeDeleteWorldVehicle` + payment-result + transação idempotente). **NÃO** nesta PR.
 
 **Depois:** implementação da `ActionSession` (desenho já corrigido em `ACTION_SESSION_DESIGN.md`).
 
