@@ -397,7 +397,26 @@ asserts (AS1–AS24 + AT1–AT13 + clamp). Total harness **392**.
 - **NÃO migrado:** advanced chop · plate/VIN · engine/panel · Part Registry · Tool Registry.
 - Economia **não** alterada. `PART_CHOPPED` assinatura preservada.
 
-**Depois:** migrar AdvancedChop → ActionSession (após validação da vertical slice de wheel).
+**PR G — AdvancedChop → ActionSession.** ✅ **FEITO** (PR #10). Core generalizado
+(`RegisterKind` + `RegisterExecutor`); `StartAdvanced` deriva `adv_door`/`adv_engine`/
+`adv_carcass` server-side. Executores em `server/action/advanced_chop.lua` delegam a
+`VPChopAdv{Door,Engine,Carcass}Commit` (extraídos de `advanced_chop.lua`). Deps
+(bonnet→engine→carcass) + welder revalidados no COMPLETE. **Predicate único**
+`shared/action_gate.lua` (`VPChopActionMode{Tyre,Advanced}`) — exclusividade
+ActionSession vs legacy; `EnforceRaised=false` = compat legacy p/ advanced;
+`RequireBaseTyres/RequireAdvanced=false` → `StartBaseTyre/StartAdvanced` DENY
+`action_disabled`. Lock unificado (`VPChopAdvancedState.lockPart` == `ChopSession.LockPart`).
+**COMMITTING fail-closed:** `ChopSession.PinPartLock` (lock imune a TTL) antes do
+executor; sweeper NÃO libera stall (só `commitStalled` + log SEVERE); `OpenBySrc`/
+`OpenByKey` = OPEN **ou** COMMITTING = ocupado. Replay idempotente ANTES do rate-limit.
+`AdvCooldown` (3s) preservado. `PART_CHOPPED` phase 2/3/4 preservada.
+`action_session_spec` **91** (AS1-23 + AS-C1-4 + AS-R + AT1-13 + ADV1-20 + clamp).
+Total harness **436**.
+- **NÃO migrado:** plate/VIN · engine/panel além do que já existe · Part Registry · Tool Registry.
+- Economia/rewards/progress bars **inalterados**.
+
+**Depois:** aguardar revisão. Próximos candidatos: plate steal / VIN scratch → ActionSession
+(quando desejado); Part Registry / Tool Registry (refactor maior).
 
 **RELEASE DEBT** (registrada, não puxar p/ estas PRs): `vp_chopshop:fence:deliverCar`
 usa `DeleteEntity` direto — precisa do hardening terminal da PR D (ownership gate +

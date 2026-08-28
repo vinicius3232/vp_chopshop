@@ -32,5 +32,12 @@ local function executeBaseTyre(act)
 end
 
 if ActionSession and ActionSession.RegisterExecutor then
+    ActionSession.RegisterKind('tyre', {
+        minDurKey = 'tyre',
+        distance  = function() return (Config.VehicleNearLiftRadius or 5.0) + 2.0 end,
+        validate  = function(v)
+            if not VPChopHasTool(v.src, false) then return 'no_tool' end
+        end,
+    })
     ActionSession.RegisterExecutor('tyre', executeBaseTyre)
 end

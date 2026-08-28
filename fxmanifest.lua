@@ -20,6 +20,7 @@ shared_scripts {
     'shared/config.lua',
     'shared/locale.lua',
     'shared/chop_parts.lua',
+    'shared/action_gate.lua',   -- [v1.15 PR-G] predicate ActionSession vs legacy (client+server)
 }
 
 client_scripts {
@@ -111,6 +112,9 @@ server_scripts {
     -- [v1.15 PR-F] executor de domínio da ActionSession p/ BASE TYRE. DEPOIS de
     -- main.lua (usa VPChopChopPartCommit) e de action_session.lua (RegisterExecutor).
     'server/action/base_tyre.lua',
+    -- [v1.15 PR-G] executores + contratos da ActionSession p/ o desmanche AVANÇADO.
+    -- DEPOIS de server/advanced_chop.lua (usa VPChopAdv{Door,Engine,Carcass}Commit).
+    'server/action/advanced_chop.lua',
 }
 
 data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'

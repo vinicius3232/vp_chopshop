@@ -426,6 +426,9 @@ end
 --- Mutex leve por peça (para operações com janela de UX). Token de uso único.
 --- TTL: um lock não liberado (client crashou antes do UnlockPart) expira sozinho
 --- após `PartLockTtlMs` — evita travar a peça até a sessão inteira morrer.
+--- Um lock PINNED (ver PinPartLock) NÃO expira por TTL — usado enquanto o domínio
+--- server-controlled está em COMMITTING (fail-closed: melhor travar a peça do que
+--- permitir dois commits).
 ---@param id string
 ---@param partKey string
 ---@return boolean ok, string|nil token
@@ -435,11 +438,27 @@ function ChopSession.LockPart(id, partKey)
     -- [v1.15 PR-D] FREEZE: não iniciar nova ação física durante o payout terminal.
     if s.state == 'READY_FOR_DISCARD' then return false, 'discarding' end
     local existing = s._partLocks[partKey]
-    if existing and GetGameTimer() < existing.expiresAt then return false end
+    if existing and (existing.pinned or GetGameTimer() < existing.expiresAt) then return false end
     local ttl = cfgNum('PartLockTtlMs', 60000)
     local tok = ('%s:%s:%d'):format(id, partKey, math.random(1, 2147483647))
     s._partLocks[partKey] = { token = tok, expiresAt = GetGameTimer() + ttl }
     return true, tok
+end
+
+--- [v1.15 PR-G hardening] "Prende" um lock existente (token deve bater) para que ele
+--- deixe de expirar por TTL. O ActionSession chama isto ao entrar em COMMITTING —
+--- a partir daí só `UnlockPart` (token certo) libera a peça.
+---@param id string
+---@param partKey string
+---@param token string
+---@return boolean
+function ChopSession.PinPartLock(id, partKey, token)
+    local s = Sessions[id]
+    if not s then return false end
+    local l = s._partLocks[partKey]
+    if not l or l.token ~= token then return false end
+    l.pinned = true
+    return true
 end
 
 ---@param id string

@@ -1,7 +1,7 @@
 -- server/session/action_session.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
 --  [v1.15 PR-F] ActionSession — AUTORIZAÇÃO TEMPORAL + COMMIT server-authoritative
---  de uma AÇÃO FÍSICA. Vertical slice desta PR: BASE TYRE (wheel_*).
+--  de uma AÇÃO FÍSICA. PR-F: BASE TYRE (wheel_*). PR-G: ADVANCED (door/engine/carcass).
 --
 --    client START → servidor autoriza + trava a peça (ChopSession.LockPart)
 --    client roda UX/minigame
@@ -37,12 +37,23 @@ local OpenByKey  = {}
 local OpenBySrc  = {}
 local _seq       = 0
 
--- Backstop: uma action nunca deveria ficar em COMMITTING mais que isto. O executor
--- de domínio (VPChopChopPartCommit) não tem Wait/loop — retorna em ~1 frame. Se algo
--- travar (edição futura com yield infinito), o sweeper destrava a peça.
-local COMMIT_MAX_MS = 30000
+-- Backstop: uma action nunca deveria ficar em COMMITTING mais que isto. Os
+-- executores de domínio não têm Wait/loop — retornam em ~1 frame (inventory ops são
+-- exports síncronos). Se algo travar de fato (yield infinito por edição futura), o
+-- sweeper destrava a peça. Folgado o suficiente p/ nunca pegar um executor legítimo.
+local COMMIT_MAX_MS = 60000
 ---@type table<string, fun(act: table): table>   kind → executor
 local _executors = {}
+---@type table<string, table>   kind → { minDurKey, distance(number|fn), validate(v)->err? }
+local _kinds = {}
+
+--- Erros de COMPLETE que representam INTENÇÃO recuperável do jogador (afastou-se,
+--- soltou a ferramenta, pré-requisito ainda não satisfeito) — a action fecha como
+--- CANCELLED (não FAILED), sem log de suspeita. O resto é FAILED.
+local RECOVERABLE = {
+    distance = true, no_tool = true, no_saw = true, no_screwdriver = true,
+    no_welder_adv = true, not_raised = true, hood_first = true, engine_first = true,
+}
 
 local StartRate, CompleteRate = {}, {}
 
@@ -95,6 +106,20 @@ function ActionSession.RegisterExecutor(kind, fn)
     _executors[kind] = fn
 end
 
+--- Registra o CONTRATO de um kind de ação (validação específica de domínio).
+--- @param kind string
+--- @param spec { minDurKey: string, distance: number|fun():number,
+---               validate: fun(v: { src, sessionId, netId, action }): string|nil }
+function ActionSession.RegisterKind(kind, spec)
+    _kinds[kind] = spec
+end
+
+local function kindDistance(spec)
+    local d = spec.distance
+    if type(d) == 'function' then d = d() end
+    return tonumber(d) or ((Config.VehicleNearLiftRadius or 5.0) + 2.0)
+end
+
 -- ─── Helpers de lifecycle ─────────────────────────────────────────────────────
 
 local function keyOf(src, sessionId, action) return ('%s:%s:%s'):format(src, sessionId, action) end
@@ -113,30 +138,26 @@ local function releaseAction(act, newStatus, reason)
     dbg('release', act.id, '→', newStatus, '(' .. tostring(reason) .. ')')
 end
 
--- ─── START (BASE TYRE) ────────────────────────────────────────────────────────
+-- ─── START ────────────────────────────────────────────────────────────────────
 
---- @param src number
---- @param sessionId string
---- @param partKey string
+--- Núcleo genérico de START. `kind` já resolvido + validado (registrado via
+--- RegisterKind). Client manda SÓ { sessionId, action } — netId/model/vsid/tool/
+--- duração/reward/origin/entitlement/preço são TODOS derivados server-side.
 --- @return table   { ok, actionId?, replay?, startedAt?, expiresAt?, err? }
-function ActionSession.StartBaseTyre(src, sessionId, partKey)
+local function startCore(src, sessionId, partKey, kind)
     if cfg().Enable == false then return { ok = false, err = 'disabled' } end
     if not (src and GetPlayerName(src)) then return { ok = false, err = 'player' } end
     if type(sessionId) ~= 'string' then return { ok = false, err = 'args' } end
     if type(partKey) ~= 'string' or #partKey < 3 or #partKey > 32 then return { ok = false, err = 'part' } end
+    local spec = _kinds[kind]
+    if not spec then return { ok = false, err = 'part' } end
 
-    -- rate limit (defense-in-depth)
     local t = nowMs()
-    if StartRate[src] and t < StartRate[src] then return { ok = false, err = 'processing' } end
-    StartRate[src] = t + math.floor(tonumber(cfg().StartRateLimitMs) or 500)
-
-    local pdef = ChopParts and ChopParts[partKey]
-    if not pdef or pdef.kind ~= 'tyre' then return { ok = false, err = 'part' } end
-
-    -- START idempotente: MESMO (src, sessionId, partKey) com action OPEN válida →
-    -- devolve a existente (cobre resposta START perdida). Nunca 'processing' p/ retry
-    -- idêntico legítimo.
     local k = keyOf(src, sessionId, partKey)
+
+    -- [PR-G hardening] REPLAY IDEMPOTENTE ANTES do rate-limit: MESMO (src, sessionId,
+    -- partKey) com action OPEN/COMMITTING → devolve a existente. Um retry idêntico
+    -- em <StartRateLimitMs NUNCA pode receber 'processing'.
     local existingId = OpenByKey[k]
     if existingId then
         local ex = Sessions[existingId]
@@ -144,25 +165,30 @@ function ActionSession.StartBaseTyre(src, sessionId, partKey)
             return { ok = true, actionId = ex.id, replay = true,
                      startedAt = ex.startedAtMs, expiresAt = ex.expiresAtMs }
         end
-        -- expirada / stale → limpa e segue p/ um START fresco
+        if ex and ex.status == 'COMMITTING' then
+            return { ok = false, err = 'processing' }              -- índice NÃO é limpo
+        end
         if ex and ex.status == 'OPEN' then releaseAction(ex, 'EXPIRED', 'stale_on_start') end
         OpenByKey[k] = nil
     end
 
-    -- UMA action OPEN por jogador. Um retry com partKey DIFERENTE não abre uma 2ª
-    -- (e não deixa o jogador travar várias peças de uma vez). Precisa terminar /
-    -- cancelar a atual primeiro.
+    -- rate limit (defense-in-depth) — SÓ para um START NOVO.
+    if StartRate[src] and t < StartRate[src] then return { ok = false, err = 'processing' } end
+    StartRate[src] = t + math.floor(tonumber(cfg().StartRateLimitMs) or 500)
+
+    -- UMA action OPEN **ou COMMITTING** por jogador — retry com partKey DIFERENTE
+    -- não abre uma 2ª (não trava várias peças; não escapa de um commit em curso).
     local mineId = OpenBySrc[src]
     if mineId then
         local mine = Sessions[mineId]
-        if mine and mine.status == 'OPEN' and t <= mine.expiresAtMs then
-            return { ok = false, err = 'busy' }
+        if mine and (mine.status == 'COMMITTING'
+                     or (mine.status == 'OPEN' and t <= mine.expiresAtMs)) then
+            return { ok = false, err = 'busy' }                    -- índice NÃO é limpo
         end
         if mine and mine.status == 'OPEN' then releaseAction(mine, 'EXPIRED', 'stale_on_start') end
         OpenBySrc[src] = nil
     end
 
-    -- Revalidações server-side (client não manda netId/model/vsid/kind/tool/…).
     local s = ChopSession.Get(sessionId)                        -- ACTIVE (terminal → nil)
     if not s then return { ok = false, err = 'no_session' } end
     if not (s.vehicle and s.vehicle.identity) then return { ok = false, err = 'no_session' } end
@@ -173,17 +199,18 @@ function ActionSession.StartBaseTyre(src, sessionId, partKey)
     local netId = s.vehicle.netId
     local ent = EntityAPI.get(netId)
     if not EntityAPI.exists(ent) then return { ok = false, err = 'vehicle' } end
-    if not ValidatePlayerNearVehicle(src, ent, (Config.VehicleNearLiftRadius or 5.0) + 2.0) then
-        return { ok = false, err = 'distance' }
-    end
+    if not ValidatePlayerNearVehicle(src, ent, kindDistance(spec)) then return { ok = false, err = 'distance' } end
 
     if ChopSession.GetPartState(sessionId, partKey) ~= nil then return { ok = false, err = 'done' } end
-    if not VPChopHasTool(src, false) then return { ok = false, err = 'no_tool' } end
 
-    -- Config fail-safe: se o TTL efetivo (já clampado abaixo do PartLockTtl) não
-    -- comporta o tempo mínimo da ação, NÃO cria uma action impossível de concluir.
-    local ttl = actionTtlMs()
-    local minD = minDurationMs('tyre')
+    -- Contrato de domínio do kind (ferramenta + pré-requisitos + welder, etc.).
+    local vErr = spec.validate({ src = src, sessionId = sessionId, netId = netId, action = partKey })
+    if vErr then return { ok = false, err = vErr } end
+
+    -- Config fail-safe: TTL efetivo (clampado abaixo do PartLockTtl) não comporta o
+    -- tempo mínimo → NÃO cria uma action impossível de concluir.
+    local ttl  = actionTtlMs()
+    local minD = minDurationMs(spec.minDurKey)
     if ttl <= minD + 1000 then
         dbg(('ActionTtl efetivo (%d) <= MinDuration (%d) → START recusado (misconfigured)'):format(ttl, minD))
         return { ok = false, err = 'misconfigured' }
@@ -202,19 +229,50 @@ function ActionSession.StartBaseTyre(src, sessionId, partKey)
         vsid          = s.vehicle.identity,
         netId         = netId,
         action        = partKey,
-        kind          = 'tyre',
+        kind          = kind,
         startedAtMs   = t,
         expiresAtMs   = t + ttl,
-        minDurationMs = minDurationMs('tyre'),
+        minDurationMs = minD,
         lockToken     = tok,
         result        = nil,
     }
     Sessions[act.id] = act
     OpenByKey[k]     = act.id
     OpenBySrc[src]   = act.id
-    dbg('StartBaseTyre', act.id, 'session', sessionId, 'part', partKey, 'src', src)
+    dbg('Start', act.id, kind, 'session', sessionId, 'part', partKey, 'src', src)
     return { ok = true, actionId = act.id, replay = false,
              startedAt = act.startedAtMs, expiresAt = act.expiresAtMs }
+end
+
+--- BASE TYRE (wheel_*). DENY `action_disabled` quando o kill-switch legacy está
+--- ativo (RequireBaseTyres=false) — nesse modo só o callback legacy processa tyre.
+function ActionSession.StartBaseTyre(src, sessionId, partKey)
+    if not VPChopActionModeTyre() then return { ok = false, err = 'action_disabled' } end
+    local pdef = ChopParts and ChopParts[partKey]
+    if not pdef or pdef.kind ~= 'tyre' then return { ok = false, err = 'part' } end
+    return startCore(src, sessionId, partKey, 'tyre')
+end
+
+--- ADVANCED (PR-G): door (bonnet/boot/door_*), engine (adv_engine), carcass (adv_carcass).
+--- Deriva o kind server-side (client só manda `action`). DENY `action_disabled`
+--- quando o modo legacy está ativo (RequireAdvanced=false OU EnforceRaised=false).
+function ActionSession.StartAdvanced(src, sessionId, partKey)
+    if not VPChopActionModeAdvanced() then return { ok = false, err = 'action_disabled' } end
+    if not (Config.AdvancedChop and Config.AdvancedChop.Enable) then return { ok = false, err = 'disabled' } end
+    -- Paridade com o legacy: mesmo rate-limit de 3s entre ações avançadas
+    -- (o executor marca o cooldown via advMarkCooldown).
+    if type(VPChopAdvOnCooldown) == 'function' and VPChopAdvOnCooldown(src) then
+        return { ok = false, err = 'processing' }
+    end
+    local kind
+    if partKey == 'adv_engine' then kind = 'adv_engine'
+    elseif partKey == 'adv_carcass' then kind = 'adv_carcass'
+    else
+        local pdef = ChopParts and ChopParts[partKey]
+        if pdef and pdef.kind == 'door' then kind = 'adv_door' end
+    end
+    if not kind then return { ok = false, err = 'part' } end
+    return startCore(src, sessionId, partKey, kind)
 end
 
 -- ─── COMPLETE ─────────────────────────────────────────────────────────────────
@@ -224,6 +282,8 @@ local function revalidate(act)
     if cfg().Enable == false then return 'disabled' end
     if Config.ChopSession and Config.ChopSession.Enable == false then return 'disabled' end
     if not (act.src and GetPlayerName(act.src)) then return 'player' end
+    local spec = _kinds[act.kind]
+    if not spec then return 'internal' end
     local s = ChopSession.Get(act.sessionId)
     if not s then return 'no_session' end
     if not (s.vehicle and s.vehicle.identity == act.vsid) then return 'vsid_mismatch' end
@@ -233,12 +293,10 @@ local function revalidate(act)
     if s.state == 'READY_FOR_DISCARD' then return 'discarding' end
     local ent = EntityAPI.get(act.netId)
     if not EntityAPI.exists(ent) then return 'vehicle' end
-    if not ValidatePlayerNearVehicle(act.src, ent, (Config.VehicleNearLiftRadius or 5.0) + 2.0) then return 'distance' end
-    local pdef = ChopParts and ChopParts[act.action]
-    if not pdef or pdef.kind ~= 'tyre' then return 'part' end
-    if not VPChopHasTool(act.src, false) then return 'no_tool' end
+    if not ValidatePlayerNearVehicle(act.src, ent, kindDistance(spec)) then return 'distance' end
     if ChopSession.GetPartState(act.sessionId, act.action) ~= nil then return 'done' end
-    return nil
+    -- Contrato de domínio do kind: ferramenta + pré-requisitos + welder (revalidado).
+    return spec.validate({ src = act.src, sessionId = act.sessionId, netId = act.netId, action = act.action })
 end
 
 --- @param src number
@@ -246,20 +304,25 @@ end
 --- @return table
 function ActionSession.Complete(src, actionId)
     if type(actionId) ~= 'string' then return { ok = false, err = 'invalid' } end
-    local t = nowMs()
-    if CompleteRate[src] and t < CompleteRate[src] then return { ok = false, err = 'processing' } end
-    CompleteRate[src] = t + math.floor(tonumber(cfg().CompleteRateLimitMs) or 500)
 
     local act = Sessions[actionId]
     if not act then return { ok = false, err = 'invalid' } end
     if act.src ~= src then return { ok = false, err = 'owner' } end
 
+    -- [PR-G hardening] RETRIEVAL IDEMPOTENTE ANTES do rate-limit: um retry do
+    -- COMPLETE sobre uma action já terminal NUNCA pode virar 'processing' só por
+    -- ter chegado em <CompleteRateLimitMs.
     if act.status == 'COMPLETED' then
         return { ok = true, replay = true, result = act.result }         -- ZERO side effects
     end
     if act.status == 'COMMITTING' then return { ok = false, err = 'processing' } end
     if TERMINAL[act.status] then return { ok = false, err = 'closed', status = act.status } end
-    -- OPEN
+
+    -- OPEN → daqui pra frente é PROCESSAMENTO NOVO: rate-limit se aplica.
+    local t = nowMs()
+    if CompleteRate[src] and t < CompleteRate[src] then return { ok = false, err = 'processing' } end
+    CompleteRate[src] = t + math.floor(tonumber(cfg().CompleteRateLimitMs) or 500)
+
     if t > act.expiresAtMs then
         releaseAction(act, 'EXPIRED', 'timeout')
         return { ok = false, err = 'expired' }
@@ -272,15 +335,25 @@ function ActionSession.Complete(src, actionId)
 
     local rErr = revalidate(act)
     if rErr then
-        -- cancelamento "de intenção" (distance/tool/…) vs falha dura — ambos fecham a
-        -- action, destravam a peça, e NÃO produzem reward/entitlement/PART_CHOPPED.
-        releaseAction(act, (rErr == 'distance' or rErr == 'no_tool' or rErr == 'not_raised') and 'CANCELLED' or 'FAILED', rErr)
+        -- intenção recuperável (distance/tool/pré-requisito) → CANCELLED; falha dura →
+        -- FAILED. Ambos fecham a action, destravam a peça, e NÃO produzem
+        -- reward/entitlement/PART_CHOPPED.
+        releaseAction(act, RECOVERABLE[rErr] and 'CANCELLED' or 'FAILED', rErr)
         return { ok = false, err = rErr }
+    end
+
+    -- [PR-G hardening] PIN do lock da peça ANTES de executar o domínio: a partir do
+    -- COMMITTING a peça é FAIL-CLOSED (nem TTL nem sweeper liberam — só UnlockPart
+    -- com o token certo, no terminal). Se o pin falhar (token perdido), NÃO roda o
+    -- domínio.
+    if not ChopSession.PinPartLock(act.sessionId, act.action, act.lockToken) then
+        releaseAction(act, 'FAILED', 'lock_lost')
+        return { ok = false, err = 'lock_lost' }
     end
 
     -- OPEN → COMMITTING (sem yield entre o check acima e esta escrita — FiveM Lua é
     -- single-thread cooperativo): 2º COMPLETE concorrente vê COMMITTING → 'processing'.
-    act.status      = 'COMMITTING'
+    act.status       = 'COMMITTING'
     act.committingAt = t
 
     local executor = _executors[act.kind]
@@ -355,10 +428,15 @@ local function sweepOnce()
                 releaseAction(act, 'FAILED', 'session_gone')
             end
         elseif act.status == 'COMMITTING' then
-            -- Backstop: um executor legítimo retorna em ~1 frame. Se ficar preso
-            -- MUITO além disso (yield infinito por edição futura), destrava a peça.
-            if t - (act.committingAt or act.startedAtMs) > COMMIT_MAX_MS then
-                releaseAction(act, 'FAILED', 'commit_timeout')
+            -- [PR-G hardening] FAIL-CLOSED: um executor legítimo retorna em ~1 frame.
+            -- Se ficar preso MUITO além disso, o sweeper NÃO libera a peça (a
+            -- coroutine ainda pode voltar → dois commits). Só loga uma vez e marca
+            -- `commitStalled` p/ observabilidade. A peça fica presa (lock pinned) até
+            -- o executor retornar OU restart OU tooling admin futuro.
+            if not act.commitStalled and t - (act.committingAt or act.startedAtMs) > COMMIT_MAX_MS then
+                act.commitStalled = true
+                print(('[vp_chopshop][ActionSession] SEVERE: %s preso em COMMITTING > %dms (session %s, part %s) — peça FAIL-CLOSED até o executor retornar.')
+                    :format(act.id, COMMIT_MAX_MS, tostring(act.sessionId), tostring(act.action)))
             end
         elseif TERMINAL[act.status] then
             if t - (act.terminalAt or 0) > retention then
@@ -381,8 +459,20 @@ end)
 lib.callback.register('vp_chopshop:action:start', function(src, payload)
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
     if type(payload) ~= 'table' then return { ok = false, err = 'args' } end
-    -- Client manda SOMENTE { sessionId, action }. Tudo o mais é derivado server-side.
-    return ActionSession.StartBaseTyre(src, payload.sessionId, payload.action)
+    -- Client manda SOMENTE { sessionId, action }. O kind é derivado server-side.
+    local action = payload.action
+    if type(action) ~= 'string' then return { ok = false, err = 'part' } end
+    if action == 'adv_engine' or action == 'adv_carcass' then
+        return ActionSession.StartAdvanced(src, payload.sessionId, action)
+    end
+    local pdef = ChopParts and ChopParts[action]
+    if pdef and pdef.kind == 'tyre' then
+        return ActionSession.StartBaseTyre(src, payload.sessionId, action)
+    end
+    if pdef and pdef.kind == 'door' then
+        return ActionSession.StartAdvanced(src, payload.sessionId, action)
+    end
+    return { ok = false, err = 'part' }
 end)
 
 lib.callback.register('vp_chopshop:action:complete', function(src, actionId)
@@ -398,7 +488,7 @@ end)
 -- ─── Seam de teste ────────────────────────────────────────────────────────────
 if GetConvar('vp_chopshop_selftest', '0') == '1' then
     ActionSession._test = {
-        reset        = function() Sessions, OpenByKey, _seq = {}, {}, 0; StartRate, CompleteRate = {}, {} end,
+        reset        = function() Sessions, OpenByKey, OpenBySrc, _seq = {}, {}, {}, 0; StartRate, CompleteRate = {}, {} end,
         _all         = function() return Sessions end,
         setEntityAPI = function(tbl) for k, v in pairs(tbl) do EntityAPI[k] = v end end,
         setClock     = function(fn) _clock = fn end,
