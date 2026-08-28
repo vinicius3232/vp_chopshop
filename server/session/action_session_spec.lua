@@ -431,30 +431,49 @@ CreateThread(function()
     check('ADV16 door completou', ActionSession.Complete(1, a16.actionId).ok == true)
     check('ADV16 START advanced imediato → processing (cooldown)', ActionSession.StartAdvanced(1, sid, 'boot').err == 'processing')
 
-    -- ═══ [P1.3 / FASE C] bonnet valida via Part Registry — paridade c/ o hardcode ══
-    -- ADV-C1 · bonnet sem serra → no_saw (via registryValidate; toolClass='cut').
-    --   Antes só `boot` (hardcode) cobria no_saw (ADV9).
+    -- ═══ [P1.4 / FASE D] TODAS as peças avançadas validam via Part Registry ══════
+    -- Paridade byte-a-byte com o hardcode legado — a bateria ADV1..ADV16 já cobre
+    -- adv_door/adv_engine/adv_carcass; estes ADV-D fixam os casos novos.
+    -- ADV-D1 · bonnet sem serra → no_saw (registry toolClass='cut'). Antes só `boot`.
     fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
-    check('ADV-C1 bonnet sem serra → no_saw (registry)', ActionSession.StartAdvanced(1, sid, 'bonnet').err == 'no_saw')
+    check('ADV-D1 bonnet sem serra → no_saw (registry)', ActionSession.StartAdvanced(1, sid, 'bonnet').err == 'no_saw')
     _G.HAS_TOOL = true
 
-    -- ADV-C2 · bonnet com serra → START ok, kind adv_door (== ADV1, agora pelo registry)
+    -- ADV-D2 · door_pside_r (variante que nunca teve teste dedicado) → no_saw via registry
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
+    check('ADV-D2 door_pside_r sem serra → no_saw (registry)', ActionSession.StartAdvanced(1, sid, 'door_pside_r').err == 'no_saw')
+    _G.HAS_TOOL = true
+
+    -- ADV-D3 · o registry TEM defs p/ adv_engine/adv_carcass (peças sintéticas) →
+    -- withRegistry realmente roteia por registryValidate (não é sempre fallback)
+    check('ADV-D3 registry cobre adv_engine + adv_carcass',
+        VPChopPartRegistry.isEnabled('adv_engine') == true and VPChopPartRegistry.isEnabled('adv_carcass') == true)
+
+    -- ADV-D3b · adv_engine via registry: sem bonnet → hood_first (requires=[bonnet])
     fresh(); spawn(10, 111); sid = legitRaise(10, 1)
-    local ac2 = ActionSession.StartAdvanced(1, sid, 'bonnet')
-    check('ADV-C2 bonnet com serra → OPEN adv_door (registry)',
-        ac2.ok == true and ActionSession._test._all()[ac2.actionId].kind == 'adv_door')
+    check('ADV-D3b adv_engine sem capô → hood_first (registry)', ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'hood_first')
 
-    -- ADV-C3 · o slice NÃO vaza: boot continua no hardcode (no_saw sem serra)
-    fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
-    check('ADV-C3 boot ainda hardcode → no_saw', ActionSession.StartAdvanced(1, sid, 'boot').err == 'no_saw')
-    _G.HAS_TOOL = true
+    -- ADV-D4 · adv_carcass via registry: engine ok mas sem welder → no_welder_adv (gates.welder)
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    ChopSession.MarkPart(sid, 'bonnet', 1, { origin = 'advanced' })
+    ChopSession.MarkPart(sid, 'adv_engine', 1, { origin = 'advanced' })
+    _G.WELDER_NEAR = false
+    check('ADV-D4 adv_carcass sem welder → no_welder_adv (registry)', ActionSession.StartAdvanced(1, sid, 'adv_carcass').err == 'no_welder_adv')
+    _G.WELDER_NEAR = true
 
-    -- ADV-C4 · registry OFF (isEnabled('bonnet')=false) → bonnet cai no fallback hardcode
+    -- ADV-D5 · registry OFF p/ adv_engine → fallback hardcode ainda dá hood_first
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    VPChopPartRegistry.defs.adv_engine.enabled = false
+    check('ADV-D5 registry OFF → adv_engine fallback → hood_first',
+        ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'hood_first')
+    VPChopPartRegistry.defs.adv_engine.enabled = true
+
+    -- ADV-D6 · registry OFF p/ bonnet → fallback hardcode → START ok
     fresh(); spawn(10, 111); sid = legitRaise(10, 1)
     VPChopPartRegistry.defs.bonnet.enabled = false
-    local ac4 = ActionSession.StartAdvanced(1, sid, 'bonnet')
-    check('ADV-C4 registry OFF → bonnet via hardcode → START ok',
-        ac4.ok == true and ActionSession._test._all()[ac4.actionId].kind == 'adv_door')
+    local ad6 = ActionSession.StartAdvanced(1, sid, 'bonnet')
+    check('ADV-D6 registry OFF → bonnet fallback → START ok',
+        ad6.ok == true and ActionSession._test._all()[ad6.actionId].kind == 'adv_door')
     VPChopPartRegistry.defs.bonnet.enabled = true
 
     -- ═══ RATE-LIMIT REAL (500ms) NÃO QUEBRA REPLAY ════════════════════════════
