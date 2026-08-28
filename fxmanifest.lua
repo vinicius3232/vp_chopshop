@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.14.3'
+version '1.15.0-rc1'
 
 dependencies {
     'ox_lib',

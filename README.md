@@ -595,7 +595,16 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.14.3` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.15.0-rc1` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+
+> **v1.15.0-rc1** — **RELEASE CANDIDATE.** Refatoração server-authority em stack de 10 PRs
+> (#2→#11, nada mergeado até a validação runtime QBox passar): `ChopSession` (fonte única do
+> estado de desmanche), `ActionSession` (autorização temporal server-side), unified discard +
+> ownership gate QBox, tyre entitlement ledger, `fence:deliverCar` terminal hardening
+> (reserva de cooldown como autoridade + marcador `vpChopDeliveredMark`). Economia/heat/trust
+> **inalterados**. Harness estático 493/493. RC-FIX-2: minigame de parafusos 3D desligado
+> (geometria placeholder / câmera fixa / giro sem resposta) → cai em `lib.skillCheck`; rework
+> pós-RC. Plano em `docs/audit/V115_RELEASE_CANDIDATE.md`. Ver CHANGELOG.
 
 > **v1.14.3** — fix: registro do archetype `wheel_spacer.ytyp` (parafuso `bolt`) no fxmanifest;
 > o parafuso 3D do minigame volta a carregar (causa raiz do "minigame não entrava"). Marcador

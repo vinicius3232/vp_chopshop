@@ -2,6 +2,62 @@
 
 ---
 
+## [1.15.0-rc1] — 2026-08-27 — Server-authority + ChopSession + ActionSession (RELEASE CANDIDATE)
+
+Refatoração arquitetural em stack de 10 PRs (#2→#11, **nenhuma mergeada** até a validação
+runtime QBox passar). Harness de teste estático: **493 asserts / 0 fail** (`lua tools/run_spec.lua .`).
+Auditoria 4-dimensões: 0 CRITICAL, 0 HIGH, 1 MEDIUM (i18n). Plano de validação e estado em
+`docs/audit/V115_RELEASE_CANDIDATE.md`. **CODE FREEZE** a partir daqui.
+
+### Security / Architecture
+- **P0 hotfix (#2):** truck storage sem lastro, `sellTyres` sem validação, `jackstandTyreStolen`
+  dead-grant, `discardVehicle` double-payout — fechados.
+- **ChopSession (#3):** fonte server-authoritative única do estado de desmanche. VehicleSessionId
+  (netId+model+ownedId + marcador server-local `vpChopVsid` write+readback). Jackstand deixa de
+  ser verdade client-side. **INVARIANT:** enquanto o veículo é válido, tempo sozinho nunca apaga
+  estado commitado — sem TTL destrutivo.
+- **adv_gate (#4):** os 3 callbacks `adv:*` exigem ChopSession ativa + `raised` + participante.
+- **base/advanced chop → ChopSession (#5,#6):** `ChoppedByNetId` / `AdvState` / `AdvMutex`
+  removidos; estado de peça vive em `session.parts[k]` com `origin='base'|'advanced'`.
+- **Unified discard (#7):** `discardVehicle` vira transação terminal. Contagem unificada
+  base+advanced. `bridge/server_vehicle.lua`: ownership por QBox (`state.vehicleid` + lookup
+  `qbx_vehicles`, fail-closed), `BridgeDeleteWorldVehicle({expectedFramework})` (DisablePersistence
+  confirmado). `Config.Discard.OwnedPolicy='deny'`. Quarentena econômica em falha de compensação.
+- **Tyre entitlement (#8):** `PlayerTyreStock` removido. Ledger `TyreEntitlement` independente da
+  ChopSession (`te:<n>`, ciclo REMOVED→STORED→SOLD/LOST). `TruckStorage` com identidade própria
+  (`ts:<n>` + marcador write+readback). Contagem derivada; `chopTyreCount` só UX.
+- **ActionSession (#9,#10):** autorização temporal server-authoritative para ações físicas
+  (START→OPEN→COMMITTING→COMPLETED). Replay = zero side-effect. Migrados base tyre + advanced
+  (door/engine/carcass). COMMITTING fail-closed (`PinPartLock`). Kill-switches exclusivos
+  (`Config.ActionSession.RequireBaseTyres` / `RequireAdvanced`).
+- **fence:deliverCar terminal hardening (#11):** deixa de usar `DeleteEntity` direto. Ownership
+  gate → **reserva de cooldown condicional** (`affectedRows==1`, autoridade, ANTES do dinheiro) →
+  marcador `vpChopDeliveredMark` (write+readback, barreira de entrada, sobrevive a resource
+  restart) → `BridgeAddCash` → `BridgeDeleteWorldVehicle` → retry por identidade estrita
+  (`deliver_car_util.lua`, sem timer). RC-FIX-1a: rollback só confirma com `affectedRows==1`.
+  RC-FIX-1b: `clearMark` no payment-fail é observável (log SEVERE, fail-closed).
+
+### Fixed (RC runtime)
+- **RC-FIX-2 (`Config.Plates.Bolt3D.Enable=false`, `Config.Jackstand.Minigame.Bolt3D.Enable=false`):**
+  o minigame de parafusos 3D (`runBoltSurface`) roda com geometria placeholder nunca calibrada
+  (parafusos fora da placa), câmera fixa na traseira mesmo roubando a placa da frente, e a
+  orientação/giro não responde. Desligado → cai em `lib.skillCheck` (Config.Plates.SkillCheck /
+  Jackstand.Minigame.SkillCheck*). O rework do minigame 3D (front/rear-aware, calibração, giro,
+  remoção do asset pago `bolt.ydr`) é tarefa pós-RC — ver `docs/audit/V115_RELEASE_CANDIDATE.md` §7.
+
+### Notes
+- Economia, payout, heat, trust, tier, XP, cooldowns: **INALTERADOS** em toda a stack.
+- Limitação conhecida: ChopSession / TyreEntitlement / TruckStorage / ActionSession são in-memory
+  — resource restart perde o ledger (documentado; decisão de persistência = v1.15 vs v1.16 depende
+  da Fase 20 do RC).
+- Pendências não-bloqueantes: i18n — 4 notificações player-facing hardcoded em pt-BR no servidor
+  (`server/main.lua:330`, `server/advanced_chop.lua:101/187`, `server/ambush.lua:160`); ~160
+  linhas de código morto em `client/fence.lua` (props de pneu legados). Ambas → chore pós-RC.
+- Assets `stream/bolt.ydr` + `stream/wheel_spacer.ytyp` (pacote pago `ls_bolt_minigame`): remover/
+  substituir antes de release público.
+
+---
+
 ## [1.14.3] — 2026-06-27 — Parafuso 3D do minigame volta a carregar (registro do .ytyp)
 
 ### Fixed
