@@ -121,18 +121,14 @@ server_scripts {
     'server/action/advanced_chop.lua',
 }
 
-data_file 'DLC_ITYP_REQUEST' 'stream/nacelle.ytyp'
-data_file 'DLC_ITYP_REQUEST' 'stream/lr_supermod_garage_int.ytyp'
--- [FIX] wheel_spacer.ytyp É o archetype do bolt.ydr (o parafuso do minigame). O arquivo está
--- em stream/, mas a linha de registro abaixo havia sido removida → o archetype 'bolt' nunca
--- registrava, RequestModel('bolt') falhava e o minigame caía no modo marcador. Registrado de
--- volta: agora o parafuso 3D carrega. (O modo marcador continua como fallback automático.)
-data_file 'DLC_ITYP_REQUEST' 'stream/wheel_spacer.ytyp'
+-- [P0.2b] stream/ removido por completo. Continha só:
+--   · bolt.ydr + wheel_spacer.ytyp — parafuso 3D do minigame, do pacote PAGO
+--     `ls_bolt_minigame` (o minigame roda em modo marcador, DrawMarker, sem asset);
+--   · nacelle.* + lr_supermod_* — props do ELEVADOR, removido do sistema há tempo
+--     (só o macaco `imp_prop_axel_stand_01a`, base game, é usado — Config.Jackstand).
+-- Nenhum é referenciado no código. Repo vai a público → sem IP de terceiros.
 
 files {
     'installation/ox_items_snippet.txt',
-    'stream/*.ydr',
-    'stream/*.ytyp',
-    'stream/*.ybn',
     'sounds/*.ogg',
 }

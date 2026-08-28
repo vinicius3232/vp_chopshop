@@ -697,7 +697,8 @@ do
         local remaining      = #bolts
         local startMs        = GetGameTimer()
         local prevCx, prevCy = GetControlNormal(0, 239), GetControlNormal(0, 240)
-        local result         = nil  -- nil = a correr; true = concluído; false = cancelar/timeout
+        local result         = nil  -- nil = a correr; true = concluído; false = cancelar/timeout; 'fallback' = geometria/câmera quebrada
+        local unprojSince    = nil  -- ms desde que NENHUM parafuso projeta na tela (câmera/geometria off)
 
         local function cleanup()
             lib.hideTextUI()
@@ -736,15 +737,27 @@ do
 
                 -- 1ª passada: localizar o parafuso sob o cursor
                 local hovered, bestDist = nil, hoverR
+                local anyProjected = false
                 for _, b in ipairs(bolts) do
                     if not b.done then
                         local on, sx, sy = world2screen(b.pos.x, b.pos.y, b.pos.z)
                         if on then
+                            anyProjected = true
                             local dx, dy = sx - cx, sy - cy
                             local d = math.sqrt(dx * dx + dy * dy)
                             if d < bestDist then bestDist = d; hovered = b end
                         end
                     end
+                end
+
+                -- Se NENHUM parafuso ativo projeta na tela por >2.5 s, a câmera/geometria
+                -- está errada (RC-FINDING-01). Degrada para o skillCheck em vez de travar
+                -- o jogador num minigame invisível.
+                if anyProjected then
+                    unprojSince = nil
+                else
+                    unprojSince = unprojSince or GetGameTimer()
+                    if GetGameTimer() - unprojSince > 2500 then result = 'fallback'; break end
                 end
 
                 -- 2ª passada: marcador. Cor vai de vermelho (0%) → verde (100%) conforme rosqueia;
@@ -754,9 +767,9 @@ do
                         local prog = math.min(1.0, b.deg / needed)
                         local mr = math.floor(230 * (1.0 - prog) + 60 * prog)
                         local mg = math.floor(60 * (1.0 - prog) + 220 * prog)
-                        local a  = (b == hovered) and 220 or 110
+                        local a  = (b == hovered) and 230 or 120
                         DrawMarker(0, b.pos.x, b.pos.y, b.pos.z + 0.12, 0.0,0.0,0.0, 180.0,0.0,0.0,
-                            0.05, 0.05, 0.08, mr, mg, 70, a,
+                            0.08, 0.08, 0.10, mr, mg, 70, a,
                             true, false, 2, false, nil, nil, false)
                     end
                 end
@@ -764,6 +777,7 @@ do
                 if hovered and holding then
                     local dcx, dcy = cx - prevCx, cy - prevCy
                     local move = math.sqrt(dcx * dcx + dcy * dcy)
+                    if move > 0.08 then move = 0.08 end  -- clamp: salto de cursor (1º frame / borda de tela) não conclui parafuso de uma vez
                     if move > 0.0 then
                         local turn = move * sens
                         hovered.deg = hovered.deg + turn
@@ -794,6 +808,7 @@ do
 
         cleanup()
         if not ok then return 'fallback' end
+        if result == 'fallback' then return 'fallback' end
         return result == true
     end
 
@@ -844,7 +859,7 @@ do
         return true
     end
 
-    -- ─── Ponta PLACA: parafusos nos cantos da placa traseira ──────────────────
+    -- ─── Ponta PLACA: parafusos nos cantos da placa (frente OU traseira) ──────
     local function plateCfg()
         local p = Config.Plates
         return (p and p.Bolt3D) or {}
@@ -858,8 +873,14 @@ do
         return passed
     end
 
-    function VPChopPlateBoltMinigame(vehicle)
+    --- @param vehicle integer
+    --- @param isRear boolean|nil  true = placa traseira (default) · false = dianteira.
+    ---   O caller (client/plates.lua) resolve a face pela posição do jogador. É UMA
+    ---   placa só — frente/traseira muda apenas o enquadramento (câmera, normal da
+    ---   face, offset Y e heading base). O servidor é INALTERADO.
+    function VPChopPlateBoltMinigame(vehicle, isRear)
         if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then return false end
+        if isRear == nil then isRear = true end
         local c = plateCfg()
 
         local vmin, vmax = GetModelDimensions(GetEntityModel(vehicle))
@@ -870,14 +891,18 @@ do
         if rlen > 0.0 then rightV = rightV / rlen end
         local vehHeading = GetEntityHeading(vehicle)
 
-        -- Centro aproximado da placa TRASEIRA (placeholder: calibrar in-game via ZFrac/YOffset)
-        local zFrac  = tonumber(c.PlateZFrac)  or 0.30
+        -- Centro aproximado da placa na face escolhida. Geometria ainda placeholder —
+        -- calibrar in-game via ZFrac / YOffset{Front,Rear} (Config.Plates.Bolt3D).
+        local zFrac  = tonumber(c.PlateZFrac) or 0.30
         local zPlate = vmin.z + (vmax.z - vmin.z) * zFrac
-        local yRear  = vmin.y - (tonumber(c.PlateYOffset) or 0.02)
-        local center = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, yRear, zPlate)
+        local yOff   = isRear
+            and (tonumber(c.PlateYOffsetRear)  or tonumber(c.PlateYOffset) or 0.02)
+            or  (tonumber(c.PlateYOffsetFront) or tonumber(c.PlateYOffset) or 0.02)
+        local yPlate = isRear and (vmin.y - yOff) or (vmax.y + yOff)
+        local center = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, yPlate, zPlate)
 
-        -- Normal da face traseira (aponta para trás = lado da câmera)
-        local outward = vector3(-fwd.x, -fwd.y, 0.0)
+        -- Normal da face escolhida (aponta para fora do carro = lado da câmera).
+        local outward = isRear and vector3(-fwd.x, -fwd.y, 0.0) or vector3(fwd.x, fwd.y, 0.0)
         local olen = #outward
         if olen > 0.0 then outward = outward / olen end
 
@@ -899,15 +924,21 @@ do
             points[#points + 1] = center + (rightV * (u * hw)) + (up * (v * hh)) + (outward * outOff)
         end
 
+        -- Câmera POR FORA da face escolhida (model-space: +Y = frente), ~1.2 m
+        -- afastada e um pouco acima, olhando de volta para a placa.
+        --   traseira: yPlate ≈ vmin.y  → câmera mais para trás  (yPlate - 1.2)
+        --   dianteira: yPlate ≈ vmax.y → câmera mais para frente (yPlate + 1.2)
+        local camBack = isRear and (yPlate - 1.2) or (yPlate + 1.2)
+
         local r = runBoltSurface({
             points  = points,
             outward = outward,
-            camPos  = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, yRear - 1.2, zPlate + 0.25),
+            camPos  = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, camBack, zPlate + 0.25),
             lookAt  = center,
-            baseRot = { x = 90.0, y = 0.0, z = vehHeading + 180.0 },
+            baseRot = { x = 90.0, y = 0.0, z = vehHeading + (isRear and 180.0 or 0.0) },
             needed  = (tonumber(c.TurnsToLoosen) or 1.5) * 360.0,
             sens    = tonumber(c.Sensitivity) or 900.0,
-            hoverR  = tonumber(c.HoverRadius)  or 0.06,
+            hoverR  = tonumber(c.HoverRadius)  or 0.09,
             timeout = tonumber(c.Timeout)      or 25000,
         })
 

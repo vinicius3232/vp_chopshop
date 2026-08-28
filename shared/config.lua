@@ -427,15 +427,18 @@ Config.Plates = {
         keys         = { 'e', 'e', 'e' },
     },
 
-    --- Minigame de parafusos 3D autoral (estilo "filo") ancorado na PLACA TRASEIRA:
-    --- câmera dedicada atrás do carro + cursor do mouse + girar segurando o botão
-    --- esquerdo. Tem prioridade sobre o SkillCheck acima quando Enable = true.
-    --- Fallback automático para o SkillCheck se o modelo `bolt` não carregar.
-    --- As medidas da placa são placeholders geométricos — calibrar in-game.
-    --- [RC-FIX-2] DESLIGADO: geometria placeholder nunca calibrada (parafusos caem
-    --- fora da placa) + câmera sempre na traseira mesmo roubando a placa da frente
-    --- (RC-FINDING-01). Cai em Config.Plates.SkillCheck (lib.skillCheck). Reativar
-    --- só após calibrar a geometria E resolver o asset pago bolt.ydr (P3 da auditoria).
+    --- Minigame de parafusos 3D autoral (estilo "filo"): câmera dedicada na face da
+    --- placa que o jogador mira + cursor do mouse + girar segurando o botão esquerdo.
+    --- Tem prioridade sobre o SkillCheck acima quando Enable = true. Sempre roda em
+    --- MODO MARCADOR (DrawMarker) — não depende de asset pago. Degrada para o
+    --- SkillCheck automaticamente se a geometria/câmera não projetar os parafusos.
+    ---
+    --- [RC-FINDING-01 / P0.2] resolvido no código: o minigame agora é FRENTE/TRASEIRA-
+    --- aware (client/plates.lua resolve a face pela posição do jogador; câmera, normal
+    --- e heading base seguem a face). Asset pago bolt.ydr REMOVIDO. Continua DESLIGADO
+    --- (Enable=false) só até uma passada de calibração in-game dos offsets abaixo —
+    --- ligar, ajustar PlateZFrac / PlateYOffset{Front,Rear} / PlateHalf* olhando os
+    --- parafusos no carro, e então deixar Enable=true.
     Bolt3D = {
         Enable          = false,
         --- 2 = parafusos no topo · 4 = um em cada canto da placa.
@@ -445,15 +448,19 @@ Config.Plates = {
         --- Sensibilidade: graus por unidade de movimento do cursor (maior = mais rápido).
         Sensitivity     = 900.0,
         --- Raio (coords de tela 0..1) para o cursor "agarrar" um parafuso.
-        HoverRadius     = 0.06,
+        HoverRadius     = 0.09,
         --- Tempo máximo (ms) antes de falhar por timeout.
         Timeout         = 25000,
         --- Geometria da placa (calibrar in-game): altura na bounding box (0..1),
-        --- recuo traseiro (m), meia-largura e meia-altura do retângulo da placa (m).
+        --- meia-largura e meia-altura do retângulo da placa (m).
         PlateZFrac      = 0.30,
-        PlateYOffset    = 0.02,
         PlateHalfWidth  = 0.20,
         PlateHalfHeight = 0.07,
+        --- Recuo da placa para fora da bounding box (m), por face. PlateYOffset (legado)
+        --- é usado como fallback se a variante da face não estiver definida.
+        PlateYOffset      = 0.02,
+        PlateYOffsetFront = 0.02,
+        PlateYOffsetRear  = 0.02,
     },
 
     --- Ferramenta exigida (verificada no client p/ UX e no servidor como verdade).
@@ -899,12 +906,13 @@ Config.Jackstand = {
 
         --- Minigame de parafusos 3D autoral (estilo "filo": câmera dedicada + cursor do
         --- mouse + girar segurando o botão esquerdo). NÃO precisa de boii_minigames nem
-        --- de NUI; usa o modelo `bolt.ydr` (já incluído no stream/). Tem prioridade sobre
-        --- o boii/skill_circle quando Enable = true. Fallback automático para lib.skillCheck
-        --- se o modelo/bone da roda não carregar.
-        --- [RC-FIX-2] DESLIGADO junto com Config.Plates.Bolt3D (RC-FINDING-01): mesmo
-        --- núcleo (runBoltSurface) com geometria/asset não validados. Cai em
-        --- boii_minigames ou lib.skillCheck (SkillCheckDifficulties/Keys acima).
+        --- de NUI nem de asset pago — roda em MODO MARCADOR (DrawMarker). Tem prioridade
+        --- sobre o boii/skill_circle quando Enable = true. Degrada para lib.skillCheck
+        --- automaticamente se a geometria/câmera não projetar os parafusos.
+        --- [RC-FINDING-01 / P0.2] núcleo (runBoltSurface) endurecido: clamp de giro e
+        --- degradação automática se nenhum parafuso projeta por >2.5 s. Asset pago
+        --- bolt.ydr REMOVIDO. Continua DESLIGADO só até calibração in-game da geometria
+        --- da roda (radius/outOff em client/main.lua) — então Enable=true.
         Bolt3D = {
             Enable        = false,
             --- Quantidade de parafusos por roda.
@@ -914,7 +922,7 @@ Config.Jackstand = {
             --- Sensibilidade: graus de giro por unidade de movimento do cursor (maior = mais rápido).
             Sensitivity   = 900.0,
             --- Raio (em coords de tela 0..1) para o cursor "agarrar" um parafuso.
-            HoverRadius   = 0.06,
+            HoverRadius   = 0.09,
             --- Tempo máximo (ms) antes de falhar por timeout.
             Timeout       = 30000,
         },
