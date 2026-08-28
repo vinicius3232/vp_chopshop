@@ -924,7 +924,10 @@ do
             points[#points + 1] = center + (rightV * (u * hw)) + (up * (v * hh)) + (outward * outOff)
         end
 
-        -- Câmera do lado da face escolhida, recuada ~1.2 m e um pouco acima.
+        -- Câmera POR FORA da face escolhida (model-space: +Y = frente), ~1.2 m
+        -- afastada e um pouco acima, olhando de volta para a placa.
+        --   traseira: yPlate ≈ vmin.y  → câmera mais para trás  (yPlate - 1.2)
+        --   dianteira: yPlate ≈ vmax.y → câmera mais para frente (yPlate + 1.2)
         local camBack = isRear and (yPlate - 1.2) or (yPlate + 1.2)
 
         local r = runBoltSurface({
