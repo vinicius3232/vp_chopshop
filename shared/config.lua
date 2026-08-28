@@ -432,8 +432,12 @@ Config.Plates = {
     --- esquerdo. Tem prioridade sobre o SkillCheck acima quando Enable = true.
     --- Fallback automático para o SkillCheck se o modelo `bolt` não carregar.
     --- As medidas da placa são placeholders geométricos — calibrar in-game.
+    --- [RC-FIX-2] DESLIGADO: geometria placeholder nunca calibrada (parafusos caem
+    --- fora da placa) + câmera sempre na traseira mesmo roubando a placa da frente
+    --- (RC-FINDING-01). Cai em Config.Plates.SkillCheck (lib.skillCheck). Reativar
+    --- só após calibrar a geometria E resolver o asset pago bolt.ydr (P3 da auditoria).
     Bolt3D = {
-        Enable          = true,
+        Enable          = false,
         --- 2 = parafusos no topo · 4 = um em cada canto da placa.
         Bolts           = 4,
         --- Voltas de mouse para soltar cada parafuso (placa pede menos que a roda).
@@ -898,8 +902,11 @@ Config.Jackstand = {
         --- de NUI; usa o modelo `bolt.ydr` (já incluído no stream/). Tem prioridade sobre
         --- o boii/skill_circle quando Enable = true. Fallback automático para lib.skillCheck
         --- se o modelo/bone da roda não carregar.
+        --- [RC-FIX-2] DESLIGADO junto com Config.Plates.Bolt3D (RC-FINDING-01): mesmo
+        --- núcleo (runBoltSurface) com geometria/asset não validados. Cai em
+        --- boii_minigames ou lib.skillCheck (SkillCheckDifficulties/Keys acima).
         Bolt3D = {
-            Enable        = true,
+            Enable        = false,
             --- Quantidade de parafusos por roda.
             Bolts         = 5,
             --- Voltas de mouse necessárias para soltar cada parafuso (2.0 = duas voltas).

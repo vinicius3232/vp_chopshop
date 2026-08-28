@@ -109,6 +109,43 @@ Caminho para **`A) READY FOR STACK MERGE`**:
 
 ---
 
+## 7. RC FINDINGS (feedback runtime da QA)
+
+### RC-FINDING-01 — minigame de parafusos 3D quebrado (placa + roda)
+**Data:** 2026-08-27 · **Fase:** pré-3 (interação com veículo) · **Severidade:** BLOCKER de teste (não é regressão da stack #2→#11 — código de placas/jackstand é anterior).
+
+**Sintomas (QA):**
+1. Ao roubar placa, os 4 parafusos (marcadores) aparecem flutuando no ar sob o chassi/diferencial, **fora da placa** → impossível concluir → "Teste de perícia falhou".
+2. Roubando a placa **da frente**, a câmera vai para a **traseira** do carro.
+3. "Placa ficou fora do quadro no carro" (a confirmar: marcadores vs mesh da placa).
+4. "Tentou realizar ações no carro com as ferramentas e não apareceu ação" (a confirmar: qual ação / carro levantado? / alvo).
+
+**Root cause (código):**
+- `client/main.lua:873-877` `VPChopPlateBoltMinigame` calcula o centro da placa **sempre na traseira** (`yRear = vmin.y - PlateYOffset`) e a câmera atrás (`camPos` em `-y`), **ignorando** qual placa o jogador mira. `client/plates.lua` `onSelect` chama `VPChopPlateBoltMinigame(veh)` sem parâmetro frente/traseira.
+- `Config.Plates.Bolt3D` (`shared/config.lua:435`) e `Config.Jackstand.Minigame.Bolt3D` (`:901`) usam **geometria placeholder** — o próprio código/config diz *"As medidas da placa são placeholders geométricos — calibrar in-game"*, *"placeholder: calibrar in-game via ZFrac/YOffset"*. `PlateZFrac=0.30 / PlateYOffset=0.02 / PlateHalfWidth=0.20 / PlateHalfHeight=0.07` nunca foram calibrados → pontos dos parafusos caem no lugar errado (bate com o screenshot).
+- Relacionado ao P3 da auditoria: o modelo `bolt.ydr` é do pacote pago `ls_bolt_minigame`.
+
+**RC-FIX-2 proposta (CONFIG-ONLY, zero código):**
+```lua
+-- shared/config.lua
+Config.Plates.Bolt3D.Enable = false              -- :436  → cai em Config.Plates.SkillCheck (lib.skillCheck, já válido)
+Config.Jackstand.Minigame.Bolt3D.Enable = false  -- :902  → cai em boii_minigames / lib.skillCheck (SkillCheck* já válido)
+```
+Efeito: roubo de placa e remoção de roda passam a usar `lib.skillCheck` (provado). Elimina câmera, marcadores flutuantes e o problema frente/traseira. O minigame 3D + remoção do asset `bolt.ydr` viram tarefa pós-RC (com a P3).
+Fallbacks confirmados no código: `client/plates.lua:110-118` (plate) e `client/main.lua:973-975` (`runWheelUx` só chama `VPChopBoltMinigame` se `mg.Enable`).
+
+**Pendente de confirmação da QA (antes de decidir se há mais que RC-FIX-2):**
+- Q1: o roubo da placa **completou** (recebeu item `stolen_plate` + placa visível sumiu) apesar do minigame, ou falhou inteiro?
+- Q2: "placa fora do quadro" = os marcadores do minigame, ou o mesh da placa está deslocado no modelo do veículo? Qual veículo?
+- Q3: "não apareceu ação com ferramentas" — qual ação (levantar macaco / desmanche / roubo de placa)? O carro estava levantado? O que mirou com o ox_target? Qual item equipado?
+
+**Status:** RC-FIX-2 **APLICADA** (`shared/config.lua` — `Config.Plates.Bolt3D.Enable=false` :436,
+`Config.Jackstand.Minigame.Bolt3D.Enable=false` :906). Config-only, zero código. Q1-Q3 ainda
+abertas — se a QA responder que há problema ALÉM do minigame 3D (steal não completa / mesh da
+placa deslocado / ação ausente com carro levantado), abrir finding separado.
+
+---
+
 ## 6. Pós-RC (só depois do RC real passar)
 
 - `chore:` isolado: **M1** (i18n server hardcoded → `L()`) + **M2** (remover bloco morto `client/fence.lua`). Regressão: 493 asserts.
