@@ -80,6 +80,13 @@ e rodar Q1–Q5. **Fase 2 só começa depois de Q1–Q4 sem FAIL P0/P1.**
 | **P2.3** | `server/vehicle_condition.lua` — `VehicleConditionSnapshot` 1×/ChopSession via `lib.getVehicleProperties`; client mede → server clampa → economia usa snapshot. |
 | **P2.4** | `vehicle_part{partType='engine'}` — motor deixa de ser 5× `car_parts`; vira peça com metadata server-only. **Aqui** entra o carry genérico (`PartEntitlement` estende `TyreEntitlement`, `PartStorage` estende `TruckStorage`) e o `client/interaction.lua` (resolve ponto por bone/offset). Não antes — sem peça não-pneu carregável, é churn. |
 
+**Design consolidado da interação física (research + arquitetura + roadmap de PRs ID-0..ID-8):**
+[`INTERACTIVE_DISMANTLING.md`](INTERACTIVE_DISMANTLING.md) ·
+[`INTERACTIVE_DISMANTLING_RESEARCH.md`](INTERACTIVE_DISMANTLING_RESEARCH.md) ·
+[`WHEEL_BOLT_MINIGAME.md`](WHEEL_BOLT_MINIGAME.md). Providers dirigidos por
+`Registry.action.minigame` (`bolt`/`cut`/`mechanical`/`wiring`/`skillcheck`). Todas as PRs de
+implementação bloqueadas pelo gate Q1–Q4.
+
 ### FASE 3 — processamento de peça  *(PART_PROCESSING_RFC #12-17)* ⏸
 
 `vehicle_part` genérico + `Config.PartProcessing` · `ProcessSession` (espelha
