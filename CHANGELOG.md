@@ -11,7 +11,7 @@
 > `v1.16-dev`. Núcleo (`ChopSession`/`ActionSession`/`discard`/`deliverCar`) **inalterado** — só
 > completado em volta. Ver `docs/design/MASTER_IMPLEMENTATION_PLAN.md` e `STATUS.md`.
 >
-> Harness estático: **566 asserts / 0 fail** (`lua tools/run_spec.lua .`). Economia, payout, heat,
+> Harness estático: **632 asserts / 0 fail** (`lua tools/run_spec.lua .`). Economia, payout, heat,
 > trust, tier, XP, cooldowns: **INALTERADOS** em toda a consolidação.
 
 ### Fase 0 — base + dores concretas da QA
@@ -59,6 +59,12 @@
 - **Ponte `vp_chopshop` → `vp_gangs` (#27, #28):** `INT-01A` — contrato `contractVersion 1`
   (`docs/integration/VP_GANGS_CONTRACT.md`). `INT-01C` — fallback legado da ponte removido
   (cutover fechado). **Muda runtime.**
+- **CI `harness` (#33):** `.github/workflows/harness.yml` roda `luac -p` (hash-literal CfxLua
+  neutralizado numa cópia temporária — não pula o arquivo, um 2º erro real ainda falha) +
+  `lua5.4 tools/run_spec.lua .` em `pull_request`/`push` para `main` e `pr-h`. Critério = exit
+  code. Sanity gate no runner: `SPEC.pass + SPEC.fail == 0` → exit 1. Branch protection
+  (rulesets) em `main` (PR + check `harness` + no-delete + no-force-push) e `pr-h` (idem, mas
+  force-push liberado p/ rebase da stack). **Infra — não toca runtime FiveM.**
 
 ### Design registrado (não implementado — bloqueado pelo gate Q1–Q4)
 - `docs/design/INTERACTIVE_DISMANTLING.md` + `_RESEARCH.md` + `WHEEL_BOLT_MINIGAME.md` — arquitetura

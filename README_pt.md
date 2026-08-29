@@ -621,7 +621,7 @@ em [`CHANGELOG.md`](CHANGELOG.md).
 > recovery** do discard (`vp_chop_carcass` + barreira `already_discarded` + sweep de boot por
 > `vsid`); minigame de placa **front/rear-aware** + degradação para `lib.skillCheck`; **asset
 > pago do parafuso removido**; ponte `vp_chopshop → vp_gangs` (`contractVersion 1`).
-> Economia/payout/heat/trust/XP **inalterados**. Harness **566/566**. Estado:
+> Economia/payout/heat/trust/XP **inalterados**. Harness **632/632**. Estado:
 > [`STATUS.md`](STATUS.md) · `docs/design/MASTER_IMPLEMENTATION_PLAN.md`.
 
 > **v1.15.0-rc1** — *superado pelo bloco v1.16-dev.* Stack de 10 PRs (#2→#11): `ChopSession`,

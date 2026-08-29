@@ -618,7 +618,7 @@ bump para `1.16.0` no release. Histórico completo em [`CHANGELOG.md`](CHANGELOG
 > sweep de boot por `vsid`); minigame de placa **front/rear-aware** + degradação graciosa para
 > `lib.skillCheck`; **asset pago do parafuso removido**; ponte `vp_chopshop → vp_gangs`
 > (`contractVersion 1`). Economia/payout/heat/trust/XP **inalterados**. Harness estático
-> **566/566**. Estado e plano: [`STATUS.md`](STATUS.md) · `docs/design/MASTER_IMPLEMENTATION_PLAN.md`.
+> **632/632**. Estado e plano: [`STATUS.md`](STATUS.md) · `docs/design/MASTER_IMPLEMENTATION_PLAN.md`.
 
 > **v1.15.0-rc1** — *superado pelo bloco v1.16-dev.* Refatoração server-authority em stack de 10
 > PRs (#2→#11): `ChopSession`, `ActionSession`, unified discard + ownership gate QBox, tyre
