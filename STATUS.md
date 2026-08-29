@@ -3,9 +3,10 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-08-29
-**Branch de integração:** `pr-h/v1.15-delivercar-terminal-hardening` @ `90e1a4b`
+**Branch de integração:** `pr-h/v1.15-delivercar-terminal-hardening` @ `564ff19`
 **`main`:** `v1.14.3` (intocado — nada de v1.16 foi pro main)
-**Harness:** `lua tools/run_spec.lua .` → **632 PASS / 0 FAIL**
+**Repo:** `github.com/vinicius3232/vp_chopshop` — **PÚBLICO** (ver §Infra + issue #34)
+**Harness:** `lua tools/run_spec.lua .` → **632 PASS / 0 FAIL** — check `harness` no CI (#33)
 
 ---
 
@@ -18,6 +19,8 @@ P2.1   — client sai de ChopParts       ✅ CÓDIGO COMPLETO   (#23)
 Checkpoint de QA                       ✅ escrito           (#24 → docs/audit/V116_INTEGRATION_QA.md)
 Docs de contexto (AGENTS/STATUS/plano) ✅                   (#25 #26)
 INT-01 — ponte vp_chopshop → vp_gangs  ✅ CÓDIGO COMPLETO   (#27 #28 — contractVersion 1, fallback legado removido)
+CI — harness como check + exit code    ✅ MERGED            (#33 — .github/workflows/harness.yml + sanity gate)
+Branch protection (main + pr-h)        ✅ ATIVO             (rulesets — ver §Infra)
 Design — VP Interactive Dismantling    ✅ FECHADO (doc)     (#29 #30 — ABERTOS, não mergeados; ver abaixo)
 ─────────────────────────────────────────────────────────────────────────
 Fase 2 — Wheels V2 / condition / motor ⏸  BLOQUEADO até a QA validar Q1–Q4
@@ -34,7 +37,8 @@ Fase 5 — polish + CI + release         ⏸
 `ensure vp_chopshop` deve dar `already_discarded` com **0 payout**. Se pagar 2× = P0.
 
 `#27`/`#28` (ponte `vp_gangs`) entraram **depois** do checkpoint `#24` e mexem em
-runtime — a QA deve validar `pr-h` no HEAD atual (`90e1a4b`), não em `866abae`.
+runtime — a QA deve validar `pr-h` no HEAD atual (`564ff19`), não em `866abae`.
+`#33` é CI/infra (workflow + runner), não toca runtime FiveM.
 
 Fase 2 (P2.2 Wheels V2 → P2.3 condition → P2.4 motor como `vehicle_part`) só
 começa depois de Q1–Q4 sem FAIL P0/P1. Bug encontrado pela QA = RC-FIX pequena e
@@ -75,6 +79,39 @@ domínio server-side) → **ID-3** (Wheel Bolt físico). Nada de runtime antes d
 | #28 | INT-01C — remove fallback legado da ponte `vp_gangs` (cutover fechado) | SIM | merged |
 | #29 | `WHEEL_BOLT_MINIGAME.md` — estudo do `filo_bolt` | doc | **aberto** (segurar até QA) |
 | #30 | `INTERACTIVE_DISMANTLING.md` + `_RESEARCH.md` + ponteiros no plano | doc | **aberto** (empilhado em #29) |
+| #31 | `STATUS.md` + `AGENTS.md` sync + regra `--force-with-lease` | doc | **aberto** (este PR) |
+| #32 | `README`/`CHANGELOG`/`GAMEPLAY` sync p/ v1.16-dev | doc | **aberto** |
+| #33 | CI `harness` (workflow + exit code + luac hash-literal + sanity gate) | infra | merged |
+
+## Infra — CI + branch protection
+
+**CI (`#33`):** `.github/workflows/harness.yml` roda `luac -p` (hash-literal CfxLua
+neutralizado numa cópia, não pula o arquivo) + `lua5.4 tools/run_spec.lua .` em
+`pull_request`/`push` para `main` e `pr-h`. Critério = exit code. Sanity gate no
+runner: `SPEC.pass + SPEC.fail == 0` → exit 1 (CI verde com 0 testes é inaceitável).
+
+**Branch protection (rulesets ativos):**
+
+| | `main` | `pr-h` |
+|---|---|---|
+| PR obrigatório | ✅ (0 reviews) | ✅ (0 reviews) |
+| status check `harness` | ✅ | ✅ |
+| block deletion | ✅ | ✅ |
+| block force-push (`non_fast_forward`) | ✅ | ❌ (permitido — rebase da stack) |
+| bypass actors | nenhum | nenhum |
+
+Force-push em `pr-h` fica liberado (a stack `#29`→`#30` rebaseia). Restrição
+por-actor (só o dono) foi avaliada mas não aplicada: `bypass_actors` isenta o
+ator de **todas** as regras do ruleset, não só do force-push.
+
+**Regra de processo:** nunca `git push --force`. Rebase de stack usa
+`git push --force-with-lease`. Registrado em [`AGENTS.md`](AGENTS.md) §4.
+
+**Repo é PÚBLICO** — issue **#34** (`PAID_ASSET_HISTORY_PURGE`) assume "repo
+privado → risco contido"; **essa premissa está incorreta**. Os blobs de asset
+pago (`stream/bolt.ydr` etc.) continuam alcançáveis no histórico Git de um repo
+público. Não executar `filter-repo`/BFG/force-push de histórico sem cumprir todos
+os gates da #34 + GO explícito — mas a urgência subiu.
 
 ## Decisão de fase (2026-08-28)
 
