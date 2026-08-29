@@ -141,7 +141,7 @@ part.action = {
 **NÃO alterar o schema agora.** `shared/registry/*` é schema v2 **CONGELADO** — qualquer campo
 novo reabre a review adversarial. Isto entra só via **RFC própria** (`docs/design/PART_REGISTRY_STEPS_RFC.md`,
 a criar) com:
-- análise de compatibilidade (projeção `projectChopParts`, drift check, os 566 asserts);
+- análise de compatibilidade (projeção `projectChopParts`, drift check, os 632 asserts);
 - decisão se `steps` vive no registry ou num arquivo de layout separado (`shared/registry/dismantle_layout.lua`)
   que o provider consome — provável melhor opção, mantém o schema de peça intacto;
 - migração das peças existentes sem mudar comportamento.
@@ -544,7 +544,7 @@ O minigame em si é client/visual e **não** é coberto pelo harness. O que **é
 | `wheels_v2_spec` (nova) | máquina de estados server-side (5 estados, sem `REMOVING`): transições válidas/inválidas; `REMOVED`/`STORED` sobrevivem a "tempo sozinho"; `LOCKED` não (libera em `CleanupPlayer`/restart) |
 | `reward_gate_spec` | nenhum caminho de `RewardResolver` é alcançável sem `revalidate` ter retornado sucesso |
 
-Meta: manter **0 regressão** no total atual (566) e somar as novas.
+Meta: manter **0 regressão** no total atual (632) e somar as novas.
 
 ### 9.2 QA in-game (novo bloco no `V116_INTEGRATION_QA.md`, ou doc próprio Q6)
 
