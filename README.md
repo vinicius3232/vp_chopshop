@@ -623,3 +623,13 @@ O script **não depende de framework** para a lógica principal — inventário 
 > **v1.13.2** — patch de hardening de auditoria (bug + segurança + performance): correção da
 > detecção de colisão de placa falsa, vestígio/marca também no desmanche avançado, burnout
 > detectado em carros RWD, gate server-side das marcas de pneu, entre outros. Ver CHANGELOG.
+
+---
+
+## Licença
+
+**Proprietary Software — Copyright (c) 2026 Vinicius Pimentel. All Rights Reserved.**
+
+Ver [`LICENSE`](LICENSE) e [`NOTICE`](NOTICE). Sem permissão de uso, cópia,
+modificação, redistribuição, sublicenciamento ou venda sem autorização escrita
+do detentor. Dependências e assets de terceiros mantêm suas próprias licenças.
