@@ -1,6 +1,6 @@
 # MASTER_IMPLEMENTATION_PLAN — vp_chopshop v1.16-dev
 
-**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 566 PASS / 0 FAIL
+**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 632 PASS / 0 FAIL
 **Progresso:** ver [`STATUS.md`](../../STATUS.md) na raiz. Este doc é o roadmap completo.
 
 ---

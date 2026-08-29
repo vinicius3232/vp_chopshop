@@ -5,7 +5,7 @@
 **Atualizado:** 2026-08-28
 **Branch de integração:** `pr-h/v1.15-delivercar-terminal-hardening` @ `3dc9652`
 **`main`:** `v1.14.3` (intocado — nada de v1.16 foi pro main)
-**Harness:** `lua tools/run_spec.lua .` → **566 PASS / 0 FAIL**
+**Harness:** `lua tools/run_spec.lua .` → **632 PASS / 0 FAIL**
 
 ---
 
@@ -57,5 +57,5 @@ isolada, mesmo fluxo.
 O dono suspendeu o RC freeze da v1.15. Motivo: a direção está decidida; testar
 uma v1.15 congelada que já vai ser reescrita desperdiça QA. Novo alvo: build
 consolidado `v1.16-dev` que a QA valida como um todo. **Não** significa reescrever
-o núcleo (ChopSession/ActionSession/discard/deliverCar — fundação de 566 asserts).
+o núcleo (ChopSession/ActionSession/discard/deliverCar — fundação de 632 asserts).
 Ver `docs/design/MASTER_IMPLEMENTATION_PLAN.md` §1.

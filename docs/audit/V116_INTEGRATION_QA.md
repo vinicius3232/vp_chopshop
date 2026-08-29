@@ -2,7 +2,7 @@
 
 **Data:** 2026-08-28
 **Branch a testar:** `pr-h/v1.15-delivercar-terminal-hardening` (após merge dos PRs #14–23)
-**Harness estático:** `lua tools/run_spec.lua .` → **566 PASS / 0 FAIL**
+**Harness estático:** `lua tools/run_spec.lua .` → **632 PASS / 0 FAIL**
 
 Deploy desta branch num servidor QBox real e rode as fases abaixo **antes** de qualquer sistema novo (P2.2+). O objetivo é confirmar que a base de refator não regrediu e que as duas mudanças de runtime da Fase 0 (minigame, restart recovery) funcionam.
 
@@ -32,7 +32,7 @@ Referência de fluxo detalhado: `docs/audit/RC_QA_TASKLIST.md`. Este doc é o **
 **FAIL comum a investigar:** `shared/part_class.lua exige VPChopPartRegistry` → ordem do fxmanifest. `attempt to index nil (VPChopPartGtaClass)` → idem.
 
 ### Q1.2 — Selftest no runtime
-`setr vp_chopshop_selftest 1` → restart → **566 PASS / 0 FAIL**. Depois `setr … 0` → restart.
+`setr vp_chopshop_selftest 1` → restart → **632 PASS / 0 FAIL**. Depois `setr … 0` → restart.
 
 ---
 

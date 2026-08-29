@@ -39,7 +39,7 @@ mods por placa.
 ## 3. NUNCA faça / NUNCA delegue
 
 - **Não reescreva** `ChopSession` / `ActionSession` / `discard` / `deliverCar` /
-  `TyreEntitlement` / `carcass_ledger`. São a fundação provada por 566 asserts
+  `TyreEntitlement` / `carcass_ledger`. São a fundação provada por 632 asserts
   (concorrência, idempotência, transação de dinheiro, fail-closed). Estenda,
   não substitua.
 - **Não edite os arquivos do spike** `shared/registry/parts.lua` /
@@ -60,7 +60,7 @@ mods por placa.
 git checkout pr-h/... && git pull
 git checkout -b feat/v1.16-<id>
   implementar
-  lua tools/run_spec.lua .              → deve ficar VERDE (hoje: 566 PASS / 0 FAIL)
+  lua tools/run_spec.lua .              → deve ficar VERDE (hoje: 632 PASS / 0 FAIL)
   luac -p <arquivos tocados>            → limpo (ignore "unexpected symbol near '`'"
                                           — é o hashkey literal do CFX, não é erro seu)
   OmniRoute -Kind challenge no diff     → CONFERIR cada achado você mesmo
@@ -96,7 +96,7 @@ Depois do GO: `gh pr merge <n> --squash --delete-branch`.
 ## 6. Build & teste
 
 - **Harness estático** (fora do FiveM): `lua tools/run_spec.lua .` — roda 10 suites,
-  hoje **566 PASS / 0 FAIL**. Stub completo dos globals CFX no topo de `run_spec.lua`.
+  hoje **632 PASS / 0 FAIL**. Stub completo dos globals CFX no topo de `run_spec.lua`.
 - Specs são self-gated na convar `vp_chopshop_selftest 1` (no servidor real também).
 - `luac -p` para checar sintaxe. O erro `unexpected symbol near '` `'` é o literal
   hashkey do CFX (`` `prop_name` ``) — **não** é um erro seu; filtre com
