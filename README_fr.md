@@ -240,6 +240,10 @@ Le script **ne dépend d'aucun framework** pour la logique principale — l'inve
 
 `1.13.2` — définie dans `fxmanifest.lua`. Historique complet dans [`CHANGELOG.md`](CHANGELOG.md).
 
+> ⚠️ **Ce README traduit est en retard.** Actuel : **`v1.14.3`** publiée (`main`), **`v1.16-dev`**
+> en QA. État de référence dans [`CHANGELOG.md`](CHANGELOG.md) et [`STATUS.md`](STATUS.md) ;
+> [`README.md`](README.md) / [`README_pt.md`](README_pt.md) sont les versions maintenues.
+
 > **v1.7.0–1.13.2 :** audit (nettoyage/sécurité/performance), récompense immédiate + embuscade,
 > le **système complet de plaques** (vol physique → forge → fausse plaque qui trompe le MDT,
 > persistante et avec réversion en garage ; dispatch selon les témoins ; support QBox/QBCore/ESX),

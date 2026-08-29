@@ -399,6 +399,10 @@ Este script **no depende de framework** para la lógica principal — el inventa
 
 `1.13.2` — definida en `fxmanifest.lua`. Historial completo en [`CHANGELOG.md`](CHANGELOG.md).
 
+> ⚠️ **Este README traducido está desactualizado.** Actual: **`v1.14.3`** publicada (`main`),
+> **`v1.16-dev`** en QA. Estado autoritativo en [`CHANGELOG.md`](CHANGELOG.md) y [`STATUS.md`](STATUS.md);
+> [`README.md`](README.md) / [`README_pt.md`](README_pt.md) son las versiones mantenidas.
+
 > **v1.7.0–1.13.2:** auditoría (limpieza/seguridad/rendimiento), recompensa inmediata + emboscada,
 > el **sistema completo de placas** (robo físico → forja → placa falsa que engaña al MDT,
 > persistente y con reversión de garaje; despacho por testigos; soporte QBox/QBCore/ESX),

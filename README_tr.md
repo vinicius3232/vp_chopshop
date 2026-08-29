@@ -244,6 +244,10 @@ Betik, ana mantık için **framework'e bağımlı değildir** — envanter yaln�
 
 `1.13.2` — `fxmanifest.lua` içinde tanımlıdır. Tam geçmiş için [`CHANGELOG.md`](CHANGELOG.md) dosyasına bakın.
 
+> ⚠️ **Bu çevrilmiş README güncel değil.** Güncel: **`v1.14.3`** yayınlandı (`main`), **`v1.16-dev`**
+> QA aşamasında. Yetkili durum [`CHANGELOG.md`](CHANGELOG.md) ve [`STATUS.md`](STATUS.md) içinde;
+> bakımı yapılan sürümler [`README.md`](README.md) / [`README_pt.md`](README_pt.md).
+
 > **v1.7.0–1.13.2:** denetim (temizlik/güvenlik/performans), anında ödül + baskın,
 > **tam plaka sistemi** (fiziksel çalma → üretim → MDT'yi kandıran sahte plaka,
 > kalıcı ve garaj geri dönüşümlü; tanık bazlı ihbar; QBox/QBCore/ESX desteği),

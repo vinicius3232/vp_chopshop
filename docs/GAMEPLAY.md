@@ -1,10 +1,20 @@
-# vp_chopshop — Gameplay (v1.6.7)
+# vp_chopshop — Gameplay
+
+> **Atualização pendente.** Este documento descreve o gameplay como era em **v1.6.7**. O fluxo
+> para o jogador (macaco → desmontar peça por peça → vender ao fence) continua igual, mas a partir
+> de `v1.16-dev` a definição de cada peça (ferramenta, dependências, gates, recompensa) passou a
+> vir do **Part Registry** (`shared/registry/parts.lua`), não de fases hardcoded. Regras
+> server-authoritative canônicas: [`../AGENTS.md`](../AGENTS.md) e `docs/audit/`. Rework completo
+> deste doc está agendado para o release da v1.16.
 
 ---
 
 ## Visão Geral
 
-Sistema de desmanche ilegal em **4 fases progressivas**. O jogador obtém um veículo, usa o macaco hidráulico para levantá-lo e desmonta peça por peça com ferramentas específicas. Os materiais e peças resultantes são vendidos a um NPC fence rotativo que exige confiança acumulada.
+Sistema de desmanche ilegal, peça por peça. O jogador obtém um veículo, usa o macaco hidráulico
+para levantá-lo e desmonta cada peça com a ferramenta exigida. Os materiais e peças resultantes
+são vendidos a um NPC fence rotativo que exige confiança acumulada. *(A organização em "4 fases
+progressivas" descrita abaixo é o modelo pré-Registry; ver nota no topo.)*
 
 ---
 
