@@ -1,0 +1,36 @@
+vp_chopshop — Proprietary License
+Copyright (c) 2026 Vinicius Pimentel. All Rights Reserved.
+
+The original portions of the source code and documentation authored for the
+vp_chopshop project (the "Software") are protected by copyright and remain the
+property of the copyright holder.
+
+This License applies only to portions of the Software for which the copyright
+holder owns the applicable rights.
+
+No permission is granted, expressly or by implication, to any person to use,
+copy, modify, merge, publish, distribute, sublicense, sell, or create
+derivative works of the Software, in whole or in part.
+
+Use of the Software is authorized solely for the copyright holder, or for
+parties that have received a separate written license or authorization from
+the copyright holder. Any other use is prohibited.
+
+THIRD-PARTY COMPONENTS. The Software depends on and interoperates with
+third-party resources, libraries, and frameworks (including, without
+limitation, the ox_lib / ox_target / ox_inventory / oxmysql suite and the
+QBox / QBCore / ESX frameworks). Those components are governed by their own
+licenses and are not covered by, nor re-licensed by, this License. This
+License grants no rights in any third-party software.
+
+THIRD-PARTY ASSETS. Any art, models, sounds, or other assets authored by
+third parties retain their original licenses and ownership and do not become
+property of this project by inclusion in this repository or its history.
+
+EXTERNAL REFERENCES. Designs studied for research (for example filo_bolt,
+offload_carmenu, CHOPNET) are not incorporated into the Software by this
+License; no code, structure, bundled asset, or other protected expression of
+those works is licensed or conveyed here.
+
+NO WARRANTY. The Software is provided "AS IS", without warranty of any kind,
+express or implied.
