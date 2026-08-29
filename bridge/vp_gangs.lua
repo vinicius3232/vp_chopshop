@@ -1,6 +1,6 @@
 -- bridge/vp_gangs.lua
 -- ══════════════════════════════════════════════════════════════════════════════
---  [INT-01A] CAMADA DE INTEGRAÇÃO vp_chopshop → vp_gangs  (contractVersion = 1)
+--  CAMADA DE INTEGRAÇÃO vp_chopshop → vp_gangs  (contractVersion = 1)
 --
 --  ÚNICO lugar do vp_chopshop que conhece `exports.vp_gangs`. Escuta o evento
 --  INTERNO VPChopEvt.PART_CHOPPED (disparado PÓS-COMMIT — a peça já está
@@ -8,47 +8,39 @@
 --  desmanche válida" pelo CONTRATO PÚBLICO do vp_gangs
 --  (`exports.vp_gangs:recordExternalCrime(src, payload)`).
 --
+--  CAMINHO ÚNICO (INT-01C fechou o cutover — não há mais fallback legado):
+--    PART_CHOPPED → bridge/vp_gangs.lua → recordExternalCrime → adapter
+--    'vp_chopshop' (config/external.lua) → ExternalBridge → rewardGangActivity
+--    INTERNO do vp_gangs.
+--  O vp_chopshop NUNCA chama rewardGangActivity direto.
+--
 --  NÃO envia:  payout / valor / placa / netId-como-identidade /
 --              citizenid-como-autoridade / internals (mutex, ChopSession, ...).
 --  O vp_gangs resolve jogador/gang/citizenid SERVER-SIDE a partir do `src`.
 --
 --  Falha da integração NUNCA altera o desmanche — o evento já é pós-commit
---  ("Falha da emissão NÃO derruba o chop", server/main.lua).
+--  ("Falha da emissão NÃO derruba o chop", server/main.lua). Qualquer
+--  erro/rejeição do contrato (forbidden_caller / adapter_disabled /
+--  bridge_disabled / version_unsupported / bad_payload / no_gang / not_official /
+--  replay / dedup_capacity / pcall_error / no_result / vp_gangs_stopped) é
+--  SÓ diagnóstico.
 --
 --  FILTRO — só os mesmos marcos que o call cru antigo (server/progression.lua)
 --  creditava: phase 1-4 de PEÇA REAL. `vin_scratch` (phase 0) e `plate_theft`
 --  (phase 1) NÃO emitem (o listener de progressão os remapeia p/ reason próprio,
 --  fora de {phase1..phase4}).
 --
---  IDEMPOTÊNCIA — operationId = ChopSession.id + partKey + phase (domínio-derivado):
---    • same-resource-lifetime: garantida — a barreira MarkChopped impede que a
---      MESMA peça re-emita PART_CHOPPED; e o vp_gangs deduplica por
---      `caller + operationId` (INT-01B).
---    • cross-restart: NÃO GARANTIDA — `_sidSeq` reseta no boot
---      (server/session/chop_session.lua) → sessões voltam a `cs:1, cs:2, ...`.
---      Boundary conhecido: não há identidade FÍSICA persistente de peça ainda
---      (roadmap vp_chopshop: vehicle_part / sourceSession). NÃO usamos
---      netId / placa / timestamp como substituto fraco.
---
---  COMPAT [INT-01A.2/INT-01C REMOVE ESTE BLOCO] — enquanto o vp_gangs não
---  registrar o adapter 'vp_chopshop' em config/external.lua,
---  `recordExternalCrime` devolve `forbidden_caller` → caímos no call legado
---  `rewardGangActivity(cid, 'vehicle_chop', {})` (0 payout — opts vazio) p/
---  preservar EXATAMENTE o crédito de gang atual.
---
---  SÓ para reasons comprovadamente PRE-MUTATION (o vp_gangs rejeita ANTES de
---  qualquer mutação): `forbidden_caller` / `disabled` / `bridge_disabled`.
---  Erro AMBÍGUO (`pcall_error` / `no_result`) NUNCA compensa — `recordExternalCrime`
---  pode ter aplicado o crédito e falhado depois → **at-most-once**.
---
---  Sequência de cutover (cross-repo — este bloco NÃO some no PR do vp_gangs):
---    INT-01A  merge (vp_chopshop)  → INT-01B merge (vp_gangs, liga o adapter)
---    → INT-01A.2/INT-01C (vp_chopshop) apaga TODO este fallback.
+--  IDEMPOTÊNCIA — operationId = ChopSession.id + partKey + phase (domínio-derivado).
+--  Dedup do lado vp_gangs (server/external_dedup.lua): replay/concorrência
+--  protegidos enquanto a entrada estiver retida (até o TTL, e no restart do
+--  vp_chopshop o namespace de dedup é limpo). cross-restart NÃO garantido —
+--  `_sidSeq` reseta no boot; sem identidade FÍSICA persistente de peça ainda
+--  (roadmap vp_chopshop: vehicle_part / sourceSession). NÃO usamos
+--  netId / placa / timestamp como substituto fraco.
 -- ══════════════════════════════════════════════════════════════════════════════
 
 local CONTRACT_VERSION = 1
 local CRIME            = 'part_chopped'
-local ACTIVITY_LEGACY  = 'vehicle_chop'   -- usado SÓ no caminho compat
 
 --- Este (partKey, phase) é um marco que o crédito de gang cobre?
 --- Espelha EXATAMENTE o gate de server/progression.lua (reason ∈ {phase1..phase4}).
@@ -90,8 +82,9 @@ function VPChopGangsBuildPayload(operationId, partKey, phase)
     }
 end
 
---- Entrega ao vp_gangs. Fail-safe: resource parado / export ausente / erro →
---- só loga, nunca propaga p/ o domínio. Devolve tabela de diagnóstico.
+--- Entrega ao vp_gangs pelo contrato público. Fail-safe: resource parado /
+--- export ausente / erro / rejeição → SÓ diagnóstico, nunca propaga p/ o domínio
+--- e NUNCA credita gang por outro caminho.
 ---@return table
 function VPChopGangsDispatch(src, payload)
     if GetResourceState('vp_gangs') ~= 'started' then
@@ -112,24 +105,6 @@ function VPChopGangsDispatch(src, payload)
         or (not ok and 'pcall_error')
         or 'no_result'
 
-    -- COMPAT [INT-01B REMOVE] — a ponte ainda não existe do lado vp_gangs.
-    -- SOMENTE reasons comprovadamente PRE-MUTATION: o vp_gangs rejeita ANTES de
-    -- qualquer `Progression.rewardGangActivity` (allowlist de adapter / bridge off).
-    -- Erro AMBÍGUO (pcall_error / no_result / timeout) → NUNCA compensa: o
-    -- recordExternalCrime pode ter mutado e falhado depois → at-most-once.
-    if reason == 'forbidden_caller' or reason == 'disabled' or reason == 'bridge_disabled' then
-        local okC, cid = pcall(function()
-            return exports.qbx_core:GetPlayer(src).PlayerData.citizenid
-        end)
-        if okC and cid then
-            pcall(function() exports.vp_gangs:rewardGangActivity(cid, ACTIVITY_LEGACY, {}) end)
-        end
-        print(('[vp_chopshop][int:vp_gangs] compat (%s) op=%s'):format(reason, tostring(payload.operationId)))
-        return { ok = false, reason = reason, compat = true }
-    end
-
-    -- rejeição legítima (no_gang / not_official / bad_payload / replay / ...) OU
-    -- erro ambíguo (pcall_error / no_result) → só diagnóstico, sem compensar.
     print(('[vp_chopshop][int:vp_gangs] sem crédito (%s) op=%s'):format(reason, tostring(payload.operationId)))
     return (type(res) == 'table' and res) or { ok = false, reason = reason }
 end

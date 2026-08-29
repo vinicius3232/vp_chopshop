@@ -1,9 +1,10 @@
 # VP_GANGS_CONTRACT.md — contrato de integração vp_chopshop → vp_gangs
 
-> **INT-01A.** Ponte pequena, versionada, fail-safe. `vp_chopshop` observa
-> atividade **válida** de desmanche e a publica pelo contrato **público** do
-> `vp_gangs`. Nenhum resource conhece internals do outro. Nenhum acesso a DB
-> cruzado. Nenhuma dependência rígida.
+> **INT-01 (V1 fechado — A · A.1 · B · B.1 · C).** Ponte pequena, versionada,
+> fail-safe, **caminho único**. `vp_chopshop` observa atividade **válida** de
+> desmanche e a publica pelo contrato **público** do `vp_gangs`. Nenhum resource
+> conhece internals do outro. Nenhum acesso a DB cruzado. Nenhuma dependência
+> rígida. **Nenhum fallback legado** (removido no INT-01C).
 
 ```
 vp_chopshop  ── domínio de veículos (ChopSession, peça, Part Registry, serial)
@@ -26,10 +27,10 @@ vp_gangs  ── domínio social/criminal (resolve gang/citizenid server-side)
 O `vp_gangs` é **consumidor econômico** dos estados de peça — nunca cria uma
 segunda definição. O `vp_chopshop` **não conhece** Contacts/ContactMeet/Territory.
 
-## O que INT-01A NÃO faz
+## O que INT-01 NÃO faz
 
 - **Nenhum payout novo.** O `vp_chopshop` já paga o desmanche. O payload **não**
-  carrega `amount`. O `vp_gangs` recebe `money.pay = 'observe'` (INT-01B).
+  carrega `amount`. O adapter no `vp_gangs` usa `money.pay = 'observe'`.
 - Não altera balanceamento, XP, tiers, fence interno, ambush, heat do chopshop.
 - Não implementa `vehicle_part` / PartProcessing / mercado ilegal de peças.
 - Não conecta `vp_chopshop.heat` ao `vp_gangs` heat (eixos separados — ver `docs/audit/EVENT_MATRIX.md`).
@@ -91,7 +92,8 @@ tick (a emissão é síncrona, pós-commit).
 
 - **same-resource-lifetime: garantida** — a barreira `MarkChopped` do
   `vp_chopshop` impede que a MESMA peça re-emita `PART_CHOPPED`; e o `vp_gangs`
-  deduplica por `caller + operationId` (INT-01B).
+  deduplica por `caller + operationId` (`server/external_dedup.lua`), com o
+  namespace daquele caller limpo no `onResourceStart` do produtor.
 - **cross-restart: NÃO GARANTIDA** — `_sidSeq` reseta no boot
   (`server/session/chop_session.lua`) → sessões voltam a `cs:1, cs:2, …`. Não há
   identidade **física** persistente de peça ainda.
@@ -110,56 +112,38 @@ tick (a emissão é síncrona, pós-commit).
 | export ausente / erro | `pcall` em toda chamada de export |
 | **falha de integração ≠ falha de domínio** | o evento é pós-commit; o bridge nunca faz rollback do desmanche |
 
-## Contrato de erro (retorno de `VPChopGangsDispatch`, só diagnóstico)
+## Contrato de erro — **só diagnóstico, sempre**
 
+Retorno de `VPChopGangsDispatch` (não usado pelo domínio):
 `vp_gangs_stopped` · `pcall_error` · `no_result` · e o `reason` do próprio
-`vp_gangs` (`forbidden_caller` / `disabled` / `no_gang` / `not_official` /
-`bad_payload` / `replay` / `version_unsupported` / `ok`). **Nenhum** afeta o
-resultado do desmanche. Erro **ambíguo** (`pcall_error` / `no_result`) → só
-diagnóstico, **nunca** aciona o fallback compat (at-most-once — ver abaixo).
+`vp_gangs` (`forbidden_caller` / `adapter_disabled` / `bridge_disabled` /
+`version_unsupported` / `bad_payload` / `no_gang` / `not_official` / `replay` /
+`dedup_capacity` / `ok`).
 
-## Compat temporário `[INT-01A.2/INT-01C REMOVE]`
+**Qualquer** um deles → **só loga**. O `vp_chopshop` **nunca** credita gang por
+outro caminho. Nenhum afeta o resultado do desmanche (`PART_CHOPPED` é pós-commit).
 
-Enquanto o `vp_gangs` não registrar o adapter `['vp_chopshop']` em
-`config/external.lua`, `recordExternalCrime` devolve `forbidden_caller`. Nesse
-caso o bridge cai no call legado
-`exports.vp_gangs:rewardGangActivity(cid, 'vehicle_chop', {})` (opts vazio →
-0 payout) para **preservar exatamente** o crédito de gang atual durante a janela
-entre INT-01A e INT-01B.
+> **INT-01C fechou o cutover.** O fallback legado
+> (`exports.vp_gangs:rewardGangActivity(cid, 'vehicle_chop', {})`) que existia em
+> `bridge/vp_gangs.lua` durante a janela INT-01A↔INT-01B **foi removido**.
+> `ACTIVITY_LEGACY`, a resolução de `citizenid` via `exports.qbx_core` e os
+> ramos por `forbidden_caller`/`disabled`/`bridge_disabled` não existem mais.
 
-**O fallback só roda para reasons comprovadamente PRE-MUTATION** — o `vp_gangs`
-rejeita ANTES de qualquer `Progression.rewardGangActivity`:
-
-| reason | fallback? | porquê |
-|---|---|---|
-| `forbidden_caller` | ✅ | allowlist de adapter — checada 1ª, antes de tudo |
-| `disabled` | ✅ | `Config.External.enabled = false` → export NO-OP |
-| `bridge_disabled` | ✅ | `ExternalBridge.apply` early-return antes de mutar |
-| `not_official` / `no_gang` / `bad_payload` / `replay` / `version_unsupported` / … | ❌ | rejeição legítima do `vp_gangs` — sem crédito é o correto |
-| **`pcall_error` / `no_result` / timeout** | ❌ | **erro AMBÍGUO** — `recordExternalCrime` pode ter aplicado o crédito e falhado DEPOIS. Compensar = **double-credit**. Regra: **at-most-once** — erro ambíguo nunca compensa, só loga. |
-
-### Sequência de cutover (cross-repo)
-
-O `[INT-01A.2/INT-01C REMOVE]` **não pode** ser removido pelo PR do `vp_gangs` — o fallback
-vive no `vp_chopshop`. Ordem real:
+## Caminho ÚNICO
 
 ```
-INT-01A  merge (vp_chopshop)   ← este PR
+PART_CHOPPED (pós-commit, vp_chopshop)
    ↓
-INT-01B  merge (vp_gangs)       liga o adapter ['vp_chopshop']
+bridge/vp_gangs.lua  (filtro phase/reason · operationId · payload V1)
    ↓
-INT-01A.2 / INT-01C (vp_chopshop)  apaga TODO o fallback de bridge/vp_gangs.lua
+exports.vp_gangs:recordExternalCrime(src, payload)
+   ↓
+adapter 'vp_chopshop'  (config/external.lua)
+   ↓
+ExternalBridge.apply  (guards · dedup reserve · ... · consume)
+   ↓
+Progression.rewardGangActivity('vehicle_chop')   ← INTERNO do vp_gangs
 ```
-
-### Nota para o INT-01B — `adapter inexistente` ≠ `adapter desligado`
-
-O INT-01B deve distinguir:
-- **adapter não registrado** → `forbidden_caller` (ativa o fallback — janela de cutover).
-- **adapter registrado com `enabled = false`** → deve retornar um reason PRÓPRIO
-  (ex.: `adapter_disabled`) que o `vp_chopshop` **não** trate como compat.
-
-Assim, um admin que desliga conscientemente a integração não é contornado pelo
-caminho legado.
 
 ## O que muda em `server/progression.lua`
 
@@ -174,29 +158,38 @@ end
 
 ## Testes
 
-`bridge/vp_gangs_spec.lua` (51 asserts, self-gated `vp_chopshop_selftest 1`):
+`bridge/vp_gangs_spec.lua` (66 asserts, self-gated `vp_chopshop_selftest 1`):
 filtro phase 1–4 (`vin_scratch`/`plate_theft`/nil/vazio não emitem) · `operationId`
 domínio-derivado (nil sem sessão) · payload v1 sem `amount`/`plate`/`netId`/
-`citizenid`/`reward` · caminho novo · compat só em `forbidden_caller`/`disabled` ·
-rejeição legítima não cai no compat · `vp_gangs` parado → nada · handler
-end-to-end.
+`citizenid`/`reward` · `recordExternalCrime` ok → 1 chamada · **QUALQUER reason
+(`forbidden_caller`/`adapter_disabled`/`bridge_disabled`/`version_unsupported`/
+`bad_payload`/`no_gang`/`not_official`/`replay`/`dedup_capacity`/`pcall_error`/
+`no_result`) → ZERO fallback** (canário: `rewardGangActivity`/`qbx_core:GetPlayer`
+nunca tocados) · `vp_gangs` parado → domínio continua · handler end-to-end ·
+**canário estático**: o fonte não faz `:rewardGangActivity(`, não acessa
+`qbx_core`, não tem `ACTIVITY_LEGACY`.
 
-`lua tools/run_spec.lua .` → **617 PASS / 0 FAIL** (566 + 51). `luac -p` limpo.
+`lua tools/run_spec.lua .` → **632 PASS / 0 FAIL** (566 + 66). `luac -p` limpo.
 
 ## Behavior change
 
 ```
 gameplay/economia do desmanche = NONE   (o evento é pós-commit; XP/tiers/payout iguais)
-crédito de gang líquido        = IDÊNTICO (caminho novo, ou compat → mesmo rewardGangActivity)
+crédito de gang líquido        = IDÊNTICO  (caminho único → adapter → rewardGangActivity interno)
 DB migration                   = NONE
 ```
 
-## Roadmap (não neste PR)
+## Estado — INT-01 V1 FECHADO
 
-- **INT-01B** (`vp_gangs`): adapter `['vp_chopshop']` em `config/external.lua`
-  (`mode='active'`, `credit='activity'`, `money.pay='observe'`, `requireOfficial=true`)
-  + dedup `caller+operationId` (TTL/LRU) em `server/external.lua` + `contractVersion` check.
-- `vehicle_part` / `sourceSession` → `operationId` cross-restart-safe.
+| passo | onde | estado |
+|---|---|---|
+| INT-01A / A.1 | vp_chopshop | ✅ `#27` (bridge + fallback compat) |
+| INT-01B / B.1 | vp_gangs | ✅ `#7` (adapter `['vp_chopshop']` + `server/external_dedup.lua` + `adapter_disabled` + `contractVersion`/`operationId`) |
+| **INT-01C** | **vp_chopshop** | ✅ **este PR** — removeu o fallback legado; caminho único |
+
+## Roadmap (não neste ciclo)
+
+- `vehicle_part` / `sourceSession` (roadmap do `vp_chopshop`) → `operationId` cross-restart-safe.
 - mercado ilegal de peças (engine → "Mecânico Fantasma" via ContactMeet, ecu →
   contato especializado, etc.) — tudo no lado `vp_gangs`, reusando Contacts /
   ContactMeet / Trap Phone.
