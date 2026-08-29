@@ -550,6 +550,11 @@ The script **does not depend on any framework** for main logic — inventory is 
 
 `1.13.2` — defined in `fxmanifest.lua`. Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
+> ⚠️ **This translated README lags.** Current: **`v1.14.3`** released (`main`), **`v1.16-dev`** in
+> QA (Part Registry as the single part-definition authority, discard restart recovery,
+> front/rear-aware plate minigame, `vp_gangs` bridge). See [`CHANGELOG.md`](CHANGELOG.md) and
+> [`STATUS.md`](STATUS.md) for the authoritative state; [`README.md`](README.md) / [`README_pt.md`](README_pt.md) are the maintained versions.
+
 > **v1.7.0–1.13.2:** audit (cleanup/security/performance), immediate reward + ambush,
 > the **full license-plate system** (physical theft → forge → fake plate that fools the MDT,
 > persistent and with garage reversion; witness-based dispatch; QBox/QBCore/ESX support),

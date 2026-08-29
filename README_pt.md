@@ -8,6 +8,13 @@ Sistema de desmanche (chop shop) para FiveM: macaco hidráulico → desmonte em 
 
 ## Security & Compatibility
 
+> **Estado atual (`v1.16-dev`, em QA):** postura de segurança e arquitetura server-authority em
+> [`AGENTS.md`](AGENTS.md) e `docs/audit/`. **Framework: QBox-first** (`qbx_core`); QBCore e ESX
+> via bridge. O log abaixo é **histórico até v1.6.7** — os carimbos "ESX-only" são de abril/2026.
+
+<details>
+<summary>Log de auditorias v1.3.9 → v1.6.7 (histórico)</summary>
+
 ### Audit — 2026-04-27 (v1.6.7)
 - Audited by fivem-audit skill (Claude Code)
 - ESX fix: `_ESX.Player()` → `_ESX.GetPlayerFromId()`; `ExtendedPlayers()` → `GetPlayers()` + iteração; `xPlayer.getJob()` → `xPlayer.job.name` (property)
@@ -61,9 +68,11 @@ Sistema de desmanche (chop shop) para FiveM: macaco hidráulico → desmonte em 
 - 0 critical, 1 high issue resolved (tool durability, XP persistence, broadcast filter)
 - Framework: **ESX-only** (bridge layer)
 
+</details>
+
 ---
 
-Sistema de **desmanche** (chop shop) para FiveM: o jogador usa um **macaco hidráulico** (`chopshop_jackstand`) para levantar qualquer veículo e desmontar peças em 4 fases progressivas, com recompensas em materiais, venda de pneus a NPC e emboscadas opcionais. Pensado para stacks com **ox_lib**, **ox_target**, **ox_inventory** e **oxmysql**.
+Sistema de **desmanche** (chop shop) para FiveM: o jogador usa um **macaco hidráulico** (`chopshop_jackstand`) para levantar qualquer veículo e desmontá-lo peça por peça, com recompensas em materiais, venda de pneus a NPC e emboscadas opcionais. Pensado para stacks com **ox_lib**, **ox_target**, **ox_inventory** e **oxmysql** — frameworks **QBox / QBCore / ESX**.
 
 ---
 
@@ -601,14 +610,23 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.15.0-rc1` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+**Released:** `v1.14.3` (`main`). **Em QA:** `v1.16-dev` (branch `pr-h/v1.15-delivercar-terminal-hardening`).
+`fxmanifest.lua` ainda declara `1.15.0-rc1` — bump para `1.16.0` no release. Histórico completo
+em [`CHANGELOG.md`](CHANGELOG.md).
 
-> **v1.15.0-rc1** — **RELEASE CANDIDATE.** Refatoração server-authority em stack de 10 PRs
-> (#2→#11, nada mergeado até a validação runtime QBox passar): `ChopSession`, `ActionSession`,
-> unified discard + ownership gate QBox, tyre entitlement ledger, `fence:deliverCar` terminal
-> hardening. Economia/heat/trust inalterados. Harness estático 493/493. RC-FIX-2: minigame de
-> parafusos 3D desligado → `lib.skillCheck` (rework pós-RC). Plano em
-> `docs/audit/V115_RELEASE_CANDIDATE.md`. Ver CHANGELOG.
+> **v1.16-dev** — *em QA, não released.* Consolidação sobre a fundação server-authority da
+> `1.15.0-rc1` (RC freeze suspenso em 2026-08-28). Núcleo (`ChopSession` / `ActionSession` /
+> `discard` / `deliverCar`) **inalterado**. Novidades: **Part Registry** (schema v2) vira a
+> autoridade única da definição de peça — `ChopParts` / `ChopPartOrder` deletados; **restart
+> recovery** do discard (`vp_chop_carcass` + barreira `already_discarded` + sweep de boot por
+> `vsid`); minigame de placa **front/rear-aware** + degradação para `lib.skillCheck`; **asset
+> pago do parafuso removido**; ponte `vp_chopshop → vp_gangs` (`contractVersion 1`).
+> Economia/payout/heat/trust/XP **inalterados**. Harness **566/566**. Estado:
+> [`STATUS.md`](STATUS.md) · `docs/design/MASTER_IMPLEMENTATION_PLAN.md`.
+
+> **v1.15.0-rc1** — *superado pelo bloco v1.16-dev.* Stack de 10 PRs (#2→#11): `ChopSession`,
+> `ActionSession`, unified discard + ownership gate QBox, tyre entitlement ledger,
+> `fence:deliverCar` terminal hardening. Harness 493/493. Ver `docs/audit/V115_RELEASE_CANDIDATE.md`.
 
 > **v1.14.3** — fix: registro do archetype `wheel_spacer.ytyp` (parafuso `bolt`) no fxmanifest;
 > o parafuso 3D do minigame volta a carregar (causa raiz do "minigame não entrava"). Marcador

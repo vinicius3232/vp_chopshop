@@ -2,7 +2,80 @@
 
 ---
 
+## [v1.16-dev] — em QA — Consolidação: Part Registry + restart recovery + ponte vp_gangs
+
+> **Não released.** `main` continua em **`v1.14.3`**. Este bloco descreve a branch de integração
+> `pr-h/v1.15-delivercar-terminal-hardening` (HEAD `90e1a4b`), que a QA valida como um todo antes
+> de qualquer merge para `main`. O RC freeze da `1.15.0-rc1` foi **suspenso** em 2026-08-28: em vez
+> de testar uma v1.15 congelada que seria reescrita, o alvo passou a ser um build consolidado
+> `v1.16-dev`. Núcleo (`ChopSession`/`ActionSession`/`discard`/`deliverCar`) **inalterado** — só
+> completado em volta. Ver `docs/design/MASTER_IMPLEMENTATION_PLAN.md` e `STATUS.md`.
+>
+> Harness estático: **566 asserts / 0 fail** (`lua tools/run_spec.lua .`). Economia, payout, heat,
+> trust, tier, XP, cooldowns: **INALTERADOS** em toda a consolidação.
+
+### Fase 0 — base + dores concretas da QA
+- **Minigame de placa front/rear-aware (#14):** `VPChopPlateBoltMinigame(vehicle, isRear)` — a face
+  deixa de ser hardcoded na traseira (`client/plates.lua` resolve pela posição do jogador no
+  espaço do modelo). `runBoltSurface` endurecido: clamp de giro (salto de cursor não conclui de
+  uma vez), degrada para `lib.skillCheck` se nada projeta na tela por >2.5 s (RC-FINDING-01).
+  **Asset pago `stream/bolt.ydr` + `wheel_spacer.ytyp` removido**; `stream/` esvaziado
+  (`nacelle.*` / `lr_supermod_*` eram elevador morto). `Bolt3D.Enable=false` mantido (skillCheck ativo).
+- **chore i18n + dead code (#15):** 4 notificações server hardcoded em pt-BR → `L()` (5 chaves ×
+  5 idiomas). Bloco morto de props de pneu removido de `client/fence.lua` (−215 linhas). Zero
+  mudança de comportamento.
+- **Restart recovery (#16):** tabela `vp_chop_carcass` (PK `net_id,model`, TTL 1800 s),
+  `server/session/carcass_ledger.lua` (`VPChopCarcassLedger`, DB seam injetável, 32 asserts).
+  Barreira `alreadyProcessed(netId, model)` **antes** do pagamento do discard → `already_discarded`
+  (fecha a dupe de re-discard pós-restart). `server/session/restart_recovery.lua`: sweep de boot
+  que só re-deleta a carcaça quando o `vsid` vivo bate com o da linha. `normModel` colapsa as
+  representações int32-negativa/uint32 do hash de modelo. Barreira do `deliverCar` **inalterada**
+  (statebag `vpChopDeliveredMark`). `Config.RestartRecovery`.
+
+### Fase 1 — Part Registry vira a autoridade da definição de peça
+- **Spike inerte + drift check (#17):** `shared/registry/{tools,parts,registry_spec}.lua` (schema
+  v2 **congelado**, 28 asserts) trazidos sem call sites. Drift check contra o runtime que chegou
+  ao `pr-h`: **zero drift**.
+- **FASE B (#18):** `shared/chop_parts.lua` passa a ser projeção de
+  `VPChopPartRegistry.projectChopParts()` (byte a byte com o `ChopParts` legado).
+- **FASE C (#19):** `bonnet` valida via `registryValidate` (vertical slice); resto no hardcode.
+- **FASE D (#20):** `adv_door` / `adv_engine` / `adv_carcass` validam 100% via registry
+  (`requires` / `toolClass` / `gates`); fallback hardcode por kind mantido.
+- **FASE E (#21):** registry **obrigatório** (`error()` no load se ausente); fallbacks hardcode
+  removidos. `Config.AdvancedChop.SawItem` / `ScrewdriverItem` (mortos) removidos.
+  **Capability nova:** `enabled=false` por peça → `'part'` (peça inchopável por config).
+- **FASE F (#22):** 11 sites server saem de `ChopParts[k].kind` → `VPChopPartGtaClass(k)`
+  (`shared/part_class.lua`).
+- **Client sai de ChopParts (#23):** 6 sites client migram para `VPChopPartRegistry.get()`.
+  `shared/chop_parts.lua` **deletado** → `shared/part_class.lua` (só `VPChopPartGtaClass`).
+  **`ChopParts` / `ChopPartOrder` deixam de existir.** O registry é a autoridade única (server + client).
+
+### Integração
+- **Checkpoint de QA da integração (#24):** `docs/audit/V116_INTEGRATION_QA.md` — blocos Q1–Q5
+  (boot + selftest, paridade de desmanche, minigame de placa, **restart recovery — Q4 crítico**,
+  economia + soak). A Fase 2 (interação física) só começa depois de Q1–Q4 sem FAIL P0/P1.
+- **Docs de contexto (#25, #26):** `AGENTS.md` (orientação para agentes de IA), `STATUS.md`
+  (estado vivo), `docs/design/MASTER_IMPLEMENTATION_PLAN.md` movido para o repo.
+- **Ponte `vp_chopshop` → `vp_gangs` (#27, #28):** `INT-01A` — contrato `contractVersion 1`
+  (`docs/integration/VP_GANGS_CONTRACT.md`). `INT-01C` — fallback legado da ponte removido
+  (cutover fechado). **Muda runtime.**
+
+### Design registrado (não implementado — bloqueado pelo gate Q1–Q4)
+- `docs/design/INTERACTIVE_DISMANTLING.md` + `_RESEARCH.md` + `WHEEL_BOLT_MINIGAME.md` — arquitetura
+  do sistema de interação física de desmanche (providers dirigidos por `Registry.action.minigame`,
+  state machine Wheels V2, threat model, roadmap ID-1..ID-8). PRs de doc **abertos**, não mergeados
+  durante a QA.
+
+### Pendências conhecidas
+- `fxmanifest.lua` ainda declara `version '1.15.0-rc1'` — bump para `1.16.0` no release.
+- `docs/GAMEPLAY.md` descreve o modelo pré-Registry (atualização pendente para o release).
+
+---
+
 ## [1.15.0-rc1] — 2026-08-27 — Server-authority + ChopSession + ActionSession (RELEASE CANDIDATE)
+
+> **Superado pelo bloco `[v1.16-dev]` acima** — o RC freeze foi suspenso em 2026-08-28. Mantido
+> como registro histórico da stack #2→#11.
 
 Refatoração arquitetural em stack de 10 PRs (#2→#11, **nenhuma mergeada** até a validação
 runtime QBox passar). Harness de teste estático: **493 asserts / 0 fail** (`lua tools/run_spec.lua .`).
