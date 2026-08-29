@@ -170,6 +170,13 @@ end
 
 _print(('\n═══ TOTAL: %d PASS / %d FAIL / %d asserts ═══')
     :format(SPEC.pass, SPEC.fail, SPEC.pass + SPEC.fail))
+-- Sanity gate: se o interceptor não contou NENHUM assert, o formato de saída dos
+-- specs provavelmente mudou e o contador quebrou silenciosamente. CI verde com
+-- 0 testes executados é inaceitável.
+if (SPEC.pass + SPEC.fail) == 0 then
+    _print('═══ RESULTADO: FALHA — 0 asserts contados (formato de output mudou?) (exit 1) ═══')
+    os.exit(1)
+end
 if anyFail or SPEC.fail > 0 then
     _print('═══ RESULTADO: FALHA (exit 1) ═══')
     os.exit(1)

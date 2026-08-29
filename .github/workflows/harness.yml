@@ -39,24 +39,29 @@ jobs:
       - name: Sintaxe — luac -p
         run: |
           set -uo pipefail
-          fail=0; ok=0; skipped=0
+          fail=0; ok=0; cfx=0
           while IFS= read -r f; do
-            if err=$(luac5.4 -p "$f" 2>&1); then
+            if luac5.4 -p "$f" 2>/dev/null; then
               ok=$((ok + 1))
               continue
             fi
-            # CfxLua aceita hash-string com crase (`model_name`) — joaat literal;
-            # o luac padrão não. Se o ÚNICO erro for esse, não é falha de sintaxe.
-            if printf '%s' "$err" | grep -qF "near '\`'" || printf '%s' "$err" | grep -qF '`'; then
-              echo "skip (CfxLua hash literal): $f"
-              skipped=$((skipped + 1))
+            # Falhou. Pode ser só a extensão sintática CfxLua: hash-literal com
+            # crase (`model_name` → joaat). Neutraliza APENAS os hash-literals
+            # numa cópia temporária e revalida — qualquer OUTRO erro de sintaxe
+            # (inclusive um segundo erro no mesmo arquivo) continua sendo FAIL.
+            tmp="$(mktemp)"
+            sed 's/`[^`]*`/0/g' "$f" > "$tmp"
+            if err=$(luac5.4 -p "$tmp" 2>&1); then
+              echo "ok (hash-literal CfxLua neutralizado): $f"
+              cfx=$((cfx + 1))
             else
               echo "SYNTAX FAIL: $f"
               printf '%s\n' "$err"
               fail=$((fail + 1))
             fi
+            rm -f "$tmp"
           done < <(find . -name '*.lua' -not -path './.git/*' | sort)
-          echo "luac -p: ${ok} ok, ${skipped} pulados (CfxLua hash), ${fail} com erro"
+          echo "luac -p: ${ok} ok, ${cfx} ok via neutralização CfxLua, ${fail} com erro"
           [ "${fail}" -eq 0 ]
 
       - name: Harness — tools/run_spec.lua
