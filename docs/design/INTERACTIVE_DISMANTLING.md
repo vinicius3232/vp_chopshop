@@ -29,6 +29,152 @@ Part Registry), com degradação graciosa e sem dependência de asset proprietá
 
 ---
 
+## 1.1 GAMEPLAY TARGET — a experiência-alvo
+
+O objetivo final **não é** um conjunto de minigames isolados. É que **desmontar um veículo
+pareça um processo físico contínuo**: aproximar → posicionar ferramenta → câmera contextual →
+localizar os pontos → agir em cada ponto → a peça se solta fisicamente → vira prop na mão →
+levar até armazenamento. Um único arco, sem "abrir um minigame" com corte de tela.
+
+**Regra dura:** cada tipo de peça tem um **procedimento próprio**. É proibido transformar tudo
+em variação visual do mesmo `skillCheck`. Se dois providers só diferem na cor do marcador, o
+design falhou.
+
+### 1.1.1 Procedimentos-alvo por peça (referência de UX, não contrato)
+
+Os numéricos (nº de pontos, voltas, tolerância, tempo) **não** são fixados aqui — calibração
+in-game na P2.2 (`Config.InteractiveDismantling`).
+
+**RODA** — `minigame = 'bolt'`
+```
+aproximar da roda → posicionar ferramenta (anim + câmera contextual lateral)
+→ localizar os N parafusos (projeção + cursor)
+→ soltar cada parafuso manualmente (rotação acumulada real, não clique)
+→ cada parafuso avança para fora conforme rosqueia
+→ último parafuso concluído → ActionSession COMPLETE (revalidate)
+→ servidor marca REMOVED → anim de puxar a roda → roda some do veículo
+→ prop físico vai para a mão → estado CARRIED (TyreEntitlement)
+→ jogador leva até truck/bancada → STORED (DB)
+```
+
+**PORTA** — `minigame = 'cut'`
+```
+selecionar a porta → câmera enquadra dobradiças/pontos de fixação → ferramenta (serra) aparece
+→ jogador realiza os cortes necessários (arrastar o cursor ao longo de cada linha)
+→ faíscas + som de serra + feedback por ponto
+→ cada ponto de fixação muda de estado de apresentação (ATTACHED→...→CUT)
+→ último corte → ActionSession COMPLETE → porta se desprende (física) / quebra
+```
+
+**CAPÔ / PORTA-MALAS** — `minigame = 'cut'`
+Mesma filosofia da porta, com pontos de corte/fixação próprios (batentes frontais / traseiros,
+derivados do bone `bonnet` / `boot` + `GetModelDimensions`).
+
+**MOTOR** — `minigame = 'mechanical'`
+```
+gate: bonnet REMOVED (requires — já exigido pelo ActionSession no START)
+→ acessar o motor → câmera contextual sobre o bloco
+→ remover parafusos/suportes (pontos 'bolt', em ordem)
+→ desconectar pontos mecânicos (mangueiras, chicote — pontos 'disconnect')
+→ desconectar os componentes necessários
+→ liberar o motor (ponto 'release')
+→ conclusão server-authoritative (revalidate) → rewardProfile engine_bulk
+```
+
+**BATERIA / ECU / RÁDIO** — `minigame = 'wiring'` *(peças não existem no registry hoje)*
+```
+acessar o componente → câmera contextual
+→ localizar os conectores → desconectar cabos/plugs (arrastar para longe do conector)
+→ remover fixações (pontos 'bolt' curtos, se houver)
+→ retirar o componente → COMPLETE
+```
+
+**BANCO** — `minigame = 'bolt'` ou `'mechanical'` *(futuro)*
+```
+abrir/acessar o interior → câmera no trilho do banco
+→ localizar os parafusos dos trilhos → soltar cada fixação
+→ banco liberado → COMPLETE
+```
+
+**CATALISADOR / ESCAPAMENTO** — `minigame = 'cut'` *(futuro)*
+```
+gate: veículo levantado (raised — já é gate de tyre/carcass)
+→ jogador entra na área inferior → CÂMERA UNDERBODY (novo enquadramento)
+→ localizar os pontos corretos no escapamento
+→ cortar / desparafusar os suportes → componente liberado → COMPLETE
+```
+
+### 1.1.2 Providers multi-etapa e multi-ponto
+
+Cada provider **deve** conseguir ter **múltiplas etapas** e **múltiplos interaction points**.
+O `bolt` já é multi-ponto (conjunto, ordem livre). O `mechanical` é multi-etapa (lista
+ordenada, tipos diferentes por etapa). O `cut` é multi-linha. O `wiring` é multi-conector.
+
+**Modelo interno do provider** (sem tocar o schema do registry):
+
+```lua
+-- dentro do provider, derivado de partDef — NÃO é um campo novo do registry ainda
+steps = {
+  { type = 'bolt',       points = {...}, needed = ... },
+  { type = 'bolt',       points = {...} },
+  { type = 'disconnect', points = {...}, pull = ... },
+  { type = 'disconnect', points = {...} },
+  { type = 'release',    points = {...} },
+}
+```
+
+O provider percorre `steps` em ordem; etapa `k+1` só habilita após `k` concluída; HUD "k/N";
+cancelar/timeout em qualquer etapa → `'cancel'` (o servidor não commitou nada — não há peça
+"meio removida" no estado server).
+
+### 1.1.3 Exemplo de schema declarativo — **FUTURO, requer RFC**
+
+Conceitualmente o ideal seria o registry declarar as etapas:
+
+```lua
+part.action = {
+  minigame = 'mechanical',
+  steps = { 'bolt', 'bolt', 'disconnect', 'disconnect', 'release' },
+}
+```
+
+**NÃO alterar o schema agora.** `shared/registry/*` é schema v2 **CONGELADO** — qualquer campo
+novo reabre a review adversarial. Isto entra só via **RFC própria** (`docs/design/PART_REGISTRY_STEPS_RFC.md`,
+a criar) com:
+- análise de compatibilidade (projeção `projectChopParts`, drift check, os 566 asserts);
+- decisão se `steps` vive no registry ou num arquivo de layout separado (`shared/registry/dismantle_layout.lua`)
+  que o provider consome — provável melhor opção, mantém o schema de peça intacto;
+- migração das peças existentes sem mudar comportamento.
+
+Até lá, os `steps` são **hardcoded dentro de cada provider**, derivados de `partDef.id` +
+bones + `GetModelDimensions`.
+
+### 1.1.4 Estados intermediários de peça — **FUTURO, client-side, NÃO-autoritativos**
+
+Escada de apresentação que um provider multi-etapa exibe enquanto o jogador trabalha:
+
+```text
+ATTACHED → PARTIALLY_DISCONNECTED → DISCONNECTED → REMOVED
+```
+
+**Regras invioláveis:**
+- Estes estados são **puramente de apresentação, no client**. Nunca vão para o `ChopSession`,
+  nunca para o DB, nunca para o inventário.
+- A **única** transição autoritativa continua sendo `nil → REMOVED`, feita pelo **servidor** no
+  `ActionSession.Complete` após `revalidate()`. O servidor não conhece `PARTIALLY_DISCONNECTED`.
+- Se o jogador cancela/desconecta no meio: o client descarta a escada; no servidor **nada mudou**
+  (a peça nunca saiu de `AVAILABLE`). Não existe "peça 60% removida" que dê 60% de reward ou
+  meio-item. É tudo-ou-nada no COMPLETE.
+- `Wheels V2` (§5) já segue isso: `LOCKED`/`REMOVING` são efêmeros e não-committed; só
+  `REMOVED`/`STORED` são verdade. A escada `ATTACHED→...` é o mesmo princípio aplicado
+  **dentro de uma única ActionSession multi-etapa**.
+- Threat: se algum dia um estado intermediário precisar sobreviver a disconnect (ex.: "porta
+  fica pendurada por um fio"), isso vira **estado autoritativo do servidor** com a mesma
+  disciplina do `REMOVED` (idempotência, sweep, fail-closed) — e entra por RFC, não por
+  conveniência de UX.
+
+---
+
 ## 2. Fluxo conceitual (inalterado)
 
 ```text
@@ -147,6 +293,10 @@ se `bridge/` é o lugar certo ou se cria `client/dismantle/`. O **caller** (o ha
 
 Parâmetros numéricos (sensibilidade, voltas, tolerância, tempo, nº de pontos) **não são fixados
 aqui** — vão para `Config.InteractiveDismantling` com defaults calibrados in-game na P2.2.
+
+Todos os providers são **multi-ponto e multi-etapa** por construção (ver §1.1.2). Os `steps`
+de cada peça são hardcoded no provider até a RFC de `steps` declarativos (§1.1.3). O objetivo
+de UX de cada um é o procedimento-alvo em §1.1.1 — não um skillCheck repintado.
 
 ### 4.1 WHEEL BOLT (`bolt`)
 
@@ -415,6 +565,11 @@ deste design. Aqui só se registra que a arquitetura comporta.
 | **ID-7** | `Config.InteractiveDismantling` consolidado + calibração dos defaults (voltas, sens, tolerância, timeouts, nº de pontos) a partir da QA in-game. Remove `Config.Jackstand.Minigame`/`Config.Plates.Bolt3D` legados se cobertos. | config | ID-2..ID-6 |
 | **ID-8** | Bloco Q6 no plano de QA in-game + CI: adicionar as suites novas ao harness e (se a Fase 5 já tiver corrigido o exit code) ao gate de CI. | doc + tools | ID-2..ID-7 |
 
+**PR fora da série ID (pré-requisito só se aprovado):** `PART_REGISTRY_STEPS_RFC` — RFC para
+`steps` declarativos por peça (§1.1.3). Doc-only. Se aprovada, os providers passam a ler o
+layout de `shared/registry/dismantle_layout.lua` (ou campo novo) em vez de hardcode. Sem ela,
+ID-2..ID-6 seguem com `steps` hardcoded no provider — não bloqueia.
+
 Peças físicas novas (`battery`, `ecu`, ...) são PRs da Fase 3/4, **depois** de ID-1..ID-8, cada
 uma isolada.
 
@@ -431,3 +586,11 @@ uma isolada.
 6. `oneAtATime` como default on/off.
 7. Se `minigame == nil` numa peça deve significar "skillcheck" ou "sem minigame, barra passiva
    legada" — provavelmente config global `Config.InteractiveDismantling.DefaultForNil`.
+8. `steps` declarativos: campo no schema da peça vs. arquivo de layout separado
+   (`shared/registry/dismantle_layout.lua`). Preferência atual: layout separado, mantém o
+   schema v2 da peça intacto. Decisão via `PART_REGISTRY_STEPS_RFC` (§1.1.3).
+9. Estados intermediários (`ATTACHED→PARTIALLY_DISCONNECTED→DISCONNECTED→REMOVED`): confirmar
+   que ficam 100% client-side; só promover a autoritativo via RFC se um caso real exigir
+   persistir "peça meio-solta" através de disconnect (§1.1.4).
+10. Câmera underbody (catalisador/escapamento) — enquadramento novo, precisa de teste de
+    colisão de câmera dentro do volume do carro levantado.
