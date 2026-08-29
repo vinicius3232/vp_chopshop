@@ -165,9 +165,10 @@ ATTACHED → PARTIALLY_DISCONNECTED → DISCONNECTED → REMOVED
 - Se o jogador cancela/desconecta no meio: o client descarta a escada; no servidor **nada mudou**
   (a peça nunca saiu de `AVAILABLE`). Não existe "peça 60% removida" que dê 60% de reward ou
   meio-item. É tudo-ou-nada no COMPLETE.
-- `Wheels V2` (§5) já segue isso: `LOCKED`/`REMOVING` são efêmeros e não-committed; só
-  `REMOVED`/`STORED` são verdade. A escada `ATTACHED→...` é o mesmo princípio aplicado
-  **dentro de uma única ActionSession multi-etapa**.
+- `Wheels V2` (§5) já segue isso: no servidor `LOCKED` é efêmero e não-committed (libera sozinho);
+  só `REMOVED`/`STORED` são verdade. `REMOVING` e os subestados **nem existem no servidor** —
+  são view do client. A escada `ATTACHED→...` é o mesmo princípio aplicado **dentro de uma única
+  ActionSession multi-etapa**, inteiramente no client.
 - Threat: se algum dia um estado intermediário precisar sobreviver a disconnect (ex.: "porta
   fica pendurada por um fio"), isso vira **estado autoritativo do servidor** com a mesma
   disciplina do `REMOVED` (idempotência, sweep, fail-closed) — e entra por RFC, não por
@@ -252,15 +253,26 @@ O provider **não** recebe `src`, não fala com o servidor, não conhece reward.
 ---@field minigame 'bolt'|'cut'|'wiring'|'mechanical'|'skillcheck'|nil  -- UX (client)
 ```
 
-Valores hoje no registry:
+Valores **reais** no `shared/registry/parts.lua` do HEAD da branch (conferido — **não** há peça
+com `minigame = nil`; toda entrada já declara intenção):
 
-| partId | `action.kind` | `action.minigame` |
-|---|---|---|
-| `tyre` (wheels) | `tyre` | `bolt` |
-| `adv_door` (portas) | `adv_door` | `cut` |
-| `adv_engine` (motor) | `adv_engine` | `mechanical` |
-| `adv_carcass` (carcaça) | `adv_carcass` | `cut` |
-| GTA nativas (bonnet, boot, doors...) | door/tyre | *(nil hoje)* |
+| partId | `category` | `action.kind` | `action.minigame` | `toolClass` | `requires` | `gates` |
+|---|---|---|---|---|---|---|
+| `wheel_lf` `wheel_rf` `wheel_lr` `wheel_rr` | `wheel` | `tyre` | **`bolt`** | `cut` | — | `raised` |
+| `bonnet` | `door` | `adv_door` | **`cut`** | `cut` | — | — |
+| `boot` | `door` | `adv_door` | **`cut`** | `cut` | — | — |
+| `door_dside_f` `door_pside_f` `door_dside_r` `door_pside_r` | `door` | `adv_door` | **`cut`** | `cut` | — | — |
+| `adv_engine` | `engine` | `adv_engine` | **`mechanical`** | `screw` | `bonnet` REMOVED | — |
+| `adv_carcass` | `panel` | `adv_carcass` | **`cut`** | *`nil`* (carcass não checa serra hoje) | `adv_engine` REMOVED | `welder` |
+
+Notas factuais do registry atual (não mudar nada disto — é o estado congelado):
+- Não existe "porta GTA nativa" separada: `bonnet`/`boot`/as 4 portas passam todas pelo helper
+  `bodyDoor(...)` → `kind = 'adv_door'`, `minigame = 'cut'`, `toolClass = 'cut'`.
+- **Rodas usam `toolClass = 'cut'`** (não `screw`) e `minigame = 'bolt'`. `gates.raised = true`.
+- `adv_carcass` tem `toolClass = nil` — o `minigame = 'cut'` é só UX; o gate real é o `welder`.
+- `PartRequire.state` hoje só aceita `'REMOVED'` (o próprio schema anota `-- futuro: 'OPEN'|'DISCONNECTED'`).
+- `minigame` **não é `nil` em nenhuma peça** → a linha `nil → skillcheck` do mapa abaixo é
+  só o comportamento defensivo para uma peça futura que esqueça o campo.
 
 Mapa **declarativo** provider:
 
@@ -340,6 +352,11 @@ Generaliza `runBoltSurface` + `VPChopBoltMinigame`.
 - **Partículas/som:** `ptfx` de faísca (`core` / `scr_...`) no ponto atual do corte; som de
   serra em loop enquanto arrasta; "clunk" ao concluir cada linha.
 - **Multi-linha:** carcaça/porta podem ter 2+ linhas sequenciais; a próxima só habilita após a anterior.
+- **Variante "ponto de calor" (a avaliar na P2.2, ver research §4.8):** em vez de arrastar uma
+  linha, para PORTA/CAPÔ/MALA o corte pode ser **N pontos de dobradiça** — segurar o maçarico
+  no ponto (`hold` + mira estável) até derreter; tirar o cursor do ponto **esfria** (perde
+  progresso). É interação, não timer. `cut` suporta os dois modos por `step.type` (`'cut_line'`
+  / `'cut_point'`); decidir qual usar por peça na calibração.
 - Fallback: `lib.skillCheck` (já é o caminho de `adv_door`/`adv_carcass` hoje).
 
 ### 4.3 MECHANICAL (`mechanical`) — motor
@@ -369,42 +386,62 @@ Generaliza `runBoltSurface` + `VPChopBoltMinigame`.
 
 ## 5. Wheels V2 — máquina de estados
 
-### 5.1 Estados
+### 5.1 Dois planos: estado do servidor × view do client
+
+**A máquina de estados AUTORITATIVA do servidor tem 5 estados — `REMOVING` não é um deles:**
 
 ```text
-AVAILABLE ──► LOCKED ──► REMOVING ──► REMOVED ──► CARRIED ──► STORED
-     ▲           │           │
-     └───────────┴───────────┘   (unlock / abort → volta a AVAILABLE)
+SERVER (autoritativo, ChopSession / entitlement / storage)
+  AVAILABLE ──► LOCKED ──► REMOVED ──► CARRIED ──► STORED
+      ▲           │
+      └───────────┘   (Cancel / disconnect / timeout / restart → volta a AVAILABLE)
+
+CLIENT VIEW (só apresentação, durante LOCKED)
+  o provider representa "REMOVING" e seus subestados
+  (ATTACHED → PARTIALLY_DISCONNECTED → DISCONNECTED → ...) — §1.1.4
 ```
 
-| Estado | Significado | Dono | Persistência |
+O servidor sabe apenas: **existe uma `ActionSession`/lock aberto para esta roda por este `src`**
+(estado `LOCKED`). O client sabe: **visualmente estou removendo a peça** (`REMOVING` + subestados).
+`REMOVING` **não** é promovido a estado server-authoritative nesta fase. Só via RFC futura, se
+surgir necessidade real de persistir "removendo" através de um disconnect.
+
+| Estado (server) | Significado | Dono | Persistência |
 |---|---|---|---|
-| `AVAILABLE` | roda presente, ninguém agindo | **servidor** (ausência de entrada em `ChopSession.parts[wheelKey]`) | in-memory |
-| `LOCKED` | um `ActionSession` foi aberto para esta roda por um `src` | **servidor** | in-memory (`ChopSession`) |
-| `REMOVING` | minigame em andamento no client do dono do lock | **servidor** marca; client **apresenta** | in-memory |
+| `AVAILABLE` | roda presente, nenhum lock | **servidor** (sem entrada em `ChopSession.parts[wheelKey]` e sem lock) | in-memory |
+| `LOCKED` | `ActionSession` aberto para esta roda por um `src` (o minigame está rodando no client dele — ou não; o servidor não distingue) | **servidor** | in-memory (`ChopSession` lock) |
 | `REMOVED` | `ActionSession.Complete` revalidou → roda saiu | **servidor** (`ChopSession.MarkPartRemoved` → `state='REMOVED'`) | in-memory + tombstone |
 | `CARRIED` | jogador carregando o prop da roda | **servidor** (`TyreEntitlement` — seam já existe) | in-memory (entitlement) |
 | `STORED` | roda depositada (truck/stash) | **servidor** (`TruckStorage`/`PartStorage`) | **DB** |
 
-### 5.2 Transições — servidor vs. apresentação
+| View (client, durante `LOCKED`) | O que é |
+|---|---|
+| `REMOVING` | rótulo genérico: o provider está ativo |
+| `ATTACHED` / `PARTIALLY_DISCONNECTED` / `DISCONNECTED` | subestados de apresentação de um provider multi-etapa (§1.1.4) — **nunca** saem do client |
+
+### 5.2 Transições
 
 | Transição | Gatilho | Autoridade | Client faz |
 |---|---|---|---|
-| `AVAILABLE→LOCKED` | `ActionSession.StartBaseTyre(src, sessionId, wheelKey)` | **servidor** — `startCore` valida distância/ferramenta/estado/`isPartMissing`; grava lock | recebe `ok`, abre o minigame |
-| `LOCKED→REMOVING` | minigame abriu | **apresentação** (o servidor considera "LOCKED com ação pendente"; não há estado DB novo) | desenha parafusos, câmera, cursor |
-| `REMOVING→LOCKED` | `'cancel'`/`'fallback'`+fail | **servidor** — `ActionSession.Cancel` libera o lock → volta a `AVAILABLE` | notifica, restaura câmera |
-| `REMOVING→REMOVED` | `'success'` → `ActionSession.Complete` | **servidor** — `revalidate` (session/veh/dist/tool/part/state/**minDurationMs**) → `MarkPartRemoved` | esconde a roda visualmente (`SetVehicleWheelIsPuncturable`/hide), toca som |
+| `AVAILABLE→LOCKED` | `ActionSession.StartBaseTyre(src, sessionId, wheelKey)` | **servidor** — `startCore` valida distância/ferramenta/estado/`isPartMissing`; grava lock | recebe `ok`, abre o provider (view entra em `REMOVING`) |
+| `LOCKED→AVAILABLE` | provider retornou `'cancel'` ou `'fallback'`+fail → `ActionSession.Cancel` | **servidor** — libera o lock | notifica, restaura câmera; view volta a nada |
+| `LOCKED→REMOVED` | provider retornou `'success'` → `ActionSession.Complete` | **servidor** — `revalidate` (session/veh/dist/tool/part/state/**minDurationMs**) → `MarkPartRemoved` | esconde a roda visualmente, toca som; view encerra |
+| `LOCKED→AVAILABLE` | disconnect / timeout / resource-restart **antes** do `Complete` | **servidor** — `ActionSession.CleanupPlayer` / `ChopSession` sweep libera o lock | — |
 | `REMOVED→CARRIED` | jogador pega o prop | **servidor** — `TyreEntitlement.grant(src, ...)` | anim carry + prop attach |
 | `CARRIED→STORED` | depósito | **servidor** — grava no storage (DB) | anim, feedback |
 | `CARRIED→AVAILABLE`? | **não existe** — roda removida não "volta" | — | — |
-| qualquer → `AVAILABLE` | disconnect/timeout/resource-restart **antes** de `REMOVED` | **servidor** — `ActionSession.CleanupPlayer` / `ChopSession` sweep libera locks | — |
 
-**Invariante herdado:** "tempo sozinho nunca destrói committed state". `LOCKED`/`REMOVING` são
-efêmeros e liberam sozinhos; `REMOVED`/`STORED` são committed e só mudam por ação explícita.
+Dentro de `LOCKED`, o client transita livremente `REMOVING`↔subestados sem falar com o servidor.
+Nenhuma dessas transições de view é reportada frame-a-frame nem persiste.
 
-**Hoje** o `ChopSession` só tem `{nil, 'REMOVED'}`. V2 acrescenta `LOCKED` (lock de
-`ActionSession` já existe conceitualmente como "ação aberta") e formaliza `REMOVING` como
-*view state*. `CARRIED`/`STORED` já são território de `TyreEntitlement`/`TruckStorage`.
+**Invariante herdado:** "tempo sozinho nunca destrói committed state". `LOCKED` é efêmero e
+libera sozinho (o lock some com o `src` ou com o restart); `REMOVED`/`STORED` são committed e só
+mudam por ação explícita.
+
+**Hoje** o `ChopSession` tem só `{nil, 'REMOVED'}`. A V2 acrescenta **`LOCKED`** como estado
+autoritativo (formaliza o lock de `ActionSession` que já existe conceitualmente). `REMOVING` e
+seus subestados **ficam no client** — não entram no `ChopSession`. `CARRIED`/`STORED` já são
+território de `TyreEntitlement`/`TruckStorage`.
 
 ### 5.3 Anti-race (já coberto, confirmar na P2.2)
 
@@ -504,7 +541,7 @@ O minigame em si é client/visual e **não** é coberto pelo harness. O que **é
 | `minigame_registry_spec` | `Registry.action.minigame` de cada peça mapeia para um provider conhecido; `nil` → default; valor inválido → resolve para `skillcheck`+log, nunca erro |
 | `action_session_spec` (estender) | `Complete` sem `Start` → erro; `Complete` após `minDurationMs` não decorrido → erro; `revalidate` re-checa distância/ferramenta; `Cancel` em ação terminal → no-op |
 | `chop_session_spec` (estender) | `AVAILABLE→LOCKED→REMOVED` idempotência; lock libera em `CleanupPlayer`; 2º ator na peça travada → erro `part`/`busy` |
-| `wheels_v2_spec` (nova) | máquina de estados: transições válidas/ inválidas; `REMOVED`/`STORED` sobrevivem a "tempo sozinho"; `LOCKED`/`REMOVING` não |
+| `wheels_v2_spec` (nova) | máquina de estados server-side (5 estados, sem `REMOVING`): transições válidas/inválidas; `REMOVED`/`STORED` sobrevivem a "tempo sozinho"; `LOCKED` não (libera em `CleanupPlayer`/restart) |
 | `reward_gate_spec` | nenhum caminho de `RewardResolver` é alcançável sem `revalidate` ter retornado sucesso |
 
 Meta: manter **0 regressão** no total atual (566) e somar as novas.
@@ -557,18 +594,27 @@ deste design. Aqui só se registra que a arquitetura comporta.
 |---|---|---|---|
 | **ID-0** | *(este design + research + brief — já feito, doc-only)* | não | — |
 | **ID-1** | `bridge/minigames.lua` fachada + `providers/skillcheck.lua` + `minigame_registry_spec`. Mapa `Registry.action.minigame → provider`, resolução + fallback. **Nenhum caller ligado ainda** (inerte). | client, inerte | Q1–Q4 |
-| **ID-2** | `providers/bolt.lua` — extrai `runBoltSurface`/`VPChopBoltMinigame` para o provider, sem mudar comportamento. Specs de projeção/gizmo onde testável. Caller da RODA (tyre) passa a chamar `VPChopMinigames.run`. | client | ID-1 |
-| **ID-3** | Wheels V2 state machine no `ChopSession`/`ActionSession`: `LOCKED`/`REMOVING` formalizados, `wheels_v2_spec`, anti-race confirmado. Sem mudança de UX. | server | ID-2 |
-| **ID-4** | `providers/cut.lua` — linha de corte, ptfx/som, multi-linha. Callers `adv_door`/`adv_carcass` + capô/mala nativas migram de `lib.skillCheck` para o provider (fallback mantido). | client | ID-1 |
-| **ID-5** | `providers/mechanical.lua` — sequência ordenada de pontos. Caller `adv_engine`. HUD "k/N". | client | ID-1, ID-4 (compartilha helpers de ponto) |
+| **ID-2** | **Wheels V2 — domínio/estado server-side.** `LOCKED` formalizado como estado autoritativo no `ChopSession`/`ActionSession` (o lock de ação); `wheels_v2_spec` (transições válidas/inválidas, `LOCKED` libera em `CleanupPlayer`/restart, `REMOVED`/`STORED` sobrevivem a "tempo sozinho", anti-race 2 atores). **Sem mudança de UX, sem provider.** `REMOVING` **não** entra no servidor. | server | ID-1 |
+| **ID-3** | **Bolt provider + integração da roda.** `providers/bolt.lua` extrai `runBoltSurface`/`VPChopBoltMinigame` sem mudar comportamento; specs de projeção onde testável; o caller da RODA passa a: `StartBaseTyre` → `VPChopMinigames.run` → `Complete`/`Cancel`. Liga a nova apresentação ao domínio já formalizado em ID-2. | client | ID-2 |
+| **ID-4** | `providers/cut.lua` — linha de corte, ptfx/som, multi-linha. Callers `adv_door` (inclui `bonnet`/`boot`/as 4 portas) e `adv_carcass` migram de `lib.skillCheck` para o provider (fallback mantido). | client | ID-3 |
+| **ID-5** | `providers/mechanical.lua` — sequência ordenada de pontos. Caller `adv_engine`. HUD "k/N". | client | ID-4 (compartilha helpers de ponto) |
 | **ID-6** | `providers/wiring.lua` — puxar plugs. Entra **dormente** (nenhuma peça usa ainda); exercitado só por spec + `Config.Debug` target. | client | ID-1 |
-| **ID-7** | `Config.InteractiveDismantling` consolidado + calibração dos defaults (voltas, sens, tolerância, timeouts, nº de pontos) a partir da QA in-game. Remove `Config.Jackstand.Minigame`/`Config.Plates.Bolt3D` legados se cobertos. | config | ID-2..ID-6 |
-| **ID-8** | Bloco Q6 no plano de QA in-game + CI: adicionar as suites novas ao harness e (se a Fase 5 já tiver corrigido o exit code) ao gate de CI. | doc + tools | ID-2..ID-7 |
+| **ID-7** | `Config.InteractiveDismantling` consolidado + calibração dos defaults (voltas, sens, tolerância, timeouts, nº de pontos) a partir da QA in-game. Remove `Config.Jackstand.Minigame`/`Config.Plates.Bolt3D` legados se cobertos. | config | ID-3..ID-6 |
+| **ID-8** | Bloco Q6 no plano de QA in-game + CI: adicionar as suites novas ao harness e (se a Fase 5 já tiver corrigido o exit code) ao gate de CI. | doc + tools | ID-3..ID-7 |
+
+**Princípio da ordem (2026-08-29):** *formalizar domínio/estado antes de ligar a nova
+apresentação ao gameplay.* Por isso **ID-2 (Wheels V2 server-side) vem antes de ID-3 (bolt
+provider + integração)** — invertido em relação ao rascunho inicial. Razão: o provider de roda
+só deve ser plugado quando o `ChopSession` já sabe representar `LOCKED` e o `wheels_v2_spec` já
+trava as transições; caso contrário a integração da UX e a mudança de domínio entram no mesmo
+PR e a review adversarial fica com dois alvos. Não há razão arquitetural para manter a ordem
+antiga (o provider extraído do `runBoltSurface` não é pré-requisito da state machine — a state
+machine é sobre lock/estado, não sobre desenho).
 
 **PR fora da série ID (pré-requisito só se aprovado):** `PART_REGISTRY_STEPS_RFC` — RFC para
 `steps` declarativos por peça (§1.1.3). Doc-only. Se aprovada, os providers passam a ler o
 layout de `shared/registry/dismantle_layout.lua` (ou campo novo) em vez de hardcode. Sem ela,
-ID-2..ID-6 seguem com `steps` hardcoded no provider — não bloqueia.
+ID-3..ID-6 seguem com `steps` hardcoded no provider — não bloqueia.
 
 Peças físicas novas (`battery`, `ecu`, ...) são PRs da Fase 3/4, **depois** de ID-1..ID-8, cada
 uma isolada.

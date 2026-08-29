@@ -30,7 +30,12 @@ Part Registry declarativo, ActionSession/ChopSession).
 | Parafuso caindo com física ao concluir | filo_bolt + interno | **ADOPT** | já temos `SetEntityVelocity` outward |
 | Menu de peças por `World3dToScreen2d` em bones nomeados | **`offload_carmenu`** | **STUDY** | boa técnica de "apontar a peça"; mas é NUI-driven, ver §3 |
 | Seleção de zona/porta/assento por clique projetado | offload_carmenu | **STUDY** | usar para o *ponto de corte* do provider `cut` |
-| Fluxo "chop shop" completo (zonas, entrega, recompensa) | **CHOPNET (vídeo)** | **STUDY** | pendente: não recebi o vídeo em contexto; ver §4 |
+| Anim "slide under" + câmera underbody (catalisador/escapamento) | **CHOPNET** | **ADOPT (conceito)** | nenhuma outra referência cobre underbody; ver §4.3 |
+| Maçarico derretendo **pontos** de dobradiça (porta/capô/mala) | **CHOPNET** | **STUDY** | metáfora de "calor no ponto" vs. nosso "arrastar linha"; ver §4.8 |
+| Prop carregável obrigatório, walking pace, hands-full | **CHOPNET** | **ADOPT** | reforça `carry` do registry + estado `CARRIED` |
+| Co-op: peças paralelizáveis, lock por-peça (não serializar o carro) | **CHOPNET** | **ADOPT (princípio)** | orienta §5.3 |
+| Loot escondido dentro da peça (roll por nível) | **CHOPNET** | **STUDY** | hook de reward server-side, nunca do minigame |
+| Fluxo de contrato / caça a modelo em tráfego / tablet NUI / drone | **CHOPNET** | **REJECT (fora de escopo)** | o VP é a camada de desmanche, não o wrapper de heist; e ficamos no-NUI |
 | Raycast 3D sobre entidades-parafuso spawnadas | filo_bolt | **REJECT (como mecanismo primário)** | ver §5 comparação A×B |
 | `WHEEL_BONES` com offsets fixos aproximados por canto | filo_bolt | **REJECT** | usar bone real |
 | `side` hardcoded (`-1.0`, ramos `side>0` mortos) | filo_bolt | **REJECT** | derivar do bone/veículo |
@@ -133,25 +138,104 @@ cursor contextual, parafuso soltando fisicamente, `oneAtATime` opcional.
 
 ---
 
-## 4. CHOPNET (vídeo enviado)
+## 4. CHOPNET — "Advanced Co-Op Chop Shop"
 
-> **PENDÊNCIA:** o vídeo / material do CHOPNET **não chegou no meu contexto** nesta sessão.
-> Não tenho como estudar o conteúdo específico que você viu. O que segue é o que dá para
-> registrar com segurança; o resto fica marcado como TODO até você reenviar o vídeo ou
-> descrever os pontos que quer aproveitar.
+**Referência:** vídeo showcase `youtu.be/SYFEKBgHBYE` + release oficial no fórum CFX
+(`forum.cfx.re/t/chopnet-advanced-co-op-chop-shop/5423046`). Data do estudo: 2026-08-29.
 
-- **Categoria:** script de chop shop comercial (FiveM). Fluxo típico do gênero: levar veículo
-  roubado a uma zona → sequência de "desmontagem" com minigames/hold → peças/recompensa →
-  cooldown/heat. Muitos usam progress bar; alguns têm interação física por peça.
-- **Licença:** desconhecida / provavelmente encrypted/escrow (Tebex). Se for escrow, **nem estudar
-  o código é possível** — só o comportamento observável no vídeo. **Nunca** desencriptar/reverter.
-- **O que quero de você para completar esta seção:**
-  1. reenviar o vídeo, ou
-  2. listar os 3–5 elementos de UX/fluxo do CHOPNET que te interessaram (ex.: "câmera que orbita
-     a peça", "ordem forçada capô→motor→carcaça", "indicador de progresso por peça no HUD",
-     "efeito de faísca no corte", "peça fica no chão e você carrega").
-- **Regra:** o que vier do CHOPNET entra como **STUDY de comportamento**, comparado ao que o
-  `runBoltSurface` + Part Registry já fazem, e reimplementado do zero. Nada de asset ou código.
+> **Método:** o vídeo do YouTube não é extraível por ferramenta; este estudo é feito sobre a
+> **descrição escrita do próprio desenvolvedor** no release CFX (mais estruturada que o vídeo)
+> + resultados de busca. **Código não é acessível** — CHOPNET é **escrow (~6.500 linhas)**;
+> nem se pretende ler. Só **comportamento e UX observáveis**. Nada de asset, código ou
+> inferência de implementação que não temos.
+
+### 4.1 Sequência física do desmanche (o que o dev descreve)
+
+| Grupo de peça | Interação descrita | Ferramenta |
+|---|---|---|
+| **Portas / capô / porta-malas** | "queimar as dobradiças" (`burn through the hinges`) antes de remover — **maçarico**, ponto a ponto na dobradiça, não corte em linha | maçarico/torch |
+| **Rodas** | minigame de **click-and-drag** para "tirar os lug bolts de cada roda" | (implícito: chave/ferramenta de roda) |
+| **Underbody / catalisador** | jogador **desliza para baixo do carro** ("slide under") para extrair o catalisador | corte/serra |
+| **Interior + elétrica** | puxar **bancos, bateria, rádio** (e o **escapamento**) | manual / desconexão |
+| **Transporte** | **carrega um prop real de cada peça** até o comprador — "mãos ocupadas, ritmo de caminhada, imersão completa"; **não é loot de inventário** | — |
+
+### 4.2 Como o jogador escolhe/interage com cada peça
+
+- Não há vídeo-transcrição, mas a descrição implica **seleção por aproximação + alvo na peça**
+  (target/zona), depois um minigame específico do grupo. Ordem entre grupos não é declarada como
+  forçada (co-op: até 5 jogadores dividem o trabalho e o payout — sugere peças destraváveis em
+  paralelo, não fila rígida).
+- **Co-op de verdade:** crews de até 5; peças/tarefas paralelizáveis; payout dividido.
+- **Loot escondido** em portas/porta-malas, rolado contra o nível do jogador — a peça removida
+  às vezes "contém" algo. (Para nós: seria um hook de reward server-side no COMPLETE da porta,
+  não algo do minigame.)
+
+### 4.3 Diferenças roda × porta × motor × interior × underbody
+
+| Peça | Metáfora física CHOPNET | O que isso ensina para o VP |
+|---|---|---|
+| Roda | click-and-drag nos lug bolts | confirma "parafuso é a linguagem da roda"; **nossa** rotação acumulada é mais expressiva que drag |
+| Porta/capô/mala | **maçarico derretendo dobradiça** (ponto) | alternativa ao nosso "arrastar na linha": **ponto de calor** — segurar o maçarico no ponto até passar; sair do ponto esfria. Ver §6 |
+| Motor | (não detalhado no release; "tear apart" genérico) | mantém nosso desenho `mechanical` multi-etapa |
+| Interior (bancos) | puxar / desparafusar trilhos | confirma `bolt`/`mechanical` para banco |
+| Underbody (catalisador/escapamento) | **animação de deslizar sob o carro** + trabalho embaixo | confirma §1.1.1: precisa de **anim "slide under"** + **câmera underbody** dedicadas |
+
+### 4.4 Feedback visual / câmera / ferramenta / ritmo
+
+- **Feedback:** o release enfatiza "hands-on" e imersão; faísca/queima nas dobradiças é explícita
+  ("burn through"). Detalhe fino do HUD não é documentado — assumir indicador de progresso por peça.
+- **Câmera:** não documentada em detalhe. A "slide under" implica troca de câmera para o underbody.
+- **Ferramenta:** maçarico (dobradiças), ferramenta de roda, jack/drone (não relevante para o
+  desmanche em si). **Perk tree de 8 nós** acelera o "stripping" — para nós, qualquer modificador
+  de velocidade é **server-side** (mexe em `minDurationMs`, que é autoritativo) — nunca um número
+  que o client escolhe.
+- **Ritmo:** deliberadamente lento e físico — "walking pace, hands full". Alinha com o nosso
+  `CARRIED` e com a decisão de exigir esforço real (não clique).
+
+### 4.5 Transição "peça presa → liberada"
+
+- Descrito como físico: dobradiça queimada → porta **se solta**; lug bolts removidos → roda sai;
+  peça vira **prop carregável**. Sem menção a "peça some e aparece no inventário" — o oposto:
+  **prop físico obrigatório**. Isto é exatamente o `REMOVED → CARRIED → STORED` do nosso §5.
+
+### 4.6 Carry / storage
+
+- **Carry:** prop real por peça, "mãos ocupadas, ritmo de caminhada". Entrega ao comprador
+  (dealer) em mão — ou **drone** para saques/compras (não para as peças).
+- **Storage:** o release fala em levar "cada peça ao comprador"; não descreve um depósito
+  intermediário. O VP tem truck/stash (`TruckStorage`) — mantemos, é superior para logística de crew.
+
+### 4.7 O que complementa filo_bolt / offload_carmenu
+
+| Ideia CHOPNET | Complementa |
+|---|---|
+| Maçarico derretendo **pontos** de dobradiça | filo_bolt/offload são sobre *pontos*; CHOPNET dá a metáfora certa para porta (calor no ponto) vs. nosso "arrastar linha" |
+| Anim **slide-under** + trabalho no underbody | nenhum dos outros dois cobre underbody |
+| **Prop carregável obrigatório**, walking pace | reforça o `carry` do registry (`prop`, `animation`) e o estado `CARRIED` |
+| Co-op: peças paralelizáveis, payout dividido | orienta o design de lock por-peça (§5.3) para **não** serializar o carro todo |
+| Loot escondido na peça (roll por nível) | hook de reward server-side, não do minigame |
+
+### 4.8 O que podemos superar
+
+1. **Rodas:** CHOPNET = click-and-drag (ainda "input N vezes"). VP = **rotação acumulada real**
+   com clamp anti-salto → mais skill, menos macro-friendly.
+2. **Portas:** "burn through" provavelmente é hold temporizado. VP pode fazer **calor acumulado
+   por ponto com escorregamento** (sair do ponto perde progresso) — interação, não timer.
+3. **Robustez:** nenhuma referência descreve degradação graciosa. O VP **degrada para skillCheck**
+   quando câmera/geometria falham (RC-FINDING-01) em vez de travar o jogador.
+4. **Sem NUI / sem escrow:** CHOPNET é tablet-NUI pesado e 6.5k linhas escrow. O VP fica
+   **no-NUI para gameplay**, aberto, testável no harness.
+5. **Autoridade:** CHOPNET (como o gênero) trata o resultado do client como verdade. O VP
+   **revalida no servidor** todo COMPLETE.
+6. **Declaratividade:** no VP o procedimento de cada peça sai do Part Registry
+   (`action.minigame` + futuros `steps`), não de código espalhado por peça.
+
+### 4.9 Pendência remanescente
+
+Se você quiser calibrar detalhes que **só o vídeo mostra** (enquadramento exato de câmera por
+peça, timing, som, se a ordem entre grupos é forçada, aparência do HUD de progresso), me diga
+os pontos específicos e eu incorporo — mas o **estudo de comportamento está completo** para
+efeito de design. Nada aqui depende de assistir ao vídeo frame a frame.
 
 ---
 
@@ -217,7 +301,7 @@ Nenhum parâmetro numérico (sensibilidade, voltas, tolerância, tempo) é fixad
 | `runBoltSurface` (interno) | próprio | — | sim | é nosso | é nosso |
 | `filo_bolt` | GPL-3.0 | sim (é aberto) | sim | **não** | **não** (contamina) |
 | `offload_carmenu` | GPL-3.0 | sim | sim | **não** | **não** |
-| CHOPNET | desconhecida / provável escrow | **só se não-encrypted**; senão só o vídeo | sim (comportamento) | **não** | **não** |
+| CHOPNET | **escrow** (~6.5k linhas, Tebex) | **não** (encrypted) — só comportamento observável | sim (comportamento/UX) | **não** | **não** |
 
 **Regra do projeto** (`AGENTS.md` §3, `docs/research/EXTERNAL_RESEARCH_MATRIX.md` §13):
 reuso de **conceito**, reimplementação própria. Providers externos, se algum dia existirem,
