@@ -129,6 +129,7 @@ dofile(base .. '/server/chop.lua')                    -- provê VPChopServerTryP
 dofile(base .. '/server/advanced_chop.lua')           -- [PR-G] provê VPChopAdv{Door,Engine,Carcass}Commit + VPChopWelderNearVehicle
 dofile(base .. '/server/action/base_tyre.lua')        -- [PR-F] registra kind/executor 'tyre' (spec sobrescreve o executor)
 dofile(base .. '/server/action/advanced_chop.lua')    -- [PR-G] registra kinds/executores adv_*
+dofile(base .. '/bridge/vp_gangs.lua')                -- [INT-01A] provê VPChopGangs* (ponte vp_chopshop→vp_gangs)
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
 -- no-op) — nunca rodar. Só os corpos dos specs, registrados a partir daqui.
@@ -144,6 +145,7 @@ dofile(base .. '/server/session/deliver_car_spec.lua')         -- [PR-H]
 dofile(base .. '/server/session/carcass_ledger_spec.lua')      -- [P0.4]
 dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F/G]
 dofile(base .. '/shared/registry/registry_spec.lua')          -- [SPIKE PR-I]
+dofile(base .. '/bridge/vp_gangs_spec.lua')                   -- [INT-01A]
 
 local anyFail = false
 for i = specStart, #threads do

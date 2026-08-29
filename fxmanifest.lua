@@ -113,6 +113,11 @@ server_scripts {
     'server/ambush.lua',
     'server/fence.lua',
     'server/progression.lua',
+    -- [INT-01A] ponte vp_chopshop → vp_gangs (contractVersion 1). Escuta VPChopEvt.PART_CHOPPED
+    -- pós-commit. DEPOIS de chop_session.lua (usa ChopSession.GetByVehicle) e progression.lua.
+    -- ÚNICO arquivo que conhece exports.vp_gangs. Fail-safe se vp_gangs stopped.
+    'bridge/vp_gangs.lua',
+    'bridge/vp_gangs_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
     -- [SERIAL] número de série da car_parts. Depois de db.lua (helpers de série),
     -- progression.lua (VPChopGetProgression) e bridges (Inv*, Bridge*, IsValidSource);
     -- ANTES de advanced_chop.lua (que usa VPChopAddStolenCarParts) e main.lua.
