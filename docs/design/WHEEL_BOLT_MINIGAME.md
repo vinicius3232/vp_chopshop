@@ -1,10 +1,16 @@
 # Design brief — Wheel Bolt Minigame
 
-> **Status:** DESIGN BRIEF — nenhuma linha de código nesta etapa.
+> **Status:** RESEARCH / DESIGN BRIEF específico de **wheels** — nenhuma linha de código nesta etapa.
 > **Baseline:** branch `pr-h/v1.15-delivercar-terminal-hardening`.
 > **Este documento NÃO inicia a P2.2 e NÃO concede GO para a Fase 2.**
 > **Implementation gate: QA Q1–Q4 (`docs/audit/V116_INTEGRATION_QA.md`) precisam estar FECHADOS primeiro.**
 > `P2.2 = NOT STARTED`.
+>
+> **FONTE CANÔNICA:** em qualquer divergência de arquitetura — contrato de provider, máquina de
+> estados, estratégia de interação, roadmap — vale [`INTERACTIVE_DISMANTLING.md`](INTERACTIVE_DISMANTLING.md),
+> **não** este documento. Este é o brief de pesquisa mais antigo (só rodas, feito antes do design
+> completo); ele existe para registrar o **estudo do `filo_bolt`**, não para especificar o sistema.
+> O provider `bolt` descrito aqui é **uma peça** do sistema definido no design canônico.
 
 Registro do estudo feito sobre `filo_bolt` como **brief de design e comportamento**.
 Não é um port, não é uma tradução função-por-função e não reutiliza código, estrutura,
@@ -60,7 +66,6 @@ Demais conceitos de UX/apresentação:
 
 - objetos presos ao **wheel bone** via `AttachEntityToEntity` (seguem o veículo sem loop de tracking);
 - câmera roteirizada focada na roda;
-- cursor / raycast 3D a partir da tela para selecionar um parafuso;
 - outline no parafuso sob foco;
 - cursor contextual (estado neutro / "pegar" / "girando" / concluído);
 - opção `oneAtATime` (só um parafuso em animação por vez, para dar ritmo);
@@ -68,10 +73,25 @@ Demais conceitos de UX/apresentação:
 - parafuso podendo **cair fisicamente** ao final do desaperto;
 - **cleanup obrigatório** de tudo que a sessão criou/alterou.
 
-**Explícito:** trigonometria circular, raycast de tela, `AttachEntityToEntity`,
-câmera roteirizada e outline de entidade são **técnicas genéricas da plataforma
-FiveM/GTA**, não partes a serem portadas da implementação estudada. Qualquer
-implementação séria dessas mecânicas converge para as mesmas natives.
+### Estratégia de interação — como o cursor acerta o parafuso
+
+```text
+REFERENCE  (filo_bolt)  : raycast 3D (StartShapeTestLosProbe) contra a entidade-parafuso
+VP DEFAULT              : projeção world/bone → screen + distância cursor → interaction point
+OPTIONAL (VP)           : entidade attachada ao bone só para feedback visual / outline / física
+```
+
+O `vp_chopshop` **não** adota o raycast como mecanismo primário. A decisão (justificada em
+[`INTERACTIVE_DISMANTLING_RESEARCH.md`](INTERACTIVE_DISMANTLING_RESEARCH.md) §5 — compat. entre
+veículos, funciona sem asset, mais barato, já é o `runBoltSurface`) é: **projeção
+world→screen** de cada ponto de interação, `hover` pela distância ao cursor. Quando o modelo do
+parafuso carrega, a entidade (attachada ao bone, conceito do `filo_bolt`) entra **por cima**, só
+para `SetEntityDrawOutline` e a queda física — nunca como alvo de raycast.
+
+**Explícito:** trigonometria circular, projeção de tela, `AttachEntityToEntity`, câmera
+roteirizada e outline de entidade são **técnicas genéricas da plataforma FiveM/GTA**, não partes
+a serem portadas da implementação estudada. O raycast do `filo_bolt` fica registrado como
+**conceito estudado**, não como caminho adotado.
 
 ---
 
@@ -94,18 +114,19 @@ implementação séria dessas mecânicas converge para as mesmas natives.
 
 ## 5. Arquitetura alvo
 
-Contrato conceitual:
+**Este documento NÃO define contrato.** O contrato canônico do provider é o de
+[`INTERACTIVE_DISMANTLING.md` §3](INTERACTIVE_DISMANTLING.md):
 
 ```lua
-runWheelBolts(vehicle, wheelId, opts) -> boolean
+VPChopMinigames.run(partDef, ctx) -> 'success' | 'cancel' | 'fallback'
 ```
 
-Local futuro sugerido: `bridge/minigames.lua` (ou equivalente já existente no
-projeto, a confirmar em auditoria no início da P2.2).
+O provider `bolt` é a implementação desse contrato para a roda. Se o nome
+`runWheelBolts(...)` aparecer no código futuro, é **função interna do provider `bolt`**
+(helper que desenha os parafusos), **nunca** API que o caller chama — o caller só conhece
+`VPChopMinigames.run`. `runWheelBolts -> boolean` era um esboço anterior e **não** é mais o alvo.
 
-O **caller não conhece** implementação nem provider — só recebe o booleano.
-
-Fluxo:
+Fluxo (resumo; a versão canônica com START/COMPLETE/CANCEL está no design doc §2):
 
 ```text
 ActionSession START
@@ -154,13 +175,25 @@ do bone, podem continuar sendo configuráveis.
 
 ## 7. Lifecycle
 
+Estados do **provider** (client), alinhados ao retorno canônico `'success'|'cancel'|'fallback'`:
+
 ```text
-idle
-→ starting
-→ active
-→ success | cancelled | failed
-→ cleanup
+idle → starting → active → (success | cancel | fallback) → cleanup
 ```
+
+**Máquina de estados do domínio — a canônica está em [`INTERACTIVE_DISMANTLING.md` §5](INTERACTIVE_DISMANTLING.md).**
+Resumo do que vale aqui:
+
+```text
+SERVIDOR (autoritativo):   AVAILABLE → LOCKED → REMOVED → CARRIED → STORED
+CLIENT VIEW (durante LOCKED, só apresentação):
+    REMOVING → ATTACHED → PARTIALLY_DISCONNECTED → DISCONNECTED → ...
+```
+
+`REMOVING` e seus subestados **não** são estado autoritativo do servidor. O servidor só sabe que
+há um `LOCKED` (ActionSession/lock aberto). A única transição autoritativa de peça continua
+`nil → REMOVED`, feita pelo servidor no `Complete` após `revalidate()`. Nada de reward/inventário
+parcial por estado intermediário.
 
 Cleanup **deve** ocorrer em todos os caminhos:
 
