@@ -1,9 +1,8 @@
 vp_chopshop
 Copyright (c) 2026 Vinicius Pimentel. All Rights Reserved.
 
-Developed and published under the handle "Vinicius3232" (also known as
-"LordB"). That handle is branding only; the copyright holder is the
-individual named above.
+Developed under the handle "Vinicius3232" (also known as "LordB"). That
+handle is branding only; the copyright holder is the individual named above.
 
 This repository is proprietary. See LICENSE.
 
@@ -13,4 +12,3 @@ not covered by this project's LICENSE.
 
 Third-party assets, if present in the working tree or in the Git history,
 remain the property of their authors under their original licenses.
-See issue #34 (PAID_ASSET_HISTORY_PURGE).
