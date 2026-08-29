@@ -94,6 +94,7 @@ sai `!= 0` se qualquer spec falha **ou** se 0 asserts forem contados.
 | Ferramentas | `Config.Tools` (saw_cheap/saw_pro/mechanic_drill) + `shared/registry/tools.lua` |
 | Migração do registry (FASE A→F) | `docs/design/PART_REGISTRY_MIGRATION.md` · review: `PART_REGISTRY_REVIEW.md` |
 | Processamento de peça na bancada (futuro) | `docs/design/PART_PROCESSING_RFC.md` |
+| Interação física de desmanche (design canônico, futuro) | `docs/design/INTERACTIVE_DISMANTLING.md` · research: `INTERACTIVE_DISMANTLING_RESEARCH.md` · brief de wheels: `WHEEL_BOLT_MINIGAME.md` |
 | Estado de desmanche de um veículo | `server/session/chop_session.lua` (`ChopSession`, in-memory) |
 | Autorização temporal de ação | `server/session/action_session.lua` (`ActionSession`) |
 | Barreira anti re-discard pós-restart | `server/session/carcass_ledger.lua` + tabela `vp_chop_carcass` |
