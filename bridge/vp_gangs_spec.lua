@@ -6,9 +6,11 @@
 --
 --  Prova: filtro phase 1-4 (vin_scratch/plate_theft NÃO emitem) · operationId
 --  domínio-derivado · payload V1 sem amount/plate/netId/citizenid · caminho novo
---  (recordExternalCrime) · compat fallback só em forbidden_caller/disabled ·
---  rejeição legítima (not_official/replay/no_gang) NÃO cai no compat · fail-safe
---  vp_gangs stopped · handler end-to-end.
+--  (recordExternalCrime) · compat SÓ em reasons pre-mutation
+--  (forbidden_caller/disabled/bridge_disabled) · rejeição legítima
+--  (not_official/replay/no_gang/bad_payload) NÃO cai no compat · ERRO AMBÍGUO
+--  (pcall_error/no_result) NUNCA compensa (at-most-once) · fail-safe vp_gangs
+--  stopped · handler end-to-end.
 --
 --  Todo setup/teardown de ambiente vive DENTRO de run() para não vazar
 --  (ex.: não sobrescrever o ChopSession real que os outros specs usam).
@@ -32,6 +34,7 @@ local function run()
 
     local RECORD_CALLS, REWARD_CALLS = {}, {}
     local RECORD_RET = { ok = true }
+    local RECORD_THROWS, RECORD_NIL = false, false
 
     _G.FAKE_RESOURCES.vp_gangs = 'started'
     _G.FAKE_RESOURCES.qbx_core = _G.FAKE_RESOURCES.qbx_core or 'started'
@@ -39,6 +42,8 @@ local function run()
     _G.FAKE_EXPORTS.vp_gangs = {
         recordExternalCrime = function(_, src, payload)
             RECORD_CALLS[#RECORD_CALLS + 1] = { src = src, payload = payload }
+            if RECORD_THROWS then error('simulated vp_gangs crash AFTER possible mutation') end
+            if RECORD_NIL then return nil end
             return RECORD_RET
         end,
         rewardGangActivity = function(_, cid, activity, opts)
@@ -53,6 +58,7 @@ local function run()
     local function reset()
         RECORD_CALLS, REWARD_CALLS = {}, {}
         RECORD_RET = { ok = true }
+        RECORD_THROWS, RECORD_NIL = false, false
         _G.FAKE_RESOURCES.vp_gangs = 'started'
     end
     local function payload(op, pk, ph) return VPChopGangsBuildPayload(op or 'cs:7:bonnet:p1', pk or 'bonnet', ph or 1) end
@@ -95,7 +101,7 @@ local function run()
         check('ok → NÃO cai no compat', #REWARD_CALLS == 0)
         check('dispatch devolve res.ok', r.ok == true)
 
-        -- ── 5) COMPAT só em forbidden_caller/disabled ────────────────
+        -- ── 5) COMPAT só em reasons PRE-MUTATION ─────────────────────
         reset(); RECORD_RET = { ok = false, reason = 'forbidden_caller' }
         r = VPChopGangsDispatch(42, payload())
         check('forbidden_caller → fallback rewardGangActivity 1×', #REWARD_CALLS == 1)
@@ -108,7 +114,11 @@ local function run()
         VPChopGangsDispatch(42, payload())
         check('disabled → também cai no compat', #REWARD_CALLS == 1)
 
-        -- ── 6) REJEIÇÃO LEGÍTIMA do vp_gangs NÃO cai no compat ───────
+        reset(); RECORD_RET = { ok = false, reason = 'bridge_disabled' }
+        VPChopGangsDispatch(42, payload())
+        check('bridge_disabled → também cai no compat', #REWARD_CALLS == 1)
+
+        -- ── 6) REJEIÇÃO LEGÍTIMA (pós-avaliação) NÃO cai no compat ───
         reset(); RECORD_RET = { ok = false, reason = 'not_official' }
         r = VPChopGangsDispatch(42, payload())
         check('not_official → SEM fallback (rejeição legítima)', #REWARD_CALLS == 0)
@@ -121,6 +131,22 @@ local function run()
         reset(); RECORD_RET = { ok = false, reason = 'no_gang' }
         VPChopGangsDispatch(42, payload())
         check('no_gang (chop solo) → SEM fallback', #REWARD_CALLS == 0)
+
+        reset(); RECORD_RET = { ok = false, reason = 'bad_payload' }
+        VPChopGangsDispatch(42, payload())
+        check('bad_payload → SEM fallback', #REWARD_CALLS == 0)
+
+        -- ── 6b) ERRO AMBÍGUO (pode ter mutado antes de falhar) → at-most-once ──
+        reset(); RECORD_THROWS = true
+        r = VPChopGangsDispatch(42, payload())
+        check('recordExternalCrime LANÇA erro → reason pcall_error', r.reason == 'pcall_error')
+        check('pcall_error → REWARD_CALLS == 0 (NÃO compensa)', #REWARD_CALLS == 0)
+        check('pcall_error → r.compat ausente', r.compat == nil)
+
+        reset(); RECORD_NIL = true
+        r = VPChopGangsDispatch(42, payload())
+        check('recordExternalCrime retorna nil → reason no_result', r.reason == 'no_result')
+        check('no_result → REWARD_CALLS == 0 (NÃO compensa)', #REWARD_CALLS == 0)
 
         -- ── 7) FAIL-SAFE: vp_gangs stopped ──────────────────────────
         reset(); _G.FAKE_RESOURCES.vp_gangs = 'missing'

@@ -115,19 +115,51 @@ tick (a emissão é síncrona, pós-commit).
 `vp_gangs_stopped` · `pcall_error` · `no_result` · e o `reason` do próprio
 `vp_gangs` (`forbidden_caller` / `disabled` / `no_gang` / `not_official` /
 `bad_payload` / `replay` / `version_unsupported` / `ok`). **Nenhum** afeta o
-resultado do desmanche.
+resultado do desmanche. Erro **ambíguo** (`pcall_error` / `no_result`) → só
+diagnóstico, **nunca** aciona o fallback compat (at-most-once — ver abaixo).
 
-## Compat temporário `[INT-01B REMOVE]`
+## Compat temporário `[INT-01A.2/INT-01C REMOVE]`
 
 Enquanto o `vp_gangs` não registrar o adapter `['vp_chopshop']` em
 `config/external.lua`, `recordExternalCrime` devolve `forbidden_caller`. Nesse
-caso (e só nesse — `disabled`/`bridge_disabled`/`pcall_error`/`no_result`), o
-bridge cai no call legado `exports.vp_gangs:rewardGangActivity(cid, 'vehicle_chop', {})`
-(opts vazio → 0 payout) para **preservar exatamente** o crédito de gang atual
-durante a janela entre INT-01A e INT-01B. Rejeições **legítimas** do `vp_gangs`
-(`no_gang`, `not_official`, `replay`, …) **não** caem no compat.
+caso o bridge cai no call legado
+`exports.vp_gangs:rewardGangActivity(cid, 'vehicle_chop', {})` (opts vazio →
+0 payout) para **preservar exatamente** o crédito de gang atual durante a janela
+entre INT-01A e INT-01B.
 
-**INT-01B liga o adapter e apaga este fallback** de `bridge/vp_gangs.lua`.
+**O fallback só roda para reasons comprovadamente PRE-MUTATION** — o `vp_gangs`
+rejeita ANTES de qualquer `Progression.rewardGangActivity`:
+
+| reason | fallback? | porquê |
+|---|---|---|
+| `forbidden_caller` | ✅ | allowlist de adapter — checada 1ª, antes de tudo |
+| `disabled` | ✅ | `Config.External.enabled = false` → export NO-OP |
+| `bridge_disabled` | ✅ | `ExternalBridge.apply` early-return antes de mutar |
+| `not_official` / `no_gang` / `bad_payload` / `replay` / `version_unsupported` / … | ❌ | rejeição legítima do `vp_gangs` — sem crédito é o correto |
+| **`pcall_error` / `no_result` / timeout** | ❌ | **erro AMBÍGUO** — `recordExternalCrime` pode ter aplicado o crédito e falhado DEPOIS. Compensar = **double-credit**. Regra: **at-most-once** — erro ambíguo nunca compensa, só loga. |
+
+### Sequência de cutover (cross-repo)
+
+O `[INT-01A.2/INT-01C REMOVE]` **não pode** ser removido pelo PR do `vp_gangs` — o fallback
+vive no `vp_chopshop`. Ordem real:
+
+```
+INT-01A  merge (vp_chopshop)   ← este PR
+   ↓
+INT-01B  merge (vp_gangs)       liga o adapter ['vp_chopshop']
+   ↓
+INT-01A.2 / INT-01C (vp_chopshop)  apaga TODO o fallback de bridge/vp_gangs.lua
+```
+
+### Nota para o INT-01B — `adapter inexistente` ≠ `adapter desligado`
+
+O INT-01B deve distinguir:
+- **adapter não registrado** → `forbidden_caller` (ativa o fallback — janela de cutover).
+- **adapter registrado com `enabled = false`** → deve retornar um reason PRÓPRIO
+  (ex.: `adapter_disabled`) que o `vp_chopshop` **não** trate como compat.
+
+Assim, um admin que desliga conscientemente a integração não é contornado pelo
+caminho legado.
 
 ## O que muda em `server/progression.lua`
 
@@ -142,14 +174,14 @@ end
 
 ## Testes
 
-`bridge/vp_gangs_spec.lua` (44 asserts, self-gated `vp_chopshop_selftest 1`):
+`bridge/vp_gangs_spec.lua` (51 asserts, self-gated `vp_chopshop_selftest 1`):
 filtro phase 1–4 (`vin_scratch`/`plate_theft`/nil/vazio não emitem) · `operationId`
 domínio-derivado (nil sem sessão) · payload v1 sem `amount`/`plate`/`netId`/
 `citizenid`/`reward` · caminho novo · compat só em `forbidden_caller`/`disabled` ·
 rejeição legítima não cai no compat · `vp_gangs` parado → nada · handler
 end-to-end.
 
-`lua tools/run_spec.lua .` → **610 PASS / 0 FAIL** (566 + 44). `luac -p` limpo.
+`lua tools/run_spec.lua .` → **617 PASS / 0 FAIL** (566 + 51). `luac -p` limpo.
 
 ## Behavior change
 

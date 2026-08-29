@@ -30,12 +30,20 @@
 --      (roadmap vp_chopshop: vehicle_part / sourceSession). NÃO usamos
 --      netId / placa / timestamp como substituto fraco.
 --
---  COMPAT [INT-01B REMOVE ESTE BLOCO] — enquanto o vp_gangs não registrar o
---  adapter 'vp_chopshop' em config/external.lua, `recordExternalCrime` devolve
---  `forbidden_caller` → caímos no call legado
---  `rewardGangActivity(cid, 'vehicle_chop', {})` p/ preservar EXATAMENTE o
---  crédito de gang atual (0 payout — opts vazio). INT-01B liga o adapter e apaga
---  este fallback.
+--  COMPAT [INT-01A.2/INT-01C REMOVE ESTE BLOCO] — enquanto o vp_gangs não
+--  registrar o adapter 'vp_chopshop' em config/external.lua,
+--  `recordExternalCrime` devolve `forbidden_caller` → caímos no call legado
+--  `rewardGangActivity(cid, 'vehicle_chop', {})` (0 payout — opts vazio) p/
+--  preservar EXATAMENTE o crédito de gang atual.
+--
+--  SÓ para reasons comprovadamente PRE-MUTATION (o vp_gangs rejeita ANTES de
+--  qualquer mutação): `forbidden_caller` / `disabled` / `bridge_disabled`.
+--  Erro AMBÍGUO (`pcall_error` / `no_result`) NUNCA compensa — `recordExternalCrime`
+--  pode ter aplicado o crédito e falhado depois → **at-most-once**.
+--
+--  Sequência de cutover (cross-repo — este bloco NÃO some no PR do vp_gangs):
+--    INT-01A  merge (vp_chopshop)  → INT-01B merge (vp_gangs, liga o adapter)
+--    → INT-01A.2/INT-01C (vp_chopshop) apaga TODO este fallback.
 -- ══════════════════════════════════════════════════════════════════════════════
 
 local CONTRACT_VERSION = 1
@@ -104,9 +112,12 @@ function VPChopGangsDispatch(src, payload)
         or (not ok and 'pcall_error')
         or 'no_result'
 
-    -- COMPAT [INT-01B REMOVE] — a ponte ainda não existe do lado vp_gangs
-    if reason == 'forbidden_caller' or reason == 'disabled' or reason == 'bridge_disabled'
-       or reason == 'pcall_error' or reason == 'no_result' then
+    -- COMPAT [INT-01B REMOVE] — a ponte ainda não existe do lado vp_gangs.
+    -- SOMENTE reasons comprovadamente PRE-MUTATION: o vp_gangs rejeita ANTES de
+    -- qualquer `Progression.rewardGangActivity` (allowlist de adapter / bridge off).
+    -- Erro AMBÍGUO (pcall_error / no_result / timeout) → NUNCA compensa: o
+    -- recordExternalCrime pode ter mutado e falhado depois → at-most-once.
+    if reason == 'forbidden_caller' or reason == 'disabled' or reason == 'bridge_disabled' then
         local okC, cid = pcall(function()
             return exports.qbx_core:GetPlayer(src).PlayerData.citizenid
         end)
@@ -117,9 +128,10 @@ function VPChopGangsDispatch(src, payload)
         return { ok = false, reason = reason, compat = true }
     end
 
-    -- reason legítimo do vp_gangs (no_gang / not_official / bad_payload / replay / ...)
-    print(('[vp_chopshop][int:vp_gangs] rejeitado (%s) op=%s'):format(reason, tostring(payload.operationId)))
-    return res or { ok = false, reason = reason }
+    -- rejeição legítima (no_gang / not_official / bad_payload / replay / ...) OU
+    -- erro ambíguo (pcall_error / no_result) → só diagnóstico, sem compensar.
+    print(('[vp_chopshop][int:vp_gangs] sem crédito (%s) op=%s'):format(reason, tostring(payload.operationId)))
+    return (type(res) == 'table' and res) or { ok = false, reason = reason }
 end
 
 --- Handler do evento interno VPChopEvt.PART_CHOPPED.
