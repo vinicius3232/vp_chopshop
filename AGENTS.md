@@ -73,6 +73,16 @@ PARAR — aguardar GO do dono
 
 Depois do GO: `gh pr merge <n> --squash --delete-branch`.
 
+**Regra de push (dura):** **nunca** `git push --force`. Quando um rebase da stack
+exigir reescrever um branch remoto, usar **sempre** `git push --force-with-lease`
+(aborta se o remoto tiver commits que você não viu). `main` bloqueia force-push
+por ruleset; `pr-h` permite (rebase da stack) — mas só com `--force-with-lease`.
+
+**CI:** todo PR para `main` ou `pr-h` roda o workflow `harness`
+(`.github/workflows/harness.yml`): `luac -p` + `lua tools/run_spec.lua .`. O
+critério é o **exit code** do harness, não o número de asserts. `run_spec.lua`
+sai `!= 0` se qualquer spec falha **ou** se 0 asserts forem contados.
+
 ## 5. Onde está a verdade (authority map)
 
 | Assunto | Doc / arquivo canônico |
