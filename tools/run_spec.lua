@@ -1,6 +1,21 @@
 -- Harness standalone p/ rodar os self-tests de server/session/*_spec.lua fora do
 -- FiveM.  Uso:  lua tools/run_spec.lua [caminho-do-resource]   (default ".")
 -- Stub dos globals CFX que os módulos/specs tocam. O seam EntityAPI isola OneSync.
+--
+-- EXIT CODE: os specs antigos só IMPRIMEM "FAIL" (não levantam erro), então uma
+-- falha passava despercebida no exit code (== 0). O interceptor de `print` abaixo
+-- observa as linhas de status "] PASS  " / "] FAIL  " emitidas por TODOS os specs
+-- e força `os.exit(1)` se qualquer uma falhar — sem depender de cada spec chamar
+-- error(). O critério de sucesso do CI é o exit code, nunca um número fixo.
+local _print = print
+local SPEC = { pass = 0, fail = 0 }
+function print(...)
+    local line = table.concat({ ... }, '\t')
+    if line:find('%] PASS  ') then SPEC.pass = SPEC.pass + 1
+    elseif line:find('%] FAIL  ') then SPEC.fail = SPEC.fail + 1 end
+    return _print(...)
+end
+
 local threads = {}
 function CreateThread(fn) threads[#threads+1] = fn end
 function Wait(_) end
@@ -150,6 +165,13 @@ dofile(base .. '/bridge/vp_gangs_spec.lua')                   -- [INT-01A]
 local anyFail = false
 for i = specStart, #threads do
     local ok, err = pcall(threads[i])
-    if not ok then print('THREAD ERROR: ' .. tostring(err)); anyFail = true end
+    if not ok then _print('THREAD ERROR: ' .. tostring(err)); anyFail = true end
 end
-if anyFail then os.exit(1) end
+
+_print(('\n═══ TOTAL: %d PASS / %d FAIL / %d asserts ═══')
+    :format(SPEC.pass, SPEC.fail, SPEC.pass + SPEC.fail))
+if anyFail or SPEC.fail > 0 then
+    _print('═══ RESULTADO: FALHA (exit 1) ═══')
+    os.exit(1)
+end
+_print('═══ RESULTADO: OK (exit 0) ═══')
