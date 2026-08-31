@@ -73,10 +73,18 @@ local defaultList = {
                 heading = math.deg(math.atan(dy, dx))
             end
 
+            local pedZ = workPos.z
+            if GetGroundZFor_3dCoord then
+                local found, gz = GetGroundZFor_3dCoord(workPos.x, workPos.y, workPos.z + 1.0, false)
+                if found and gz > 0.0 then
+                    pedZ = gz
+                end
+            end
+
             if SetEntityCoordsNoOffset then
-                SetEntityCoordsNoOffset(ped, workPos.x, workPos.y, workPos.z, false, false, false)
+                SetEntityCoordsNoOffset(ped, workPos.x, workPos.y, pedZ, false, false, false)
             elseif SetEntityCoords then
-                SetEntityCoords(ped, workPos.x, workPos.y, workPos.z, false, false, false, false)
+                SetEntityCoords(ped, workPos.x, workPos.y, pedZ, false, false, false, false)
             end
             if SetEntityHeading then
                 SetEntityHeading(ped, heading)
