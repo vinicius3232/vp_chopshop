@@ -962,33 +962,53 @@ local function findNearestMountedWheel(veh)
     return bestCoords, bestDist, bestIdx, boneNames[idx1], true
 end
 
---- [v1.16 UX-B / UX-B.1] Executa a experiência física interativa da remoção da roda.
+--- [v1.16 UX-B.2] Executa a experiência física interativa da remoção da roda.
 --- Utiliza VPChopDismantleMinigame com o profile 'wheel' (5 parafusos com giro de mouse),
 --- seguido de uma animação física de retirada do pneu antes do commit na ActionSession.
 ---
---- @param expiresAtMs number|nil  Tempo (GetGameTimer) em que a ActionSession expira.
----   Quando fornecido, o timeout do minigame é limitado pelo budget restante menos
----   uma margem de segurança (animação + round-trip COMPLETE + jitter).
----   INVARIANTE: o minigame DEVE cancelar antes da ActionSession expirar.
+--- Clock-domain safety:
+---   ActionSession.Start retorna { startedAt, expiresAt } em clock do FXServer.
+---   O client NÃO pode comparar diretamente expiresAt com GetGameTimer() (clocks distintos).
+---   O chamador deve derivar `ttlMs = expiresAt - startedAt` (mesmo domínio de clock do
+---   servidor), depois passar esse ttlMs aqui. Aqui aplica-se: clientDeadline = now + ttlMs.
 ---
---- Retorna true se o jogador concluiu 100% dos parafusos; false se cancelou ou falhou.
-local function runWheelUx(veh, wheelIdx, partKey, expiresAtMs)
+--- @param ttlMs     number|nil   Duração total da ActionSession em ms, derivada server-side.
+---                               nil indica fluxo legacy (sem ActionSession).
+--- @param isAction  boolean|nil  true = modo ActionSession; nil/false = fluxo legacy.
+---
+--- Retorna: true  → minigame completo + animação OK
+---          false → cancelado, falha ou budget insuficiente (caller deve enviar action:cancel)
+---          string (2º val, opcional) → código de erro: 'budget_invalid' / 'budget_insufficient'
+local function runWheelUx(veh, wheelIdx, partKey, ttlMs, isAction)
     local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
     local boneKey   = partKey or boneNames[(wheelIdx or 0) + 1] or 'wheel_lf'
 
-    -- Margem de segurança: animação (1500ms) + round-trip COMPLETE + jitter/latência.
-    -- O minigame deve encerrar dentro desta janela antes do expiresAt do servidor.
+    -- Reserve: trânsito da resp. START + animação de pull + round-trip COMPLETE + jitter.
+    -- INVARIANTE: uxTimeout + RESERVE_MS <= ttlMs (o COMPLETE chega antes do expiresAt).
     local PULL_ANIM_MS  = 1500
-    local COMPLETE_RTT  = 500   -- round-trip callback estimate
-    local JITTER_MS     = 500   -- rede + jitter FiveM
-    local RESERVE_MS    = PULL_ANIM_MS + COMPLETE_RTT + JITTER_MS   -- 2500ms total
+    local RESERVE_MS    = 4000  -- START transit(1000) + COMPLETE RTT(1000) + jitter(500) + pull(1500)
+    local MIN_UX_MS     = 5000  -- mínimo para uma experiência de 5 parafusos ser viável
 
     local uxTimeout
-    if expiresAtMs and expiresAtMs > 0 then
-        local remaining = expiresAtMs - GetGameTimer()
-        uxTimeout = math.max(1000, remaining - RESERVE_MS)
+    if isAction then
+        -- Modo ActionSession: ttlMs DEVE ser um número positivo derivado do servidor.
+        -- expiresAt=0 ou nil neste contexto é resposta inválida → fail-closed.
+        if not ttlMs or ttlMs <= 0 then
+            return false, 'budget_invalid'
+        end
+        -- Budget disponível para a UX (excluindo a reserva necessária para fechar o fluxo).
+        -- NÃO mistura domínios de clock: ttlMs vem de (expiresAt - startedAt) no servidor.
+        -- Aqui aplicamos ao clock do CLIENT: clientDeadline = GetGameTimer() + ttlMs.
+        local budget = ttlMs - RESERVE_MS
+        if budget < MIN_UX_MS then
+            -- Fail-closed: não há tempo suficiente para uma UX significativa.
+            -- NÃO abre NUI, NÃO cria câmera, NÃO inicia minigame.
+            return false, 'budget_insufficient'
+        end
+        uxTimeout = budget
     else
-        uxTimeout = 45000   -- fallback sem expiresAt
+        -- Fluxo legacy (kill-switch desligado): sem ActionSession, usa timeout padrão.
+        uxTimeout = 45000
     end
 
     local minigameOk = false
@@ -1044,11 +1064,19 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
             end
             local actionId = st.actionId
 
-            -- 3) UX — timeout limitado ao budget restante da ActionSession (UX-B.1)
-            local uxOk = runWheelUx(veh, wheelIdx, partKey, st.expiresAt)
+            -- 3) UX — budget derivado do MESMO domínio de clock do servidor.
+            -- NUNCA compare st.expiresAt com GetGameTimer() — são clocks distintos.
+            -- Derive ttlMs = expiresAt - startedAt (ambos do servidor) e aplique
+            -- client-side como: clientDeadline = GetGameTimer() + ttlMs.
+            local ttlMs = (st.expiresAt and st.startedAt)
+                          and (st.expiresAt - st.startedAt) or 0
+            local uxOk, uxErr = runWheelUx(veh, wheelIdx, partKey, ttlMs, true)
             if not uxOk then
                 pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
                 JackstandBusy = false
+                if uxErr == 'budget_insufficient' or uxErr == 'budget_invalid' then
+                    VPChopNotify(L('notify_chop_failed_fmt', uxErr), 'error')
+                end
                 return
             end
 

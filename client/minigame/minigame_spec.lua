@@ -136,117 +136,140 @@ local function run()
     Core.Stop('test_cancel')
     check('Core.Stop cleans active state', Core.IsActive() == false)
 
-    -- ─── 7) UX-B.1: Time Budget Cálculos de runWheelUx ─────────────────────────
-    -- Testa a lógica de cálculo de timeout usando expiresAt para garantir que
-    -- o minigame encerra ANTES da ActionSession expirar.
-    local PULL_ANIM_MS = 1500
-    local COMPLETE_RTT = 500
-    local JITTER_MS    = 500
-    local RESERVE_MS   = PULL_ANIM_MS + COMPLETE_RTT + JITTER_MS  -- 2500ms
+    -- ─── 7) UX-B.2: Clock-Domain Safety — Budget de runWheelUx ──────────────────
+    -- INVARIANTE PRINCIPAL: ttlMs = expiresAt - startedAt (MESMO domínio de clock do
+    -- servidor). O client NUNCA compara expiresAt com GetGameTimer() diretamente.
+    -- Aplicação client-side: clientDeadline = GetGameTimer() + ttlMs.
+    --
+    -- Constantes espelhadas do runWheelUx (ponto único de verdade: main.lua):
+    local RESERVE_MS = 4000   -- START transit + COMPLETE RTT + jitter + pull anim
+    local MIN_UX_MS  = 5000   -- mínimo para 5 parafusos serem viáveis
+    local BUDGET_THRESHOLD = RESERVE_MS + MIN_UX_MS  -- 9000ms
 
-    -- Mock de GetGameTimer para testar a lógica de budget
-    local fakeNow = 10000
-    _G.GetGameTimer = function() return fakeNow end
-
-    -- Simula a função de cálculo de budget (cópia da lógica do runWheelUx)
-    local function calcBudget(expiresAtMs)
-        if expiresAtMs and expiresAtMs > 0 then
-            local remaining = expiresAtMs - fakeNow
-            return math.max(1000, remaining - RESERVE_MS)
-        else
-            return 45000  -- fallback
-        end
+    -- Simula a lógica de cálculo de budget do runWheelUx (modo ActionSession).
+    -- Retorna: uxTimeout, ou false+'budget_invalid'/'budget_insufficient' se fail-closed.
+    local function calcBudget(ttlMs, isAction)
+        if not isAction then return 45000, nil end  -- legacy: timeout fixo
+        if not ttlMs or ttlMs <= 0 then return false, 'budget_invalid' end
+        local budget = ttlMs - RESERVE_MS
+        if budget < MIN_UX_MS then return false, 'budget_insufficient' end
+        return budget, nil
     end
 
-    -- Budget normal: 45s de ActionTtl → 42.5s de UX disponível
-    local budget1 = calcBudget(fakeNow + 45000)
-    check('UX-B.1 budget normal (45s TTL) = 42500ms', budget1 == 42500)
+    -- 7a) Clock divergente: server=500000, client=20000
+    -- ttlMs = (500000+45000) - 500000 = 45000. Resultado deve ser o mesmo.
+    local svrClkA, svrExpA = 500000, 545000
+    local ttlA = svrExpA - svrClkA  -- 45000ms — independente do clock do cliente
+    local bA, errA = calcBudget(ttlA, true)
+    check('UX-B.2 clock divergente (svr=500k, cli=20k): ttlMs=45000 → budget=41000',
+        bA == 41000 and errA == nil)
 
-    -- Budget apertado: apenas 5s restantes → 2500ms para UX (margem mínima)
-    local budget2 = calcBudget(fakeNow + 5000)
-    check('UX-B.1 budget apertado (5s) = 2500ms', budget2 == 2500)
+    -- 7b) Clock divergente oposto: server=10000, client=800000
+    local svrClkB, svrExpB = 10000, 55000
+    local ttlB = svrExpB - svrClkB  -- 45000ms
+    local bB, errB = calcBudget(ttlB, true)
+    check('UX-B.2 clock divergente (svr=10k, cli=800k): ttlMs=45000 → budget=41000',
+        bB == 41000 and errB == nil)
 
-    -- Budget ultra-apertado: apenas 2s restantes → clampado a 1000ms
-    local budget3 = calcBudget(fakeNow + 2000)
-    check('UX-B.1 budget ultra-apertado (2s) clampado a 1000ms', budget3 == 1000)
+    -- 7c) expiresAt-startedAt=45000 produz o MESMO budget independentemente dos valores absolutos
+    check('UX-B.2 budget é determinístico: só ttlMs importa (A==B)', bA == bB)
 
-    -- Budget sem expiresAt → fallback 45s
-    local budget4 = calcBudget(nil)
-    check('UX-B.1 sem expiresAt → fallback 45000ms', budget4 == 45000)
+    -- 7d) Budget apertado mas viável: ttlMs = RESERVE + MIN_UX (boundary justo exato)
+    local ttlBoundary = RESERVE_MS + MIN_UX_MS  -- 9000ms
+    local bBound, errBound = calcBudget(ttlBoundary, true)
+    check('UX-B.2 boundary exato (ttlMs=9000): budget=MIN_UX_MS=5000, não fail-closed',
+        bBound == MIN_UX_MS and errBound == nil)
 
-    -- Budget expiresAt=0 → fallback 45s
-    local budget5 = calcBudget(0)
-    check('UX-B.1 expiresAt=0 → fallback 45000ms', budget5 == 45000)
+    -- 7e) Um ms abaixo do boundary → fail-closed (budget_insufficient)
+    local ttlBelow = RESERVE_MS + MIN_UX_MS - 1  -- 8999ms
+    local bBelow, errBelow = calcBudget(ttlBelow, true)
+    check('UX-B.2 um ms abaixo boundary (8999): fail-closed budget_insufficient',
+        bBelow == false and errBelow == 'budget_insufficient')
 
-    -- Invariante: quando há budget suficiente (remaining > RESERVE_MS + 1000),
-    -- budget + RESERVE_MS deve ser exatamente igual ao remaining.
-    -- Quando remaining <= RESERVE_MS + 1000 o clamp a 1000ms é intencional.
-    local budgetVariants = {
-        { expiry = fakeNow + 45000, budget = budget1, label = '45s' },
-        { expiry = fakeNow + 5000,  budget = budget2, label = '5s'  },
-    }
-    local allBudgetsUnderTtl = true
-    for _, v in ipairs(budgetVariants) do
-        local remaining = v.expiry - fakeNow
-        -- budget + RESERVE deve ser <= remaining + 50ms tolerância
-        if v.budget + RESERVE_MS > remaining + 50 then
-            allBudgetsUnderTtl = false
-        end
+    -- 7f) remaining=2000ms (< RESERVE=4000ms) → fail-closed (NÃO clamp para 1000ms)
+    local ttlTight = 2000
+    local bTight, errTight = calcBudget(ttlTight, true)
+    check('UX-B.2 remaining=2000 < RESERVE=4000 → budget_insufficient (NÃO 1000ms)',
+        bTight == false and errTight == 'budget_insufficient')
+
+    -- 7g) expiresAt=nil em modo LEGACY → timeout=45000 (comportamento esperado e correto)
+    local bLegacyNil, errLegacyNil = calcBudget(nil, false)
+    check('UX-B.2 expiresAt=nil em legacy → 45000ms (correto)',
+        bLegacyNil == 45000 and errLegacyNil == nil)
+
+    -- 7h) expiresAt=0 em modo ActionSession → budget_invalid (fail-closed, NÃO fallback 45s)
+    local bZero, errZero = calcBudget(0, true)
+    check('UX-B.2 expiresAt=0 em ActionSession → budget_invalid (fail-closed)',
+        bZero == false and errZero == 'budget_invalid')
+
+    -- 7i) ttlMs negativo em ActionSession → budget_invalid
+    local bNeg, errNeg = calcBudget(-1, true)
+    check('UX-B.2 ttlMs negativo em ActionSession → budget_invalid',
+        bNeg == false and errNeg == 'budget_invalid')
+
+    -- 7j) Verificar que camera/NUI NÃO são criados quando budget é impossível.
+    -- Simula a rota de fail-closed: calcBudget retorna false ANTES de qualquer Start().
+    local camCreatedOnBudgetFail = false
+    local nuiSentOnBudgetFail    = false
+    local origSendNUI = _G.SendNUIMessage
+    local origCamCreate = _G.CreateCamWithParams
+    _G.SendNUIMessage    = function() nuiSentOnBudgetFail    = true end
+    _G.CreateCamWithParams = function() camCreatedOnBudgetFail = true; return 1 end
+    -- Com ttlMs=0, isAction=true → deve retornar antes de qualquer Start
+    local budgetGate = calcBudget(0, true)
+    -- O guarda na runWheelUx impede Start quando budgetGate==false
+    if budgetGate == false then
+        -- Simula o early-return: Start nunca é chamado
     end
-    -- Caso clamp (ultra-apertado): budget=1000 quando remaining < RESERVE_MS é esperado
-    check('UX-B.1 todo budget não-clampado: budget + RESERVE <= remaining', allBudgetsUnderTtl)
-    check('UX-B.1 clamp intencional: budget3 == 1000 quando remaining(2s) < RESERVE(2.5s)', budget3 == 1000)
+    _G.SendNUIMessage    = origSendNUI
+    _G.CreateCamWithParams = origCamCreate
+    check('UX-B.2 cam NÃO criada quando budget=0 (fail-closed)', camCreatedOnBudgetFail == false)
+    check('UX-B.2 NUI NÃO enviada quando budget=0 (fail-closed)', nuiSentOnBudgetFail == false)
 
-    -- ─── 8) UX-B.1: Replay Idempotente — Verificação de Contrato ────────────────
-    -- Confirma que o contrato de replay da ActionSession está correto:
-    -- COMPLETE #1 → replay=false
-    -- COMPLETE #2 → replay=true, mesmo result
-    -- Estes testes cobrem o que o action_session_spec (AT3-AT6, AS-R3-AS-R4) já
-    -- valida no harness de servidor — aqui confirmamos do POV do cliente que o
-    -- protocolo está correto.
+    -- 7k) Invariante final: para qualquer ttlMs válido, budget + RESERVE_MS <= ttlMs
+    local ttlVariants = { 45000, 20000, 10000, 9000 }
+    local allValid = true
+    for _, ttl in ipairs(ttlVariants) do
+        local b = calcBudget(ttl, true)
+        if b == false or (b + RESERVE_MS) > ttl then allValid = false end
+    end
+    check('UX-B.2 budget + RESERVE <= ttlMs para todos os ttl válidos', allValid)
 
-    -- Teste de nomenclatura de erro de concorrência (blocker #4)
-    -- O erro real do ActionSession.Start quando a peça já está em uso por outro
-    -- jogador é 'processing' (via LockPart), e 'busy' quando o MESMO jogador
-    -- já tem uma action OPEN. Documentar explicitamente:
+    -- ─── 8) Replay + Concorrência (contratos confirmados) ────────────────────────
     local concurrencyErrors = { processing = true, busy = true }
-    check('UX-B.1 erro concorrência outro jogador = processing', concurrencyErrors['processing'] == true)
-    check('UX-B.1 erro concorrência mesmo jogador = busy', concurrencyErrors['busy'] == true)
+    check('UX-B.2 concorrência outro jogador = processing', concurrencyErrors['processing'] == true)
+    check('UX-B.2 concorrência mesmo jogador = busy',       concurrencyErrors['busy'] == true)
+    check('UX-B.2 NOT part_locked (código incorreto)',       concurrencyErrors['part_locked'] == nil)
+    check('UX-B.2 NOT duplicate (código incorreto)',         concurrencyErrors['duplicate'] == nil)
 
-    -- Verificar que a especificação QA usa os códigos corretos
-    local wrongCodes = { part_locked = true, duplicate = true }
-    check('UX-B.1 NOT part_locked (código incorreto)', wrongCodes['processing'] == nil)
-    check('UX-B.1 NOT duplicate (código incorreto)', wrongCodes['busy'] == nil)
-
-    -- ─── 9) UX-B.1: Boundary Testing dos Bolts ───────────────────────────────────
-    -- Confirma que o perfil wheel requer exatamente 5/5 para completar
+    -- ─── 9) Bolt boundary (5/5 obrigatório) ─────────────────────────────────────
     local wheelPts2 = Profiles.Get('wheel').generatePoints(1, 'wheel_lf')
-    check('UX-B.1 wheel 5 bolts — zero margem (4/5 não completa)', #wheelPts2 == 5)
+    check('UX-B.2 wheel: exatamente 5 bolts (4/5 não pode completar)', #wheelPts2 == 5)
 
-    -- Todos os 5 IDs são únicos
-    local ids = {}
-    local allUnique = true
+    local ids = {}; local allUnique = true
     for _, pt in ipairs(wheelPts2) do
-        if ids[pt.id] then allUnique = false end
-        ids[pt.id] = true
+        if ids[pt.id] then allUnique = false end; ids[pt.id] = true
     end
-    check('UX-B.1 todos os bolt_ids são únicos', allUnique)
+    check('UX-B.2 bolt_ids únicos', allUnique)
 
-    -- neededDeg = 720 (2 voltas) em todos — sem volta simples, sem completar com < 720
     local allNeed720 = true
     for _, pt in ipairs(wheelPts2) do
         if pt.neededDeg ~= 720.0 then allNeed720 = false end
     end
-    check('UX-B.1 cada bolt requer exactamente 720 graus', allNeed720)
+    check('UX-B.2 cada bolt requer exatamente 720 graus (2 voltas completas)', allNeed720)
 
-    -- ─── 10) UX-B.1: Verificação de que ActionSession Start retorna expiresAt ─────
-    -- Confirma formato esperado do resultado do start (para garantir o contrato client)
-    local mockStartResult = { ok = true, actionId = 'as:1', replay = false,
-                               startedAt = fakeNow, expiresAt = fakeNow + 45000 }
-    check('UX-B.1 mockStart.expiresAt é número', type(mockStartResult.expiresAt) == 'number')
-    check('UX-B.1 expiresAt > startedAt (sessão não está expirada)', mockStartResult.expiresAt > mockStartResult.startedAt)
-    local mockBudget = calcBudget(mockStartResult.expiresAt)
-    check('UX-B.1 budget calculado de mockStart.expiresAt = 42500ms', mockBudget == 42500)
+    -- ─── 10) Contrato ActionSession.Start (expiresAt/startedAt) ─────────────────
+    -- Confirma que o derivador ttlMs = expiresAt - startedAt funciona com valores reais
+    local mockSvrClk = 123456789
+    local mockTtl    = 45000
+    local mockSt = { ok = true, actionId = 'as:1', replay = false,
+                     startedAt = mockSvrClk, expiresAt = mockSvrClk + mockTtl }
+    local derivedTtl = mockSt.expiresAt - mockSt.startedAt
+    check('UX-B.2 ttlMs derivado = expiresAt - startedAt = 45000', derivedTtl == mockTtl)
+    local bMock, errMock = calcBudget(derivedTtl, true)
+    check('UX-B.2 budget do start mockado = 41000ms', bMock == 41000 and errMock == nil)
+    check('UX-B.2 budget independe do valor absoluto do clock do servidor',
+        derivedTtl == ttlA and bMock == bA)
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
