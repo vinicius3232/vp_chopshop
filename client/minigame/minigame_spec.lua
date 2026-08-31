@@ -618,11 +618,13 @@ local function run()
 
     -- ─── 27) UX-E.1: Hardened Trace Algorithm Simulations (TRACE-1 .. TRACE-8) ───
     -- Helper para simular o motor de trace de html/app.js em Lua
-    local function createTraceEngine(path)
+    local function createTraceEngine(path, traceTolerance)
         local totalSegs = #path - 1
+        local tol = traceTolerance or 55.0
         return {
             path = path,
             totalSegs = totalSegs,
+            traceTolerance = tol,
             currentSegmentIndex = 1, -- 1-indexed em Lua
             currentSegmentT = 0.0,
             lastAcceptedT = 0.0,
@@ -631,11 +633,11 @@ local function run()
             isTracing = false,
             progress = 0,
             completed = false,
-            -- Simula mousedown com validação de proximidade
+            -- Simula mousedown com validação de proximidade dinâmica
             onMouseDown = function(self, mx, my, now)
                 local target = self.lastCutScreenPos
                 local dist = math.sqrt((mx - target.x)^2 + (my - target.y)^2)
-                if dist > 55 then return false end
+                if dist > self.traceTolerance then return false end
                 self.isTracing = true
                 self.lastPointerTimestamp = now
                 return true
@@ -665,7 +667,7 @@ local function run()
                 local projY = p0.y + tClamped * dy
                 local distToSeg = math.sqrt((mx - projX)^2 + (my - projY)^2)
 
-                if distToSeg <= 55 then
+                if distToSeg <= self.traceTolerance then
                     local maxSpeedPxS = 320 * (uxSpeed or 1.0)
                     local maxAdvancePx = maxSpeedPxS * dt + 25
                     local maxAdvanceT = maxAdvancePx / math.max(1, segLen)
@@ -781,6 +783,15 @@ local function run()
     local legitResume = t6:onMouseDown(182, 100, tSim + 1050)
     check('TRACE-6 retomada próxima ao ponto de parada (x=182) é aceita',
         legitResume == true and t6.isTracing == true)
+
+    -- TRACE-6b: perfil com tolerância dinâmica (ex: 75px) aceita retomada a 65px (onde o default 55px rejeita)
+    local t6Custom = createTraceEngine(testPath, 75.0)
+    t6Custom:onMouseDown(100, 100, 1000)
+    for x = 110, 180, 10 do tSim = tSim + 50; t6Custom:onMouseMove(x, 100, tSim, 1.0) end
+    t6Custom:onMouseUp()
+    local customResume = t6Custom:onMouseDown(245, 100, tSim + 1000) -- distância 65px <= 75px
+    check('UX-F traceTolerance dinâmico (75px) aceita retomada a 65px de distância',
+        customResume == true and t6Custom.isTracing == true)
 
     -- TRACE-7: completar segment 1 legitimamente desbloqueia segment 2
     local t7 = createTraceEngine(testPath)

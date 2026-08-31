@@ -206,8 +206,8 @@
           const targetPos = currentPt.lastCutScreenPos || initialP0;
           const distToCut = Math.hypot(e.clientX - targetPos.x, e.clientY - targetPos.y);
 
-          // Proximity allowance: 55px
-          if (distToCut > 55) {
+          // Proximity allowance: dynamic tolerance from profile (default 55px)
+          if (distToCut > traceTolerancePx) {
             return; // Reject resumption from unauthorized arbitrary points on the line
           }
 
