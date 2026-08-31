@@ -77,9 +77,14 @@ function VPChopChopPartCommit(_, _, _) return { ok = true } end  -- overridden p
 _G.FAKE_RESOURCES = { qbx_core = 'started', qbx_vehicles = 'started' }
 _G.FAKE_EXPORTS   = {}
 function GetResourceState(r) return _G.FAKE_RESOURCES[r] or 'missing' end
-_G.exports = setmetatable({}, { __index = function(_, res)
-    return _G.FAKE_EXPORTS[res] or setmetatable({}, { __index = function() return function() end end })
-end })
+_G.exports = setmetatable({}, {
+    __index = function(_, res)
+        return _G.FAKE_EXPORTS[res] or setmetatable({}, { __index = function() return function() end end })
+    end,
+    __call = function(_, exportName, fn)
+        _G.FAKE_EXPORTS[exportName] = fn
+    end,
+})
 _G.VPChopMDT = { GetRealPlate = function(p) return p end }
 _G.VPChopDBReady = true   -- [PR-D] default do harness: DB pronto (specs sobrescrevem p/ testar nil/false)
 function SetEntityAsMissionEntity(_, _, _) end
@@ -125,10 +130,12 @@ _G.Config = {
     },
 }
 local base = arg[1] or '.'
+_G._HARNESS_BASE = base
 dofile(base .. '/shared/registry/tools.lua')          -- [P1.1] VPChopToolRegistry
 dofile(base .. '/shared/registry/parts.lua')          -- [P1.1] VPChopPartRegistry
 dofile(base .. '/shared/part_class.lua')              -- [P2.1] VPChopPartGtaClass
 dofile(base .. '/shared/action_gate.lua')             -- [PR-G] VPChopActionMode{Tyre,Advanced}
+dofile(base .. '/server/partserial.lua')              -- [SERIAL] provê VPChopSerialGen / VPChopAddStolenCarParts
 dofile(base .. '/server/session/chop_session.lua')   -- provê ChopSession (+ sweeper thread [1])
 dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequireRaisedSession
 dofile(base .. '/server/session/base_state.lua')      -- provê VPChopBaseState
@@ -161,6 +168,7 @@ dofile(base .. '/server/session/carcass_ledger_spec.lua')      -- [P0.4]
 dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F/G]
 dofile(base .. '/shared/registry/registry_spec.lua')          -- [SPIKE PR-I]
 dofile(base .. '/bridge/vp_gangs_spec.lua')                   -- [INT-01A]
+dofile(base .. '/server/partserial_spec.lua')                 -- [UX-0 QA findings]
 
 local anyFail = false
 for i = specStart, #threads do
