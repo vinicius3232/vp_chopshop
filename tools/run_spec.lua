@@ -193,6 +193,9 @@ function L(key) return key end
 function VPChopNotify(_, _) end
 function IsControlJustPressed(_, _) return false end
 function IsDisabledControlJustPressed(_, _) return false end
+function IsControlPressed(_, _) return false end
+function IsDisabledControlPressed(_, _) return false end
+function DisableControlAction(_, _, _) end
 function RegisterKeyMapping(_, _, _, _) end
 function RegisterCommand(_, _, _) end
 

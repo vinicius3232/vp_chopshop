@@ -15,21 +15,32 @@ local function raycastFromCamera(dist)
     return hit == 1, endCoords
 end
 
+local function resolveModel(modelName, fallback)
+    local hash = type(modelName) == 'number' and modelName or GetHashKey(modelName)
+    if type(IsModelInCdimage) == 'function' and not IsModelInCdimage(hash) then
+        return type(fallback) == 'number' and fallback or GetHashKey(fallback)
+    end
+    return hash
+end
+
 ---@param modelHash integer|string
 ---@param callbackName string
 ---@return boolean
 local function ghostPlace(modelHash, callbackName)
-    local loaded = lib.requestModel(modelHash, 8000)
+    local hash = resolveModel(modelHash, 'prop_gas_tank_01a')
+    local loaded = lib.requestModel(hash, 8000)
     if not loaded then
         VPChopNotify(L('notify_model_unavailable'), 'error')
-        SetModelAsNoLongerNeeded(modelHash)
+        SetModelAsNoLongerNeeded(hash)
         return false
     end
+    modelHash = hash
     local preview ---@type integer|nil
     local heading = GetEntityHeading(PlayerPedId())
+    VPChopNotify(L('placement_textui'), 'inform')
     lib.showTextUI(L('placement_textui'), {
         position = 'left-center',
-        icon = 'arrows-up-down-left-right',
+        icon     = 'arrows-up-down-left-right',
     })
 
     local function cleanup()
@@ -41,7 +52,11 @@ local function ghostPlace(modelHash, callbackName)
     end
 
     while true do
-        Wait(33)  -- [PERF] 30fps é suficiente p/ ghost de posicionamento; raycast custa caro por frame
+        Wait(0)
+        DisableControlAction(0, 38, true) -- E (INPUT_CONTEXT)
+        DisableControlAction(0, 14, true) -- Scroll Up
+        DisableControlAction(0, 15, true) -- Scroll Down
+
         local hit, pos = raycastFromCamera(14.0)
         if hit and pos then
             if not preview or not DoesEntityExist(preview) then
@@ -54,9 +69,9 @@ local function ghostPlace(modelHash, callbackName)
                 SetEntityHeading(preview, heading)
             end
         end
-        if IsControlPressed(0, 14) then heading = heading + 2.0 end
-        if IsControlPressed(0, 15) then heading = heading - 2.0 end
-        if IsControlJustPressed(0, 38) then
+        if IsControlPressed(0, 14) or IsDisabledControlPressed(0, 14) then heading = heading + 2.0 end
+        if IsControlPressed(0, 15) or IsDisabledControlPressed(0, 15) then heading = heading - 2.0 end
+        if IsControlJustPressed(0, 38) or IsDisabledControlJustPressed(0, 38) then
             if preview and DoesEntityExist(preview) then
                 local c = GetEntityCoords(preview)
                 cleanup()
@@ -76,7 +91,7 @@ local function ghostPlace(modelHash, callbackName)
         -- [FIX M-4] Só cancela o placement com X se o jogador NÃO estiver carregando uma peça
         -- (VPChopCarryingPart está definido em client/main.lua como global).
         -- Sem este guard, o X key era consumido por ambas as loops simultaneamente.
-        if IsControlJustPressed(0, 73) and not VPChopCarryingPart then
+        if (IsControlJustPressed(0, 73) or IsDisabledControlJustPressed(0, 73)) and not VPChopCarryingPart then
             cleanup()
             return false
         end
