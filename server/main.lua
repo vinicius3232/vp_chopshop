@@ -387,7 +387,17 @@ function VPChopChopPartCommit(source, netId, partKey)
     if alarmCfg and alarmCfg.Enable and not AlarmActive[netId] then
         local vehForAlarm = NetworkGetEntityFromNetworkId(netId)
         if vehForAlarm and vehForAlarm ~= 0 and DoesEntityExist(vehForAlarm) then
-            local class  = GetVehicleClass(vehForAlarm)
+            local class = 0
+            if rawget(_G, 'GetVehicleClass') then
+                local ok, vc = pcall(GetVehicleClass, vehForAlarm)
+                if ok and type(vc) == 'number' then class = vc end
+            elseif rawget(_G, 'GetVehicleClassFromName') then
+                local model = GetEntityModel(vehForAlarm)
+                if model and model ~= 0 then
+                    local ok, vc = pcall(GetVehicleClassFromName, model)
+                    if ok and type(vc) == 'number' and vc >= 0 then class = vc end
+                end
+            end
             local chance = (alarmCfg.ChanceByClass and alarmCfg.ChanceByClass[class])
                            or (alarmCfg.DefaultChance or 0.25)
             if math.random() <= chance then

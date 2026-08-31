@@ -109,7 +109,14 @@ RegisterNetEvent('vp_chopshop:createTyreMark', function(netId, coords)
     -- e NUNCA deve ser chamado no servidor. O servidor armazena o modelHash e tenta lookup se qbx_core ativo.
     local modelHash = GetEntityModel(veh)
     if not modelHash or modelHash == 0 then return end
-    local vClass = GetVehicleClass(veh) or 0
+    local vClass = 0
+    if rawget(_G, 'GetVehicleClass') then
+        local ok, vc = pcall(GetVehicleClass, veh)
+        if ok and type(vc) == 'number' then vClass = vc end
+    elseif rawget(_G, 'GetVehicleClassFromName') and modelHash and modelHash ~= 0 then
+        local ok, vc = pcall(GetVehicleClassFromName, modelHash)
+        if ok and type(vc) == 'number' and vc >= 0 then vClass = vc end
+    end
 
     local modelIdentifier = tostring(modelHash)
     if GetResourceState('qbx_core') == 'started' then

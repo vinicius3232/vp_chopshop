@@ -23,8 +23,38 @@ AddEventHandler('playerDropped', function() _raiseCd[source] = nil end)
 
 --- Classe de veículo elegível a macaco (espelha o filtro client de VPChopJackstandRaiseCar).
 local function isJackableClass(veh)
-    local vc = GetVehicleClass(veh)
-    return (vc >= 0 and vc <= 7) or (vc >= 9 and vc <= 12) or (vc >= 17 and vc <= 20)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return false end
+    local model = GetEntityModel(veh)
+
+    -- 1) Se GetVehicleClass existir (mock / client environment)
+    if rawget(_G, 'GetVehicleClass') then
+        local ok, vc = pcall(GetVehicleClass, veh)
+        if ok and type(vc) == 'number' then
+            return (vc >= 0 and vc <= 7) or (vc >= 9 and vc <= 12) or (vc >= 17 and vc <= 20)
+        end
+    end
+
+    -- 2) CFX server native: GetVehicleClassFromName(modelHash)
+    if rawget(_G, 'GetVehicleClassFromName') and model and model ~= 0 then
+        local ok, vc = pcall(GetVehicleClassFromName, model)
+        if ok and type(vc) == 'number' and vc >= 0 then
+            return (vc >= 0 and vc <= 7) or (vc >= 9 and vc <= 12) or (vc >= 17 and vc <= 20)
+        end
+    end
+
+    -- 3) CFX server native: GetVehicleType(veh)
+    if rawget(_G, 'GetVehicleType') then
+        local ok, vtype = pcall(GetVehicleType, veh)
+        if ok and type(vtype) == 'string' then
+            if vtype == 'automobile' or vtype == 'trailer' then
+                return true
+            elseif vtype == 'bike' or vtype == 'boat' or vtype == 'heli' or vtype == 'plane' or vtype == 'submarine' or vtype == 'train' then
+                return false
+            end
+        end
+    end
+
+    return true
 end
 
 --- Distância máxima jogador↔veículo aceite p/ levantar (config client + margem).
