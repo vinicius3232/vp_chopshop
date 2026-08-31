@@ -191,14 +191,30 @@ local function spawnToolProp(propCfg)
         cfg = tCfg and tCfg.HandProp
     end
     if not cfg or not cfg.model then return end
-    local ok = pcall(lib.requestModel, cfg.model, 5000)
-    if not ok then return end
+
+    local model = cfg.model
+    -- Fail-safe: validação de cdimage / validade do model
+    if type(IsModelInCdimage) == 'function' and not IsModelInCdimage(model) then
+        if model == 'prop_tool_screwflt01' then
+            model = 'prop_tool_drill'
+        end
+        if not IsModelInCdimage(model) then
+            return -- Segue a operação sem prop sem travar o requestModel
+        end
+    end
+
+    local ok = pcall(lib.requestModel, model, 3000)
+    if not ok or (type(HasModelLoaded) == 'function' and not HasModelLoaded(model)) then
+        return
+    end
+
     local ped = PlayerPedId()
     local pos = GetEntityCoords(ped)
-    local prop = CreateObject(cfg.model, pos.x, pos.y, pos.z, true, true, false)
+    local prop = CreateObject(model, pos.x, pos.y, pos.z, true, true, false)
     SetEntityAsMissionEntity(prop, true, true)
-    SetModelAsNoLongerNeeded(cfg.model)
+    SetModelAsNoLongerNeeded(model)
     if not prop or prop == 0 then return end
+
     local handBone = GetPedBoneIndex(ped, 28422)
     local off = cfg.offset   or { 0.0, 0.0, 0.0 }
     local rot = cfg.rotation or { 0, 0, 0 }
@@ -816,48 +832,11 @@ do
     -- ─── Ponta RODA: parafusos em círculo na face da roda ─────────────────────
     function VPChopBoltMinigame(vehicle, wheelIndex)
         local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
-        local boneKey   = boneNames[wheelIndex + 1]
-        if not boneKey then return false end
-        local boneId = GetEntityBoneIndexByName(vehicle, boneKey)
-        if not boneId or boneId == -1 then return VPChopBoltMinigameFallback() end
-
-        local c          = boltCfg()
-        local boltCount  = math.max(3, math.floor(tonumber(c.Bolts) or 5))
-        local isLeft     = (boneKey == 'wheel_lf' or boneKey == 'wheel_lr')
-        local sideSign   = isLeft and -1.0 or 1.0
-        local wheelPos   = GetWorldPositionOfEntityBone(vehicle, boneId)
-        local fwd        = GetEntityForwardVector(vehicle)
-        local up         = vector3(0.0, 0.0, 1.0)
-        local rightV     = vector3(fwd.y, -fwd.x, 0.0)
-        local rlen       = #rightV
-        if rlen > 0.0 then rightV = rightV / rlen end
-        local sideDir    = rightV * sideSign
-        local vehHeading = GetEntityHeading(vehicle)
-
-        local radius = 0.135
-        local outOff = 0.04
-        local points = {}
-        for i = 0, boltCount - 1 do
-            local a      = (2.0 * math.pi / boltCount) * i
-            local ca, sa = math.cos(a), math.sin(a)
-            points[#points + 1] = wheelPos + (up * (ca * radius)) + (fwd * (sa * radius)) + (sideDir * outOff)
+        local boneKey   = boneNames[(wheelIndex or 0) + 1] or 'wheel_lf'
+        if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+            return VPChopDismantleMinigame.Start(vehicle, 'wheel', { boneKey = boneKey })
         end
-
-        local r = runBoltSurface({
-            points  = points,
-            outward = sideDir,
-            camPos  = GetOffsetFromEntityInWorldCoords(vehicle, sideSign * 1.6, 0.0, 0.35),
-            lookAt  = wheelPos,
-            baseRot = { x = 90.0, y = 0.0, z = vehHeading + (sideSign * 90.0) },
-            needed  = (tonumber(c.TurnsToLoosen) or 2.0) * 360.0,
-            sens    = tonumber(c.Sensitivity) or 900.0,
-            hoverR  = tonumber(c.HoverRadius)  or 0.06,
-            timeout = tonumber(c.Timeout)      or 30000,
-        })
-
-        if r == 'fallback' then return VPChopBoltMinigameFallback() end
-        if not r then VPChopNotify(L('tyremission_minigame_fail'), 'error'); return false end
-        return true
+        return VPChopMinigameFallback(vehicle, boneKey, 'minigame_core_missing')
     end
 
     -- ─── Ponta PLACA: parafusos nos cantos da placa (frente OU traseira) ──────
@@ -999,15 +978,69 @@ local function findNearestMountedWheel(veh)
     return bestCoords, bestDist, bestIdx, boneNames[idx1], true
 end
 
---- [v1.15 PR-F] Roda o UX visual da remoção de roda (minigame + progress). Retorna
---- true se o jogador concluiu, false se cancelou/falhou.
-local function runWheelUx(veh, wheelIdx)
-    local mg = Config.Jackstand and Config.Jackstand.Minigame and Config.Jackstand.Minigame.Bolt3D
-    if mg and mg.Enable then
-        if not VPChopBoltMinigame(veh, wheelIdx) then return false end
+--- [v1.16 UX-B.2 / UX-C] Helper comum para cálculo de budget de UX clock-safe.
+--- ttlMs = st.expiresAt - st.startedAt (ambos no domínio do servidor).
+--- Retorna (budget, nil) se válido, ou (false, errCode) em fail-closed.
+local function computeUxBudget(ttlMs, minUxMs, reserveMs)
+    if not ttlMs or ttlMs <= 0 then return false, 'budget_invalid' end
+    local reserve = reserveMs or 4000
+    local minUx   = minUxMs or 4000
+    local budget  = ttlMs - reserve
+    if budget < minUx then return false, 'budget_insufficient' end
+    return budget, nil
+end
+
+--- [v1.16 UX-B.2] Executa a experiência física interativa da remoção da roda.
+--- Utiliza VPChopDismantleMinigame com o profile 'wheel' (5 parafusos com giro de mouse),
+--- seguido de uma animação física de retirada do pneu antes do commit na ActionSession.
+---
+--- Clock-domain safety:
+---   ActionSession.Start retorna { startedAt, expiresAt } em clock do FXServer.
+---   O client NÃO pode comparar diretamente expiresAt com GetGameTimer() (clocks distintos).
+---   O chamador deve derivar `ttlMs = expiresAt - startedAt` (mesmo domínio de clock do
+---   servidor), depois passar esse ttlMs aqui. Aqui aplica-se: clientDeadline = now + ttlMs.
+---
+--- @param ttlMs     number|nil   Duração total da ActionSession em ms, derivada server-side.
+---                               nil indica fluxo legacy (sem ActionSession).
+--- @param isAction  boolean|nil  true = modo ActionSession; nil/false = fluxo legacy.
+---
+--- Retorna: true  → minigame completo + animação OK
+---          false → cancelado, falha ou budget insuficiente (caller deve enviar action:cancel)
+---          string (2º val, opcional) → código de erro: 'budget_invalid' / 'budget_insufficient'
+local function runWheelUx(veh, wheelIdx, partKey, ttlMs, isAction)
+    local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
+    local boneKey   = partKey or boneNames[(wheelIdx or 0) + 1] or 'wheel_lf'
+
+    local PULL_ANIM_MS  = 1500
+    local RESERVE_MS    = 4000  -- START transit(1000) + COMPLETE RTT(1000) + jitter(500) + pull(1500)
+    local MIN_UX_MS     = 5000  -- mínimo para uma experiência de 5 parafusos ser viável
+
+    local uxTimeout
+    if isAction then
+        local budget, err = computeUxBudget(ttlMs, MIN_UX_MS, RESERVE_MS)
+        if not budget then return false, err end
+        uxTimeout = budget
+    else
+        -- Fluxo legacy (kill-switch desligado): sem ActionSession, usa timeout padrão.
+        uxTimeout = 45000
     end
+
+    local minigameOk = false
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        minigameOk = VPChopDismantleMinigame.Start(veh, 'wheel', {
+            boneKey = boneKey,
+            uxSpeed = 1.0,
+            timeout = uxTimeout,
+        })
+    else
+        minigameOk = VPChopBoltMinigame(veh, wheelIdx)
+    end
+
+    if not minigameOk then return false end
+
+    -- Animação física de puxar/remover o pneu do cubo da roda (1.5s)
     return lib.progressBar({
-        duration     = 4000,
+        duration     = PULL_ANIM_MS,
         label        = L('tyremission_pulling_tyre'),
         useWhileDead = false, canCancel = true,
         disable      = { move = true, car = true, combat = true },
@@ -1045,11 +1078,19 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
             end
             local actionId = st.actionId
 
-            -- 3) UX
-            local uxOk = runWheelUx(veh, wheelIdx)
+            -- 3) UX — budget derivado do MESMO domínio de clock do servidor.
+            -- NUNCA compare st.expiresAt com GetGameTimer() — são clocks distintos.
+            -- Derive ttlMs = expiresAt - startedAt (ambos do servidor) e aplique
+            -- client-side como: clientDeadline = GetGameTimer() + ttlMs.
+            local ttlMs = (st.expiresAt and st.startedAt)
+                          and (st.expiresAt - st.startedAt) or 0
+            local uxOk, uxErr = runWheelUx(veh, wheelIdx, partKey, ttlMs, true)
             if not uxOk then
                 pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
                 JackstandBusy = false
+                if uxErr == 'budget_insufficient' or uxErr == 'budget_invalid' then
+                    VPChopNotify(L('notify_chop_failed_fmt', uxErr), 'error')
+                end
                 return
             end
 
@@ -1067,7 +1108,7 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
             tyreEntitlementId = res.result and res.result.tyreEntitlementId
         else
             -- Kill-switch: fluxo legacy direto (ActionSession desligada).
-            local uxOk = runWheelUx(veh, wheelIdx)
+            local uxOk = runWheelUx(veh, wheelIdx, partKey)
             if not uxOk then JackstandBusy = false; return end
             local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:chopPart', false, netId, partKey)
             JackstandBusy = false
@@ -1122,7 +1163,7 @@ RegisterNetEvent('vp_chopshop:adv:breakDoor', function(netId, partKey, doorIndex
     advMarkChopped(netId, partKey)
 end)
 
---- [v1.15 PR-G] UX de uma fase avançada (tool prop + alarm dispatch + progress bar).
+--- [v1.15 PR-G] UX de uma fase avançada legada (tool prop + alarm dispatch + progress bar).
 --- Retorna true se o jogador concluiu; false se cancelou/falhou.
 local function runAdvUx(veh, tCfg, label, ms, anim, defaultDict, defaultClip, defaultFlag)
     spawnToolProp(anim and anim.prop)
@@ -1141,10 +1182,161 @@ local function runAdvUx(veh, tCfg, label, ms, anim, defaultDict, defaultClip, de
     return ok == true
 end
 
---- [v1.15 PR-G] Fluxo genérico de uma fase avançada via ActionSession:
---- getActive → action:start → UX → action:complete/cancel. Kill-switch
---- (Config.ActionSession.Enable == false) cai no callback legacy adv:*.
---- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk }
+--- [v1.16 UX-C] Executa a experiência física interativa de desmanche de painel (bonnet, boot, portas).
+--- 1. Spawna a ferramenta de corte na mão do ped (prop_tool_consaw).
+--- 2. Toca a animação nativa contínua de corte do GTA (SawAnim).
+--- 3. Abre a NUI com os pontos contextuais de corte (dobradiças / travas) usando primitive 'cut'.
+--- 4. Conclui os pontos com velocidade escalada pela ferramenta (saw_cheap vs saw_pro).
+--- 5. Toca uma rápida animação física de soltura (800ms).
+--- 6. Retorna true para a ActionSession completar no servidor (a peça é removida pelo commit).
+local function runPanelUx(veh, partKey, ttlMs, isAction, tCfg)
+    local profileName = 'panel_' .. partKey
+    local profile = (VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get(profileName))
+                    or (VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get('panel'))
+
+    local uxTimeout
+    if isAction then
+        local minUx = (profile and profile.minUxMs) or 3500
+        local reserve = (profile and profile.reserveMs) or 3500
+        local budget, err = computeUxBudget(ttlMs, minUx, reserve)
+        if not budget then return false, err end
+        uxTimeout = budget
+    else
+        uxTimeout = 45000
+    end
+
+    -- uxSpeed derivado da ferramenta:
+    -- saw_cheap: speedMult = 1.4 -> uxSpeed = 1.0 / 1.4 = ~0.714 (mais tempo de corte)
+    -- saw_pro:   speedMult = 1.0 -> uxSpeed = 1.0 (baseline)
+    local speedMult = (tCfg and (tCfg.speedMult or tCfg.uxSpeed)) or 1.0
+    local uxSpeed = (speedMult > 0) and (1.0 / speedMult) or 1.0
+
+    local animCfg = (Config.AdvancedChop and Config.AdvancedChop.SawAnim) or {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_consaw',
+            offset   = { 0.05, 0.02, 0.0 },
+            rotation = { 20, 0, -50 },
+        },
+    }
+
+    spawnToolProp(animCfg and animCfg.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
+
+    local minigameOk = false
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        minigameOk = VPChopDismantleMinigame.Start(veh, profileName, {
+            boneKey = partKey,
+            uxSpeed = uxSpeed,
+            timeout = uxTimeout,
+            anim    = animCfg,
+        })
+    else
+        minigameOk = VPChopMinigameFallback(veh, partKey, 'panel_core_missing')
+    end
+
+    destroyToolProp()
+
+    if not minigameOk then return false end
+
+    -- Animação física curta de soltura / puxão do painel cortado (800ms)
+    return lib.progressBar({
+        duration     = 800,
+        label        = L('adv_panel_pulling'),
+        useWhileDead = false, canCancel = true,
+        disable      = { move = true, car = true, combat = true },
+        anim         = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
+    }) == true
+end
+
+--- [v1.16 UX-D] Orienta o ped suavemente para olhar na direção do componente alvo.
+local function orientPedToTarget(ped, targetCoords)
+    if not ped or not targetCoords then return end
+    TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 600)
+    Wait(300)
+end
+
+--- [v1.16 UX-D] Executa a experiência física interativa de desacoplamento do bloco do motor.
+--- 1. Orienta o ped para o cofre do motor.
+--- 2. Spawna a parafusadeira mecânica (prop_tool_drill) na mão.
+--- 3. Inicia animação mecânica contínua (EngineAnim).
+--- 4. Abre a NUI com os 4 calços estruturais usando a primitive 'drill'.
+--- 5. Executa a perfuração/soltura dos 4 fixadores.
+--- 6. Toca uma rápida sequência de desacoplamento físico (800ms).
+--- 7. Retorna true para a ActionSession completar no servidor (o motor é comitado como removido).
+local function runEngineUx(veh, ttlMs, isAction, tCfg)
+    local profile = VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get('engine')
+
+    local uxTimeout
+    if isAction then
+        local minUx = (profile and profile.minUxMs) or 3500
+        local reserve = (profile and profile.reserveMs) or 3500
+        local budget, err = computeUxBudget(ttlMs, minUx, reserve)
+        if not budget then return false, err end
+        uxTimeout = budget
+    else
+        uxTimeout = 45000
+    end
+
+    -- uxSpeed derivado de mechanic_drill:
+    -- speedMult = 0.7 -> uxSpeed = 1.0 / 0.7 = ~1.43 (rápido torque elétrico)
+    local speedMult = (tCfg and (tCfg.speedMult or tCfg.uxSpeed)) or 0.7
+    local uxSpeed = (speedMult > 0) and (1.0 / speedMult) or 1.43
+
+    local animCfg = (Config.AdvancedChop and Config.AdvancedChop.EngineAnim) or {
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_drill',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
+        },
+    }
+
+    local ped = PlayerPedId()
+    local bayPos = GetEntityCoords(veh)
+    local bonnetBone = GetEntityBoneIndexByName(veh, 'bonnet')
+    if bonnetBone ~= -1 then
+        bayPos = GetWorldPositionOfEntityBone(veh, bonnetBone)
+    end
+    orientPedToTarget(ped, bayPos)
+
+    spawnToolProp(animCfg and animCfg.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
+
+    local minigameOk = false
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        minigameOk = VPChopDismantleMinigame.Start(veh, 'engine', {
+            boneKey = 'bonnet',
+            uxSpeed = uxSpeed,
+            timeout = uxTimeout,
+            anim    = animCfg,
+        })
+    else
+        minigameOk = VPChopMinigameFallback(veh, 'adv_engine', 'engine_core_missing')
+    end
+
+    destroyToolProp()
+
+    if not minigameOk then return false end
+
+    -- Animação física curta de desacoplamento do bloco do motor (800ms)
+    return lib.progressBar({
+        duration     = 800,
+        label        = L('adv_engine_pulling'),
+        useWhileDead = false, canCancel = true,
+        disable      = { move = true, car = true, combat = true },
+        anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+    }) == true
+end
+
+--- [v1.15 PR-G / v1.16 UX-C / UX-D] Fluxo genérico de uma fase avançada via ActionSession:
+--- getActive → action:start → UX (física interativa ou progresso) → action:complete/cancel.
+--- Kill-switch (Config.ActionSession.Enable == false) cai no callback legacy adv:*.
+--- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk, usePanelUx, useEngineUx }
 local function doAdvAction(veh, netId, tCfg, opts)
     CreateThread(function()
         local useAction = VPChopActionModeAdvanced()   -- [PR-G] exclusivo: ActionSession OU legacy
@@ -1165,9 +1357,24 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 return
             end
             local actionId = st.actionId
-            if not ux() then
+
+            local uxOk, uxErr
+            if opts.usePanelUx then
+                local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
+                uxOk, uxErr = runPanelUx(veh, opts.action, ttlMs, true, tCfg)
+            elseif opts.useEngineUx then
+                local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
+                uxOk, uxErr = runEngineUx(veh, ttlMs, true, tCfg)
+            else
+                uxOk = ux()
+            end
+
+            if not uxOk then
                 pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
                 JackstandBusy = false
+                if uxErr == 'budget_insufficient' or uxErr == 'budget_invalid' then
+                    VPChopNotify(L('notify_chop_failed_fmt', uxErr), 'error')
+                end
                 return
             end
             local cOk, res = pcall(lib.callback.await, 'vp_chopshop:action:complete', false, actionId)
@@ -1181,7 +1388,15 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 return
             end
         else
-            if not ux() then JackstandBusy = false; return end
+            local uxOk
+            if opts.usePanelUx then
+                uxOk = runPanelUx(veh, opts.action, nil, false, tCfg)
+            elseif opts.useEngineUx then
+                uxOk = runEngineUx(veh, nil, false, tCfg)
+            else
+                uxOk = ux()
+            end
+            if not uxOk then JackstandBusy = false; return end
             local cbOk, result = pcall(lib.callback.await, opts.legacyEvent, false, netId, opts.action)
             JackstandBusy = false
             if not cbOk or not result or not result.ok then
@@ -1201,26 +1416,40 @@ local function doAdvChopPart(veh, netId, partKey)
     if not tName then VPChopNotify(L('notify_no_saw'), 'error'); return end
     JackstandBusy = true
     doAdvAction(veh, netId, tCfg, {
-        action = partKey, legacyEvent = 'vp_chopshop:adv:chopPart',
-        label = L('adv_progress_door'),
-        ms = (Config.AdvancedChop and Config.AdvancedChop.DoorProgressMs) or 6000,
-        anim = Config.AdvancedChop and Config.AdvancedChop.SawAnim,
-        dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1,
-        notifyOk = 'adv_part_removed',
+        action      = partKey,
+        legacyEvent = 'vp_chopshop:adv:chopPart',
+        label       = L('adv_progress_door'),
+        ms          = (Config.AdvancedChop and Config.AdvancedChop.DoorProgressMs) or 6000,
+        anim        = Config.AdvancedChop and Config.AdvancedChop.SawAnim,
+        dict        = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip        = 'cutting_loop',
+        flag        = 1,
+        notifyOk    = 'adv_part_removed',
+        usePanelUx  = true,  -- [UX-C] Body panels usam a desmontagem física interativa
     })
 end
 
 local function doAdvChopEngine(veh, netId)
     if JackstandBusy then return end
-    local _, tCfg = getPlayerTool('drill')
+    -- [UX-D] Pré-requisito defensivo: o capô precisa ter sido removido primeiro
+    if not advIsChopped(netId, 'bonnet') then
+        VPChopNotify(L('err_hood_first') or 'Remova o capô primeiro.', 'error')
+        return
+    end
+    local tName, tCfg = getPlayerTool('drill')
+    if not tName then VPChopNotify(L('notify_no_drill'), 'error'); return end
     JackstandBusy = true
     doAdvAction(veh, netId, tCfg, {
-        action = 'adv_engine', legacyEvent = 'vp_chopshop:adv:chopEngine',
-        label = L('adv_progress_engine'),
-        ms = (Config.AdvancedChop and Config.AdvancedChop.EngineProgressMs) or 8000,
-        anim = Config.AdvancedChop and Config.AdvancedChop.EngineAnim,
-        dict = 'mini@repair', clip = 'fixing_a_player', flag = 1,
-        notifyOk = 'adv_engine_removed',
+        action      = 'adv_engine',
+        legacyEvent = 'vp_chopshop:adv:chopEngine',
+        label       = L('adv_progress_engine'),
+        ms          = (Config.AdvancedChop and Config.AdvancedChop.EngineProgressMs) or 8000,
+        anim        = Config.AdvancedChop and Config.AdvancedChop.EngineAnim,
+        dict        = 'mini@repair',
+        clip        = 'fixing_a_player',
+        flag        = 1,
+        notifyOk    = 'adv_engine_removed',
+        useEngineUx = true,  -- [UX-D] Motor usa o desacoplamento físico com parafusadeira
     })
 end
 
