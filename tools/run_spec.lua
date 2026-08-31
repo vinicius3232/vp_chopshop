@@ -77,9 +77,14 @@ function VPChopChopPartCommit(_, _, _) return { ok = true } end  -- overridden p
 _G.FAKE_RESOURCES = { qbx_core = 'started', qbx_vehicles = 'started' }
 _G.FAKE_EXPORTS   = {}
 function GetResourceState(r) return _G.FAKE_RESOURCES[r] or 'missing' end
-_G.exports = setmetatable({}, { __index = function(_, res)
-    return _G.FAKE_EXPORTS[res] or setmetatable({}, { __index = function() return function() end end })
-end })
+_G.exports = setmetatable({}, {
+    __index = function(_, res)
+        return _G.FAKE_EXPORTS[res] or setmetatable({}, { __index = function() return function() end end })
+    end,
+    __call = function(_, exportName, fn)
+        _G.FAKE_EXPORTS[exportName] = fn
+    end,
+})
 _G.VPChopMDT = { GetRealPlate = function(p) return p end }
 _G.VPChopDBReady = true   -- [PR-D] default do harness: DB pronto (specs sobrescrevem p/ testar nil/false)
 function SetEntityAsMissionEntity(_, _, _) end
@@ -124,11 +129,51 @@ _G.Config = {
         boot     = { steel  = { amount = 3, chance = 1.0 } },
     },
 }
+-- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
+if not _G.vector3 then
+    local v3meta = {
+        __add = function(a, b) return vector3(a.x + b.x, a.y + b.y, a.z + b.z) end,
+        __sub = function(a, b) return vector3(a.x - b.x, a.y - b.y, a.z - b.z) end,
+        __mul = function(a, b)
+            if type(a) == 'number' then return vector3(a * b.x, a * b.y, a * b.z)
+            elseif type(b) == 'number' then return vector3(a.x * b, a.y * b, a.z * b)
+            else return vector3(a.x * b.x, a.y * b.y, a.z * b.z) end
+        end,
+        __div = function(a, b) return vector3(a.x / b, a.y / b, a.z / b) end,
+        __unm = function(a) return vector3(-a.x, -a.y, -a.z) end,
+        __len = function(a) return math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) end,
+        __tostring = function(a) return ('vector3(%s, %s, %s)'):format(a.x, a.y, a.z) end,
+    }
+    function vector3(x, y, z)
+        return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, v3meta)
+    end
+end
+function RegisterNUICallback(_, _) end
+function SendNUIMessage(_) end
+function SetNuiFocus(_, _) end
+function PlaySoundFrontend(_, _, _, _) end
+function RequestAnimDict(_) end
+function HasAnimDictLoaded(_) return true end
+function TaskPlayAnim(_, _, _, _, _, _, _, _, _, _, _) end
+function ClearPedTasks(_) end
+function PlayerPedId() return 1 end
+function IsPedDeadOrDying(_, _) return false end
+function GetCurrentResourceName() return 'vp_chopshop' end
+function L(key) return key end
+function VPChopNotify(_, _) end
+
 local base = arg[1] or '.'
+_G._HARNESS_BASE = base
 dofile(base .. '/shared/registry/tools.lua')          -- [P1.1] VPChopToolRegistry
 dofile(base .. '/shared/registry/parts.lua')          -- [P1.1] VPChopPartRegistry
 dofile(base .. '/shared/part_class.lua')              -- [P2.1] VPChopPartGtaClass
 dofile(base .. '/shared/action_gate.lua')             -- [PR-G] VPChopActionMode{Tyre,Advanced}
+dofile(base .. '/server/partserial.lua')              -- [SERIAL] provê VPChopSerialGen / VPChopAddStolenCarParts
+dofile(base .. '/client/minigame/camera.lua')        -- [UX-A] CameraController
+dofile(base .. '/client/minigame/projection.lua')    -- [UX-A] ProjectionHelper
+dofile(base .. '/client/minigame/profiles.lua')      -- [UX-A] Profiles Registry
+dofile(base .. '/client/minigame/fallback.lua')      -- [UX-A] Minigame Fallback
+dofile(base .. '/client/minigame/core.lua')          -- [UX-A] VPChopDismantleMinigame Core
 dofile(base .. '/server/session/chop_session.lua')   -- provê ChopSession (+ sweeper thread [1])
 dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequireRaisedSession
 dofile(base .. '/server/session/base_state.lua')      -- provê VPChopBaseState
@@ -161,6 +206,8 @@ dofile(base .. '/server/session/carcass_ledger_spec.lua')      -- [P0.4]
 dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F/G]
 dofile(base .. '/shared/registry/registry_spec.lua')          -- [SPIKE PR-I]
 dofile(base .. '/bridge/vp_gangs_spec.lua')                   -- [INT-01A]
+dofile(base .. '/server/partserial_spec.lua')                 -- [UX-0 QA findings]
+dofile(base .. '/client/minigame/minigame_spec.lua')         -- [UX-A Interaction Core]
 
 local anyFail = false
 for i = specStart, #threads do

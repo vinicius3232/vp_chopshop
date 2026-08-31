@@ -1,12 +1,16 @@
 -- Cole em ox_inventory/data/items.lua (ajuste peso/stack ao gosto).
+-- Itens oficiais do vp_chopshop (v1.16).
 
-['chopshop_lift'] = {
-    label = 'Elevador de desmanche',
-    weight = 8000,
+-- ─── Equipamentos e Estações Físicas ──────────────────────────────────────────
+
+['chopshop_jackstand'] = {
+    label = 'Macaco hidráulico',
+    weight = 3500,
     stack = false,
     close = true,
     consume = 0,
-    client = { export = 'vp_chopshop.useLiftItem' },
+    client = { export = 'vp_chopshop.useJackstandItem' },
+    description = 'Macaco hidráulico para elevar veículos e permitir o desmanche.',
 },
 
 ['chopshop_bench'] = {
@@ -16,40 +20,137 @@
     close = true,
     consume = 0,
     client = { export = 'vp_chopshop.useBenchItem' },
+    description = 'Bancada para processamento de peças e adulteração de placas/séries.',
 },
 
-['chopshop_jackstand'] = {
-    label = 'Macaco hidráulico',
-    weight = 3500,
+['chopshop_welder'] = {
+    label = 'Máquina de solda',
+    weight = 8000,
     stack = false,
     close = true,
     consume = 0,
-    client = { export = 'vp_chopshop.useJackstandItem' },
+    client = { export = 'vp_chopshop.useWelderItem' },
+    description = 'Máquina de solda portátil para corte de carcaças no desmanche avançado.',
 },
 
--- Opcional: abastecer elevador (nome em Config.Items.fuel)
-['petrol_barrel'] = {
-    label = 'Barril de combustível',
-    weight = 12000,
+-- ─── Ferramentas Consumíveis ──────────────────────────────────────────────────
+
+['saw_cheap'] = {
+    label = 'Serra amadora',
+    weight = 1200,
+    stack = false,
+    close = true,
+    description = 'Serra de corte rápido com baixa durabilidade (2 usos).',
+},
+
+['saw_pro'] = {
+    label = 'Serra profissional',
+    weight = 1500,
+    stack = false,
+    close = true,
+    description = 'Serra profissional de alta durabilidade para corte de chapas e portas (6 usos).',
+},
+
+['mechanic_drill'] = {
+    label = 'Parafusadeira mecânica',
+    weight = 1400,
+    stack = false,
+    close = true,
+    description = 'Ferramenta elétrica para desparafusar fixadores e motor (10 usos).',
+},
+
+['screwdriver'] = {
+    label = 'Chave de fenda',
+    weight = 300,
     stack = true,
     close = true,
+    description = 'Chave de fenda para remoção de placas de veículos e desarme de alarmes.',
 },
 
--- Materiais de exemplo (crie os que faltarem conforme shared/config.lua)
-['aluminium'] = { label = 'Alumínio', weight = 60, stack = true, close = true },
-['metalscrap'] = { label = 'Sucata', weight = 40, stack = true, close = true },
-['steel'] = { label = 'Aço', weight = 80, stack = true, close = true },
-['rubber'] = { label = 'Borracha', weight = 30, stack = true, close = true },
-['copper'] = { label = 'Cobre', weight = 70, stack = true, close = true },
-['plastic'] = { label = 'Plástico', weight = 25, stack = true, close = true },
-['glass'] = { label = 'Vidro', weight = 20, stack = true, close = true },
+-- ─── Peças e Commodities Automotivas ──────────────────────────────────────────
 
--- Sistema de heat / fence / progressão (v1.3.0+)
+['chopshop_tyre'] = {
+    label = 'Pneu desmanchado',
+    weight = 5000,
+    stack = false,
+    close = true,
+    description = 'Pneu retirado de veículo desmanchado. Requer logística física de transporte.',
+},
+
+['car_parts'] = {
+    label = 'Peças de carro',
+    weight = 2000,
+    stack = true,
+    close = true,
+    description = 'Peças automotivas com procedência e número de série forense.',
+},
+
+-- ─── Materiais Básicos ────────────────────────────────────────────────────────
+
+['aluminum'] = {
+    label = 'Alumínio',
+    weight = 60,
+    stack = true,
+    close = true,
+    description = 'Lingote ou retalho de alumínio para forja e receitas.',
+},
+
+['metalscrap'] = {
+    label = 'Sucata',
+    weight = 40,
+    stack = true,
+    close = true,
+    description = 'Sucata de metal reciclada do desmanche.',
+},
+
+['steel'] = {
+    label = 'Aço',
+    weight = 80,
+    stack = true,
+    close = true,
+    description = 'Placas e barras de aço estrutural.',
+},
+
+['rubber'] = {
+    label = 'Borracha',
+    weight = 30,
+    stack = true,
+    close = true,
+    description = 'Borracha vulcanizada proveniente de pneus e mangueiras.',
+},
+
+['copper'] = {
+    label = 'Cobre',
+    weight = 70,
+    stack = true,
+    close = true,
+    description = 'Fios e tubos de cobre recuperados de componentes elétricos.',
+},
+
+['plastic'] = {
+    label = 'Plástico',
+    weight = 25,
+    stack = true,
+    close = true,
+    description = 'Polímeros plásticos de para-choques e acabamentos.',
+},
+
+['glass'] = {
+    label = 'Vidro',
+    weight = 20,
+    stack = true,
+    close = true,
+    description = 'Vidros automotivos temperados.',
+},
+
+-- ─── Progressão, Fence e Forense ──────────────────────────────────────────────
+
 ['fence_referral'] = {
     label = 'Indicação do Receptador',
     weight = 10,
     stack = false,
     close = true,
+    description = 'Contato e indicação para negociação com a rede de receptadores.',
 },
 
 ['vin_kit'] = {
@@ -57,24 +158,17 @@
     weight = 300,
     stack = true,
     close = true,
+    description = 'Kit químico e punções para remarcação de numeração de chassi.',
 },
 
--- [FASE1 placas] Placa física arrancada de um veículo alvo com a chave de fenda.
--- Insumo de venda no fence. Sem client.export — não é "usável", só carregada/vendida.
--- Metadata definida em runtime pelo servidor: { plate, model, takenAt }.
--- stack=false porque cada placa é única (metadata distinta por instância).
 ['stolen_plate'] = {
     label = 'Placa Roubada',
     weight = 800,
     stack = false,
     close = true,
+    description = 'Placa física furtada de um veículo alvo.',
 },
 
--- [FASE2 placas] Placa FALSA forjada na bancada a partir de uma `stolen_plate`.
--- Item USÁVEL: ao usar, o export client aplica o disfarce no veículo do/à frente do jogador.
--- consume = 1 → a placa some do inventário quando aplicada (server consome via metadata).
--- Metadata definida em runtime na forja: { plate } (a placa exibida = a da placa roubada).
--- stack = false porque cada placa carrega metadata distinta (placa de origem).
 ['fake_plate'] = {
     label = 'Placa Falsa',
     weight = 600,
@@ -82,12 +176,9 @@
     close = true,
     consume = 1,
     client = { export = 'vp_chopshop.useFakePlateItem' },
+    description = 'Placa clonada para disfarce temporário de veículos.',
 },
 
--- [SERIAL v1.13.0] Scanner de peças — ferramenta da POLÍCIA para inspecionar as car_parts
--- de um suspeito (ox_target global em jogadores). Sem client.export: não é "usável", basta
--- carregar. O scan normal vê roubada/riscada e a forjada parece legal; a PERÍCIA (carregar
--- também o forensic_kit do resource `evidences`) flagra a forjada cruzando a série no DB.
 ['parts_scanner'] = {
     label = 'Scanner de Peças',
     weight = 800,
@@ -96,13 +187,10 @@
     description = 'Lê o número de série das peças de carro de um suspeito. Com kit forense, revela séries forjadas.',
 },
 
--- [EVIDENCE v1.11.0] Luvas — counterplay forense. POSSUIR no inventário bloqueia digitais
--- nas ações de crime (checado server-side em bridge/evidence.lua via InvCount). NÃO é
--- consumível: basta carregar. DNA (sangue) ainda pode cair mesmo com luvas (Config.Evidence).
 ['gloves'] = {
     label = 'Luvas',
     weight = 100,
     stack = true,
     close = true,
-    description = 'Luvas — evitam deixar digitais em cena de crime.',
+    description = 'Luvas — evitam deixar impressões digitais em cenas de crime.',
 },

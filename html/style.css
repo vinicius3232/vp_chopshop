@@ -1,0 +1,252 @@
+:root {
+  --bg-dark: rgba(15, 17, 23, 0.85);
+  --border-color: rgba(255, 255, 255, 0.12);
+  --accent-amber: #f59e0b;
+  --accent-cyan: #06b6d4;
+  --accent-green: #10b981;
+  --accent-red: #ef4444;
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  background: transparent !important;
+  overflow: hidden;
+  font-family: var(--font-family);
+  color: var(--text-main);
+}
+
+#dismantle-app {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: auto;
+  transition: opacity 0.25s ease;
+}
+
+#dismantle-app.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ─── Header HUD ─────────────────────────────────────────────────────────── */
+.hud-header {
+  margin: 28px auto 0;
+  padding: 12px 24px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  text-align: center;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  max-width: 480px;
+  width: 90%;
+  pointer-events: none;
+}
+
+.hud-title-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.hud-badge {
+  background: var(--accent-amber);
+  color: #111827;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+#hud-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-main);
+  text-transform: uppercase;
+}
+
+#hud-help {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* ─── Hotspot Container & Elements ───────────────────────────────────────── */
+#hotspot-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hotspot {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+
+.hotspot:hover {
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.hotspot.active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+.hotspot.completed {
+  cursor: default;
+  transform: translate(-50%, -50%) scale(0.95);
+  pointer-events: none;
+}
+
+.hotspot-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.hotspot-bg-circle {
+  fill: rgba(17, 24, 39, 0.75);
+  stroke: rgba(255, 255, 255, 0.15);
+  stroke-width: 3;
+}
+
+.hotspot-progress-circle {
+  fill: none;
+  stroke: var(--accent-cyan);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 163.36; /* 2 * PI * 26 */
+  stroke-dashoffset: 163.36;
+  transition: stroke-dashoffset 0.05s linear, stroke 0.2s ease;
+}
+
+.hotspot.completed .hotspot-progress-circle {
+  stroke: var(--accent-green);
+  stroke-dashoffset: 0 !important;
+}
+
+.hotspot-inner {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.hotspot-icon {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.hotspot-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.hotspot.completed .hotspot-icon {
+  color: var(--accent-green);
+}
+
+/* ─── Footer HUD ─────────────────────────────────────────────────────────── */
+.hud-footer {
+  margin: 0 auto 32px;
+  padding: 14px 24px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  max-width: 420px;
+  width: 90%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  pointer-events: auto;
+}
+
+.progress-bar-container {
+  flex: 1;
+}
+
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+  border-radius: 3px;
+  transition: width 0.15s ease;
+}
+
+.hud-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key-tag {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-main);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.key-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}

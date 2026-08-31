@@ -105,12 +105,24 @@ RegisterNetEvent('vp_chopshop:createTyreMark', function(netId, coords)
     end
 
     -- [TYRE] RESOLVER O MODELO SERVER-SIDE (trust-no-client). GetEntityModel funciona
-    -- server-side neste build (entidades OneSync). GetDisplayNameFromVehicleModel e
-    -- GetVehicleClass também são acessíveis server-side para entidades de rede.
+    -- server-side neste build (entidades OneSync). GetDisplayNameFromVehicleModel é CLIENT-ONLY
+    -- e NUNCA deve ser chamado no servidor. O servidor armazena o modelHash e tenta lookup se qbx_core ativo.
     local modelHash = GetEntityModel(veh)
     if not modelHash or modelHash == 0 then return end
-    local displayName = GetDisplayNameFromVehicleModel(modelHash) or 'CARMODEL'
-    local vClass      = GetVehicleClass(veh) or 0
+    local vClass = GetVehicleClass(veh) or 0
+
+    local modelIdentifier = tostring(modelHash)
+    if GetResourceState('qbx_core') == 'started' then
+        local ok, vehs = pcall(function() return exports.qbx_core:GetVehiclesByName() or exports.qbx_core:GetVehicles() end)
+        if ok and type(vehs) == 'table' then
+            for modelName, data in pairs(vehs) do
+                if (data and (data.hash == modelHash or joaat(modelName) == modelHash)) or joaat(tostring(modelName)) == modelHash then
+                    modelIdentifier = string.upper(tostring(data.model or modelName))
+                    break
+                end
+            end
+        end
+    end
 
     nextMarkId = nextMarkId + 1
     local markId = nextMarkId
@@ -119,7 +131,7 @@ RegisterNetEvent('vp_chopshop:createTyreMark', function(netId, coords)
     TyreMarks[markId] = {
         coords    = vector3(coords.x + 0.0, coords.y + 0.0, coords.z + 0.0),
         model     = modelHash,
-        modelName = displayName,
+        modelName = modelIdentifier,
         class     = vClass,
         createdAt = now,
         expires   = now + ttl,
@@ -180,8 +192,9 @@ lib.callback.register('vp_chopshop:examineTyreMark', function(src, markId)
         VPChopMDT.ReportActivity('', src, ('tyre_marks_model:%s'):format(mark.modelName))
     end)
 
-    -- Retorno: display name (o CLIENT traduz com GetLabelText) + nome da classe pt-BR.
+    -- Retorno: model hash + display/identifier + nome da classe pt-BR.
     return {
+        model     = mark.model,
         modelName = mark.modelName,
         class     = className(mark.class),
     }
