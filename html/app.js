@@ -32,7 +32,7 @@
     pt.completed = true;
     pt.progress = 100;
     pt.progressCircle.style.strokeDashoffset = 0;
-    pt.element.classList.remove('active', 'cutting');
+    pt.element.classList.remove('active', 'cutting', 'drilling');
     pt.element.classList.add('completed');
     pt.icon.innerHTML = '&#10003;'; // Checkmark
     postNui('minigamePointComplete', { id: pt.id });
@@ -108,7 +108,12 @@
       el.style.left = `${(pt.x || 0.5) * 100}%`;
       el.style.top = `${(pt.y || 0.5) * 100}%`;
 
-      const iconLabel = primitive === 'cut' ? '&#9986;' : `${index + 1}`;
+      let iconLabel = `${index + 1}`;
+      if (primitive === 'cut') {
+        iconLabel = '&#9986;';
+      } else if (primitive === 'drill') {
+        iconLabel = '&#9881;';
+      }
 
       el.innerHTML = `
         <svg class="hotspot-svg" viewBox="0 0 64 64">
@@ -117,7 +122,7 @@
         </svg>
         <div class="hotspot-inner">
           <span class="hotspot-icon">${iconLabel}</span>
-          <span class="hotspot-label">${pt.label || (primitive === 'cut' ? 'CORTE' : 'PARAFUSO')}</span>
+          <span class="hotspot-label">${pt.label || (primitive === 'cut' ? 'CORTE' : (primitive === 'drill' ? 'CALÇO' : 'PARAFUSO'))}</span>
         </div>
       `;
 
@@ -134,6 +139,9 @@
 
         if (primitive === 'cut' || primitive === 'hold') {
           el.classList.add('cutting');
+          startCuttingLoop(ptId);
+        } else if (primitive === 'drill') {
+          el.classList.add('drilling');
           startCuttingLoop(ptId);
         }
 
@@ -248,7 +256,7 @@
   window.addEventListener('mouseup', () => {
     if (activeHotspotId && pointsMap[activeHotspotId]) {
       const pt = pointsMap[activeHotspotId];
-      pt.element.classList.remove('active', 'cutting');
+      pt.element.classList.remove('active', 'cutting', 'drilling');
     }
     stopCuttingLoop();
     activeHotspotId = null;

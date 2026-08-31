@@ -186,6 +186,16 @@ html, body {
   100% { transform: translate(-50%, -50%) scale(1.14) rotate(1deg); }
 }
 
+.hotspot.drilling {
+  animation: drillVibrate 0.08s infinite alternate ease-in-out;
+}
+
+@keyframes drillVibrate {
+  0% { transform: translate(-50%, -50%) scale(1.10) translate(-1px, 1px); }
+  50% { transform: translate(-50%, -50%) scale(1.13) translate(1px, -1px); }
+  100% { transform: translate(-50%, -50%) scale(1.11) translate(-1px, -1px); }
+}
+
 .hotspot.primitive-cut .hotspot-progress-circle {
   stroke: var(--accent-amber);
 }
@@ -193,6 +203,15 @@ html, body {
 .hotspot.primitive-cut.cutting .hotspot-progress-circle {
   stroke: #fbbf24;
   filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.8));
+}
+
+.hotspot.primitive-drill .hotspot-progress-circle {
+  stroke: var(--accent-cyan);
+}
+
+.hotspot.primitive-drill.drilling .hotspot-progress-circle {
+  stroke: #38bdf8;
+  filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.85));
 }
 
 .hotspot.completed .hotspot-icon {

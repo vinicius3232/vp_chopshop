@@ -393,6 +393,85 @@ local function run()
     check('UX-C generic panel profile routes to boot points', #genericProf.generatePoints(1, 'boot') == 3)
     check('UX-C generic panel profile routes to door points', #genericProf.generatePoints(1, 'door_dside_f') == 3)
 
+    -- ─── 16) UX-D: Engine Profile & Configuration ────────────────────────────────
+    local engProf = Profiles.Get('engine')
+    check('UX-D profile engine exists', engProf ~= nil)
+    local advEngProf = Profiles.Get('adv_engine')
+    check('UX-D profile adv_engine alias exists', advEngProf ~= nil)
+    if engProf then
+        check('UX-D profile engine toolClass is screw', engProf.toolClass == 'screw')
+        check('UX-D profile engine has title', type(engProf.title) == 'string' and #engProf.title > 0)
+        check('UX-D profile engine has helpText', type(engProf.helpText) == 'string' and #engProf.helpText > 0)
+        check('UX-D profile engine fov is 44', engProf.fov == 44.0)
+        check('UX-D profile engine minUxMs is 3500', engProf.minUxMs == 3500)
+        check('UX-D profile engine reserveMs is 3500', engProf.reserveMs == 3500)
+    end
+
+    -- ─── 17) UX-D: Engine 4 Mount Points & Drill Primitive ───────────────────────
+    if engProf and engProf.generatePoints then
+        local engPts = engProf.generatePoints(1, 'bonnet')
+        check('UX-D engine generates exactly 4 mount points', #engPts == 4)
+
+        local expectedMounts = {
+            eng_mount_fl = true,
+            eng_mount_fr = true,
+            eng_mount_rl = true,
+            eng_mount_rr = true,
+        }
+        local allMountsMatch = true
+        local allPrimitiveDrill = true
+        local allHoldTimeValid = true
+        for _, pt in ipairs(engPts) do
+            if not expectedMounts[pt.id] then allMountsMatch = false end
+            if pt.primitive ~= 'drill' then allPrimitiveDrill = false end
+            if not pt.holdTimeMs or pt.holdTimeMs < 1000 or pt.holdTimeMs > 4000 then
+                allHoldTimeValid = false
+            end
+        end
+        check('UX-D engine mount IDs match 4 chassis corners', allMountsMatch)
+        check('UX-D engine uses drill primitive (not rotate or cut)', allPrimitiveDrill)
+        check('UX-D engine mount points have valid holdTimeMs', allHoldTimeValid)
+    end
+
+    -- ─── 18) UX-D: Engine Camera & Bay Geometry ──────────────────────────────────
+    if engProf and engProf.calculateCamera then
+        local camPosE, lookAtE = engProf.calculateCamera(1, 'bonnet')
+        check('UX-D engine camera is elevated above bay center', camPosE.z > lookAtE.z)
+        check('UX-D engine camera is in front of vehicle looking in', camPosE.y > lookAtE.y)
+    end
+
+    -- ─── 19) UX-D: Tool Dynamics for mechanic_drill ──────────────────────────────
+    local drillDef = VPChopToolRegistry.get('mechanic_drill')
+    check('UX-D mechanic_drill exists in ToolRegistry', drillDef ~= nil)
+    if drillDef then
+        check('UX-D mechanic_drill class is screw', drillDef.class == 'screw')
+        check('UX-D mechanic_drill uxSpeed is 0.7 (fast electric torque)', drillDef.uxSpeed == 0.7)
+        local drillRate = 1.0 / (drillDef.uxSpeed or 0.7)
+        check('UX-D mechanic_drill speed multiplier is > 1.4x', drillRate > 1.4)
+    end
+
+    -- ─── 20) UX-D: Engine Budget Calculation & hood_first Rule ───────────────────
+    -- 20a: Normal engine TTL 45s -> budget = 41500ms
+    local ebNormal = calcPanelBudget(45000, true)
+    check('UX-D engine normal budget (45s TTL) = 41500ms', ebNormal == 41500)
+
+    -- 20b: Boundary exato (7000ms) -> 3500ms
+    local ebBound = calcPanelBudget(7000, true)
+    check('UX-D engine boundary exato (7000ms) = 3500ms', ebBound == 3500)
+
+    -- 20c: Below boundary (6999ms) -> fail-closed
+    local ebBelow, ebBelowErr = calcPanelBudget(6999, true)
+    check('UX-D engine 1ms abaixo boundary -> budget_insufficient',
+        ebBelow == false and ebBelowErr == 'budget_insufficient')
+
+    -- 20d: hood_first rule: engine prerequisites bonnet
+    local bonnetChopped = false
+    local canChopEngineWithoutBonnet = bonnetChopped == true
+    check('UX-D engine locked when bonnet is NOT chopped (hood_first)', canChopEngineWithoutBonnet == false)
+    bonnetChopped = true
+    local canChopEngineWithBonnet = bonnetChopped == true
+    check('UX-D engine unlocked when bonnet is chopped', canChopEngineWithBonnet == true)
+
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 

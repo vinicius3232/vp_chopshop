@@ -1235,10 +1235,92 @@ local function runPanelUx(veh, partKey, ttlMs, isAction, tCfg)
     }) == true
 end
 
---- [v1.15 PR-G / v1.16 UX-C] Fluxo genérico de uma fase avançada via ActionSession:
+--- [v1.16 UX-D] Orienta o ped suavemente para olhar na direção do componente alvo.
+local function orientPedToTarget(ped, targetCoords)
+    if not ped or not targetCoords then return end
+    TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 600)
+    Wait(300)
+end
+
+--- [v1.16 UX-D] Executa a experiência física interativa de desacoplamento do bloco do motor.
+--- 1. Orienta o ped para o cofre do motor.
+--- 2. Spawna a parafusadeira mecânica (prop_tool_screwflt01) na mão.
+--- 3. Inicia animação mecânica contínua (EngineAnim).
+--- 4. Abre a NUI com os 4 calços estruturais usando a primitive 'drill'.
+--- 5. Executa a perfuração/soltura dos 4 fixadores.
+--- 6. Toca uma rápida sequência de desacoplamento físico (800ms).
+--- 7. Retorna true para a ActionSession completar no servidor (o motor é comitado como removido).
+local function runEngineUx(veh, ttlMs, isAction, tCfg)
+    local profile = VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get('engine')
+
+    local uxTimeout
+    if isAction then
+        local minUx = (profile and profile.minUxMs) or 3500
+        local reserve = (profile and profile.reserveMs) or 3500
+        local budget, err = computeUxBudget(ttlMs, minUx, reserve)
+        if not budget then return false, err end
+        uxTimeout = budget
+    else
+        uxTimeout = 45000
+    end
+
+    -- uxSpeed derivado de mechanic_drill:
+    -- speedMult = 0.7 -> uxSpeed = 1.0 / 0.7 = ~1.43 (rápido torque elétrico)
+    local speedMult = (tCfg and (tCfg.speedMult or tCfg.uxSpeed)) or 0.7
+    local uxSpeed = (speedMult > 0) and (1.0 / speedMult) or 1.43
+
+    local animCfg = (Config.AdvancedChop and Config.AdvancedChop.EngineAnim) or {
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_screwflt01',
+            offset   = { 0.10, 0.03, 0.0 },
+            rotation = { 10, 0, -30 },
+        },
+    }
+
+    local ped = PlayerPedId()
+    local bayPos = GetEntityCoords(veh)
+    local bonnetBone = GetEntityBoneIndexByName(veh, 'bonnet')
+    if bonnetBone ~= -1 then
+        bayPos = GetWorldPositionOfEntityBone(veh, bonnetBone)
+    end
+    orientPedToTarget(ped, bayPos)
+
+    spawnToolProp(animCfg and animCfg.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
+
+    local minigameOk = false
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        minigameOk = VPChopDismantleMinigame.Start(veh, 'engine', {
+            boneKey = 'bonnet',
+            uxSpeed = uxSpeed,
+            timeout = uxTimeout,
+            anim    = animCfg,
+        })
+    else
+        minigameOk = VPChopMinigameFallback(veh, 'adv_engine', 'engine_core_missing')
+    end
+
+    destroyToolProp()
+
+    if not minigameOk then return false end
+
+    -- Animação física curta de desacoplamento do bloco do motor (800ms)
+    return lib.progressBar({
+        duration     = 800,
+        label        = L('adv_engine_pulling'),
+        useWhileDead = false, canCancel = true,
+        disable      = { move = true, car = true, combat = true },
+        anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+    }) == true
+end
+
+--- [v1.15 PR-G / v1.16 UX-C / UX-D] Fluxo genérico de uma fase avançada via ActionSession:
 --- getActive → action:start → UX (física interativa ou progresso) → action:complete/cancel.
 --- Kill-switch (Config.ActionSession.Enable == false) cai no callback legacy adv:*.
---- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk, usePanelUx }
+--- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk, usePanelUx, useEngineUx }
 local function doAdvAction(veh, netId, tCfg, opts)
     CreateThread(function()
         local useAction = VPChopActionModeAdvanced()   -- [PR-G] exclusivo: ActionSession OU legacy
@@ -1264,6 +1346,9 @@ local function doAdvAction(veh, netId, tCfg, opts)
             if opts.usePanelUx then
                 local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
                 uxOk, uxErr = runPanelUx(veh, opts.action, ttlMs, true, tCfg)
+            elseif opts.useEngineUx then
+                local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
+                uxOk, uxErr = runEngineUx(veh, ttlMs, true, tCfg)
             else
                 uxOk = ux()
             end
@@ -1290,6 +1375,8 @@ local function doAdvAction(veh, netId, tCfg, opts)
             local uxOk
             if opts.usePanelUx then
                 uxOk = runPanelUx(veh, opts.action, nil, false, tCfg)
+            elseif opts.useEngineUx then
+                uxOk = runEngineUx(veh, nil, false, tCfg)
             else
                 uxOk = ux()
             end
@@ -1328,15 +1415,25 @@ end
 
 local function doAdvChopEngine(veh, netId)
     if JackstandBusy then return end
-    local _, tCfg = getPlayerTool('drill')
+    -- [UX-D] Pré-requisito defensivo: o capô precisa ter sido removido primeiro
+    if not advIsChopped(netId, 'bonnet') then
+        VPChopNotify(L('err_hood_first') or 'Remova o capô primeiro.', 'error')
+        return
+    end
+    local tName, tCfg = getPlayerTool('drill')
+    if not tName then VPChopNotify(L('notify_no_drill'), 'error'); return end
     JackstandBusy = true
     doAdvAction(veh, netId, tCfg, {
-        action = 'adv_engine', legacyEvent = 'vp_chopshop:adv:chopEngine',
-        label = L('adv_progress_engine'),
-        ms = (Config.AdvancedChop and Config.AdvancedChop.EngineProgressMs) or 8000,
-        anim = Config.AdvancedChop and Config.AdvancedChop.EngineAnim,
-        dict = 'mini@repair', clip = 'fixing_a_player', flag = 1,
-        notifyOk = 'adv_engine_removed',
+        action      = 'adv_engine',
+        legacyEvent = 'vp_chopshop:adv:chopEngine',
+        label       = L('adv_progress_engine'),
+        ms          = (Config.AdvancedChop and Config.AdvancedChop.EngineProgressMs) or 8000,
+        anim        = Config.AdvancedChop and Config.AdvancedChop.EngineAnim,
+        dict        = 'mini@repair',
+        clip        = 'fixing_a_player',
+        flag        = 1,
+        notifyOk    = 'adv_engine_removed',
+        useEngineUx = true,  -- [UX-D] Motor usa o desacoplamento físico com parafusadeira
     })
 end
 
