@@ -27,7 +27,10 @@ local function ghostPlace(modelHash, callbackName)
     end
     local preview ---@type integer|nil
     local heading = GetEntityHeading(PlayerPedId())
-    lib.showTextUI(L('placement_textui'))
+    lib.showTextUI(L('placement_textui'), {
+        position = 'left-center',
+        icon = 'arrows-up-down-left-right',
+    })
 
     local function cleanup()
         lib.hideTextUI()
