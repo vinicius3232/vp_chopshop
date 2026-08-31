@@ -962,20 +962,41 @@ local function findNearestMountedWheel(veh)
     return bestCoords, bestDist, bestIdx, boneNames[idx1], true
 end
 
---- [v1.16 UX-B] Executa a experiência física interativa da remoção da roda.
+--- [v1.16 UX-B / UX-B.1] Executa a experiência física interativa da remoção da roda.
 --- Utiliza VPChopDismantleMinigame com o profile 'wheel' (5 parafusos com giro de mouse),
 --- seguido de uma animação física de retirada do pneu antes do commit na ActionSession.
+---
+--- @param expiresAtMs number|nil  Tempo (GetGameTimer) em que a ActionSession expira.
+---   Quando fornecido, o timeout do minigame é limitado pelo budget restante menos
+---   uma margem de segurança (animação + round-trip COMPLETE + jitter).
+---   INVARIANTE: o minigame DEVE cancelar antes da ActionSession expirar.
+---
 --- Retorna true se o jogador concluiu 100% dos parafusos; false se cancelou ou falhou.
-local function runWheelUx(veh, wheelIdx, partKey)
+local function runWheelUx(veh, wheelIdx, partKey, expiresAtMs)
     local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
     local boneKey   = partKey or boneNames[(wheelIdx or 0) + 1] or 'wheel_lf'
+
+    -- Margem de segurança: animação (1500ms) + round-trip COMPLETE + jitter/latência.
+    -- O minigame deve encerrar dentro desta janela antes do expiresAt do servidor.
+    local PULL_ANIM_MS  = 1500
+    local COMPLETE_RTT  = 500   -- round-trip callback estimate
+    local JITTER_MS     = 500   -- rede + jitter FiveM
+    local RESERVE_MS    = PULL_ANIM_MS + COMPLETE_RTT + JITTER_MS   -- 2500ms total
+
+    local uxTimeout
+    if expiresAtMs and expiresAtMs > 0 then
+        local remaining = expiresAtMs - GetGameTimer()
+        uxTimeout = math.max(1000, remaining - RESERVE_MS)
+    else
+        uxTimeout = 45000   -- fallback sem expiresAt
+    end
 
     local minigameOk = false
     if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
         minigameOk = VPChopDismantleMinigame.Start(veh, 'wheel', {
             boneKey = boneKey,
             uxSpeed = 1.0,
-            timeout = 45000,
+            timeout = uxTimeout,
         })
     else
         minigameOk = VPChopBoltMinigame(veh, wheelIdx)
@@ -985,7 +1006,7 @@ local function runWheelUx(veh, wheelIdx, partKey)
 
     -- Animação física de puxar/remover o pneu do cubo da roda (1.5s)
     return lib.progressBar({
-        duration     = 1500,
+        duration     = PULL_ANIM_MS,
         label        = L('tyremission_pulling_tyre'),
         useWhileDead = false, canCancel = true,
         disable      = { move = true, car = true, combat = true },
@@ -1023,8 +1044,8 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
             end
             local actionId = st.actionId
 
-            -- 3) UX
-            local uxOk = runWheelUx(veh, wheelIdx, partKey)
+            -- 3) UX — timeout limitado ao budget restante da ActionSession (UX-B.1)
+            local uxOk = runWheelUx(veh, wheelIdx, partKey, st.expiresAt)
             if not uxOk then
                 pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
                 JackstandBusy = false
