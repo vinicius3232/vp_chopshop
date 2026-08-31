@@ -127,6 +127,8 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, partKey, 2)
 
     -- [H4 FIX] breakDoor filtrado por proximidade.
+    local partDef = VPChopPartRegistry.get(partKey)
+    local doorIndex = (partDef and partDef.gtaIndex) or 0
     local ent = NetworkGetEntityFromNetworkId(netId)
     local bpos = (ent and ent ~= 0 and DoesEntityExist(ent)) and GetEntityCoords(ent) or nil
     for _, pid in ipairs(GetPlayers()) do
@@ -137,7 +139,7 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
                 local pped = GetPlayerPed(pidN)
                 send = pped and pped ~= 0 and #(GetEntityCoords(pped) - bpos) < 150.0
             end
-            if send then TriggerClientEvent('vp_chopshop:adv:breakDoor', pidN, netId, partKey, partDef.index) end
+            if send then TriggerClientEvent('vp_chopshop:adv:breakDoor', pidN, netId, partKey, doorIndex) end
         end
     end
     return { ok = true }

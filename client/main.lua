@@ -205,21 +205,24 @@ local function spawnToolProp(propCfg)
         end
     end
 
-    local ok = pcall(lib.requestModel, model, 3000)
-    if not ok or (type(HasModelLoaded) == 'function' and not HasModelLoaded(model)) then
-        return
+    local hash = type(model) == 'number' and model or GetHashKey(model)
+    RequestModel(hash)
+    local t0 = GetGameTimer()
+    while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 2000) do
+        Wait(20)
     end
+    if not HasModelLoaded(hash) then return end
 
     local ped = PlayerPedId()
     local pos = GetEntityCoords(ped)
-    local prop = CreateObject(model, pos.x, pos.y, pos.z, true, true, false)
+    local prop = CreateObject(hash, pos.x, pos.y, pos.z, true, true, false)
     SetEntityAsMissionEntity(prop, true, true)
-    SetModelAsNoLongerNeeded(model)
+    SetModelAsNoLongerNeeded(hash)
     if not prop or prop == 0 then return end
 
     local handBone = GetPedBoneIndex(ped, 28422)
-    local off = cfg.offset   or { 0.0, 0.0, 0.0 }
-    local rot = cfg.rotation or { 0, 0, 0 }
+    local off = cfg.offset   or { 0.05, 0.02, 0.0 }
+    local rot = cfg.rotation or { 20, 0, -50 }
     AttachEntityToEntity(prop, ped, handBone,
         off[1], off[2], off[3], rot[1], rot[2], rot[3],
         true, true, false, true, 1, true)
