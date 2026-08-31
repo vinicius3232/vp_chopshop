@@ -120,7 +120,9 @@ end
 Profiles.list.carcass = {
     title = 'CORTE ESTRUTURAL DA CARCAÇA',
     helpText = 'Segure e acompanhe com o maçarico o traçado das linhas estruturais do chassi',
-    toolClass = 'cut',
+    toolClass = nil, -- [UX-E.1] Carcaça não exige ferramenta de inventário (gate é a máquina de solda física)
+    traceSpeed = 1.0,
+    traceTolerance = 55.0,
     fov = 48.0,
     minUxMs = 6000,
     reserveMs = 4000,

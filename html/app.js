@@ -124,6 +124,7 @@
         el.style.width = '100vw';
         el.style.height = '100vh';
         el.style.transform = 'none';
+        el.style.pointerEvents = 'auto';
 
         el.innerHTML = `
           <svg class="trace-svg" style="position:absolute;width:100%;height:100%;top:0;left:0;pointer-events:none;overflow:visible;">
@@ -166,12 +167,33 @@
 
         updateSvgPath(pt.path);
 
-        startNode.addEventListener('mousedown', (e) => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const initialP0 = { x: (pt.path[0].x || 0.5) * w, y: (pt.path[0].y || 0.5) * h };
+
+        el.addEventListener('mousedown', (e) => {
           if (e.button !== 0) return;
-          if (pointsMap[ptId] && pointsMap[ptId].completed) return;
+          const currentPt = pointsMap[ptId];
+          if (!currentPt || currentPt.completed) return;
+
+          // Proximity validation: must click near starting point or near last accepted cut position
+          const targetPos = currentPt.lastCutScreenPos || initialP0;
+          const distToCut = Math.hypot(e.clientX - targetPos.x, e.clientY - targetPos.y);
+
+          // Proximity allowance: 55px
+          if (distToCut > 55) {
+            return; // Reject resumption from unauthorized arbitrary points on the line
+          }
+
           activeHotspotId = ptId;
+          currentPt.isTracing = true;
+          currentPt.lastPointerTimestamp = Date.now();
           el.classList.add('active', 'tracing');
-          if (torchTip) torchTip.classList.remove('hidden');
+          if (torchTip) {
+            torchTip.style.left = `${targetPos.x}px`;
+            torchTip.style.top = `${targetPos.y}px`;
+            torchTip.classList.remove('hidden');
+          }
           e.preventDefault();
         });
 
@@ -189,6 +211,10 @@
           updateSvgPath: updateSvgPath,
           currentSegmentIndex: 0,
           currentSegmentT: 0,
+          lastAcceptedT: 0,
+          lastCutScreenPos: initialP0,
+          lastPointerTimestamp: Date.now(),
+          isTracing: false,
           progress: 0,
           completed: false,
           visible: true
@@ -332,8 +358,12 @@
         }
       }
       prevMouseAngle = currentAngle;
-    } else if (pt.primitive === 'trace' && pt.path && pt.path.length >= 2) {
-      // ─── Structural Trace / Polyline Cutter with Anti-Cheese ─────────────
+    } else if (pt.primitive === 'trace' && pt.isTracing && pt.path && pt.path.length >= 2) {
+      // ─── Structural Trace: Anti-Cheese & Intra-Segment Hardening ─────────
+      const now = Date.now();
+      const dt = Math.min(0.1, Math.max(0.001, (now - (pt.lastPointerTimestamp || now)) / 1000.0));
+      pt.lastPointerTimestamp = now;
+
       const w = window.innerWidth;
       const h = window.innerHeight;
       const segIdx = pt.currentSegmentIndex || 0;
@@ -345,52 +375,72 @@
 
         const dx = p1.x - p0.x;
         const dy = p1.y - p0.y;
-        const segLenSq = dx * dx + dy * dy;
+        const segLenPx = Math.hypot(dx, dy);
 
-        if (segLenSq > 1) {
-          // Orthogonal projection of cursor onto segment line
-          const u = ((e.clientX - p0.x) * dx + (e.clientY - p0.y) * dy) / segLenSq;
+        if (segLenPx > 1) {
+          // Orthogonal projection of cursor onto active segment
+          const u = ((e.clientX - p0.x) * dx + (e.clientY - p0.y) * dy) / (segLenPx * segLenPx);
           const tClamped = Math.max(0, Math.min(1, u));
 
           const projX = p0.x + tClamped * dx;
           const projY = p0.y + tClamped * dy;
           const distToSeg = Math.hypot(e.clientX - projX, e.clientY - projY);
 
-          const tolerancePx = 60; // Safe tolerance margin
+          const tolerancePx = 55;
           if (distToSeg <= tolerancePx) {
-            // Anti-cheese: forward motion only with smooth advance
-            if (tClamped >= (pt.currentSegmentT || 0)) {
-              pt.currentSegmentT = tClamped;
+            // Speed limit anti-cheese: cap max advance per frame based on time and trace speed
+            const maxSpeedPxS = 320 * (uxSpeedMult || 1.0);
+            const maxAdvancePx = maxSpeedPxS * dt + 25; // 25px frame tolerance
+            const maxAdvanceT = maxAdvancePx / Math.max(1, segLenPx);
 
-              // Move torch spark tip to projected cut location
+            // 1. Anti-Jump / Teleport rejection
+            if (tClamped > (pt.currentSegmentT || 0) + maxAdvanceT) {
+              return; // Teleport jump rejected!
+            }
+
+            // 2. Backward motion: update visual spark tip position but do not increase progress
+            if (tClamped < (pt.currentSegmentT || 0)) {
               if (pt.torchTip) {
                 pt.torchTip.style.left = `${projX}px`;
                 pt.torchTip.style.top = `${projY}px`;
               }
-
-              // Advance to next segment if reached the end of current segment
-              if (tClamped >= 0.95) {
-                if (segIdx + 1 < totalSegs) {
-                  pt.currentSegmentIndex = segIdx + 1;
-                  pt.currentSegmentT = 0;
-                } else {
-                  pt.progress = 100;
-                  completePoint(pt);
-                  return;
-                }
-              }
-
-              // Overall trace progress
-              const totalProgressRatio = (pt.currentSegmentIndex + (pt.currentSegmentT || 0)) / totalSegs;
-              pt.progress = Math.min(100, Math.floor(totalProgressRatio * 100));
-
-              if (pt.fgPath) {
-                const totalLen = pt.fgPath.getTotalLength ? pt.fgPath.getTotalLength() : 500;
-                pt.fgPath.style.strokeDashoffset = totalLen * (1 - pt.progress / 100);
-              }
-
-              updateOverallProgress();
+              return;
             }
+
+            // 3. Legitimate forward movement
+            pt.currentSegmentT = tClamped;
+            pt.lastAcceptedT = tClamped;
+            pt.lastCutScreenPos = { x: projX, y: projY };
+
+            if (pt.torchTip) {
+              pt.torchTip.style.left = `${projX}px`;
+              pt.torchTip.style.top = `${projY}px`;
+            }
+
+            // Segment transition: must reach >= 0.98 and be physically near next vertex
+            const distToEnd = Math.hypot(e.clientX - p1.x, e.clientY - p1.y);
+            if (tClamped >= 0.98 && distToEnd <= 40) {
+              if (segIdx + 1 < totalSegs) {
+                pt.currentSegmentIndex = segIdx + 1;
+                pt.currentSegmentT = 0.0;
+                pt.lastAcceptedT = 0.0;
+              } else {
+                pt.progress = 100;
+                completePoint(pt);
+                return;
+              }
+            }
+
+            // Overall trace progress computation
+            const totalProgressRatio = (pt.currentSegmentIndex + (pt.currentSegmentT || 0)) / totalSegs;
+            pt.progress = Math.min(100, Math.floor(totalProgressRatio * 100));
+
+            if (pt.fgPath) {
+              const totalLen = pt.fgPath.getTotalLength ? pt.fgPath.getTotalLength() : 500;
+              pt.fgPath.style.strokeDashoffset = totalLen * (1 - pt.progress / 100);
+            }
+
+            updateOverallProgress();
           }
         }
       }
@@ -400,6 +450,7 @@
   window.addEventListener('mouseup', () => {
     if (activeHotspotId && pointsMap[activeHotspotId]) {
       const pt = pointsMap[activeHotspotId];
+      pt.isTracing = false;
       pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing');
       if (pt.torchTip) pt.torchTip.classList.add('hidden');
     }

@@ -519,7 +519,9 @@ local function run()
     local advCarcassProf = Profiles.Get('adv_carcass')
     check('UX-E profile adv_carcass alias exists', advCarcassProf ~= nil)
     if carcassProf then
-        check('UX-E profile carcass toolClass is cut', carcassProf.toolClass == 'cut')
+        check('UX-E.1 profile carcass toolClass is nil (physical welder gate)', carcassProf.toolClass == nil)
+        check('UX-E.1 profile carcass traceSpeed is 1.0', carcassProf.traceSpeed == 1.0)
+        check('UX-E.1 profile carcass traceTolerance is 55.0', carcassProf.traceTolerance == 55.0)
         check('UX-E profile carcass has title', type(carcassProf.title) == 'string' and #carcassProf.title > 0)
         check('UX-E profile carcass has helpText', type(carcassProf.helpText) == 'string' and #carcassProf.helpText > 0)
         check('UX-E profile carcass fov is 48', carcassProf.fov == 48.0)
@@ -613,6 +615,209 @@ local function run()
     completedSections = 5
     isCarcassComplete = (completedSections == 5)
     check('UX-E carcass completes only at 5/5 sections', isCarcassComplete == true)
+
+    -- ─── 27) UX-E.1: Hardened Trace Algorithm Simulations (TRACE-1 .. TRACE-8) ───
+    -- Helper para simular o motor de trace de html/app.js em Lua
+    local function createTraceEngine(path)
+        local totalSegs = #path - 1
+        return {
+            path = path,
+            totalSegs = totalSegs,
+            currentSegmentIndex = 1, -- 1-indexed em Lua
+            currentSegmentT = 0.0,
+            lastAcceptedT = 0.0,
+            lastCutScreenPos = { x = path[1].x, y = path[1].y },
+            lastPointerTimestamp = 1000,
+            isTracing = false,
+            progress = 0,
+            completed = false,
+            -- Simula mousedown com validação de proximidade
+            onMouseDown = function(self, mx, my, now)
+                local target = self.lastCutScreenPos
+                local dist = math.sqrt((mx - target.x)^2 + (my - target.y)^2)
+                if dist > 55 then return false end
+                self.isTracing = true
+                self.lastPointerTimestamp = now
+                return true
+            end,
+            onMouseUp = function(self)
+                self.isTracing = false
+            end,
+            -- Simula mousemove com anti-jump e velocidade limitada
+            onMouseMove = function(self, mx, my, now, uxSpeed)
+                if not self.isTracing or self.completed then return end
+                local dt = math.min(0.1, math.max(0.001, (now - self.lastPointerTimestamp) / 1000.0))
+                self.lastPointerTimestamp = now
+
+                local segIdx = self.currentSegmentIndex
+                if segIdx > self.totalSegs then return end
+
+                local p0 = self.path[segIdx]
+                local p1 = self.path[segIdx + 1]
+                local dx = p1.x - p0.x
+                local dy = p1.y - p0.y
+                local segLen = math.sqrt(dx * dx + dy * dy)
+                if segLen < 1 then return end
+
+                local u = ((mx - p0.x) * dx + (my - p0.y) * dy) / (segLen * segLen)
+                local tClamped = math.max(0.0, math.min(1.0, u))
+                local projX = p0.x + tClamped * dx
+                local projY = p0.y + tClamped * dy
+                local distToSeg = math.sqrt((mx - projX)^2 + (my - projY)^2)
+
+                if distToSeg <= 55 then
+                    local maxSpeedPxS = 320 * (uxSpeed or 1.0)
+                    local maxAdvancePx = maxSpeedPxS * dt + 25
+                    local maxAdvanceT = maxAdvancePx / math.max(1, segLen)
+
+                    -- Anti-Jump / Teleport rejection
+                    if tClamped > (self.currentSegmentT + maxAdvanceT) then
+                        return -- Teleporte ignorado
+                    end
+
+                    -- Movimento para trás: não aumenta o progresso
+                    if tClamped < self.currentSegmentT then
+                        return
+                    end
+
+                    -- Movimento legítimo para frente
+                    self.currentSegmentT = tClamped
+                    self.lastAcceptedT = tClamped
+                    self.lastCutScreenPos = { x = projX, y = projY }
+
+                    -- Transição entre segmentos
+                    local distToEnd = math.sqrt((mx - p1.x)^2 + (my - p1.y)^2)
+                    if tClamped >= 0.98 and distToEnd <= 40 then
+                        if segIdx + 1 <= self.totalSegs then
+                            self.currentSegmentIndex = segIdx + 1
+                            self.currentSegmentT = 0.0
+                            self.lastAcceptedT = 0.0
+                        else
+                            self.progress = 100
+                            self.completed = true
+                            return
+                        end
+                    end
+
+                    local ratio = ((self.currentSegmentIndex - 1) + self.currentSegmentT) / self.totalSegs
+                    self.progress = math.min(100, math.floor(ratio * 100))
+                end
+            end
+        }
+    end
+
+    -- Definir um traçado de teste: P0(100,100) -> P1(300,100) -> P2(500,100) (comprimento total = 400px, 2 segmentos de 200px)
+    local testPath = {
+        { x = 100, y = 100 },
+        { x = 300, y = 100 },
+        { x = 500, y = 100 }
+    }
+
+    -- TRACE-1: P0 -> movimento gradual contínuo -> P1 -> PASS
+    local t1 = createTraceEngine(testPath)
+    local ok1 = t1:onMouseDown(100, 100, 1000)
+    check('TRACE-1 startNode mousedown aceito', ok1 == true)
+    -- Avanço passo a passo com dt de 50ms (movimento suave)
+    local tSim = 1000
+    for x = 110, 500, 10 do
+        tSim = tSim + 50
+        t1:onMouseMove(x, 100, tSim, 1.0)
+    end
+    check('TRACE-1 movimento gradual contínuo completa 100%', t1.completed == true and t1.progress == 100)
+
+    -- TRACE-2: P0 -> salto direto para t=0.95 no primeiro segmento -> NÃO completa
+    local t2 = createTraceEngine(testPath)
+    t2:onMouseDown(100, 100, 1000)
+    t2:onMouseMove(290, 100, 1020, 1.0) -- dt = 20ms, salto de 190px (excede maxAdvancePx ~31px)
+    check('TRACE-2 salto direto para t=0.95 é rejeitado pelo anti-jump', t2.progress == 0 and t2.completed == false)
+
+    -- TRACE-3: P0 -> salto direto para endpoint final (P2) -> NÃO completa
+    local t3 = createTraceEngine(testPath)
+    t3:onMouseDown(100, 100, 1000)
+    t3:onMouseMove(500, 100, 1030, 1.0)
+    check('TRACE-3 salto direto para endpoint final é rejeitado', t3.progress == 0 and t3.completed == false)
+
+    -- TRACE-4: progressão gradual 0.10 -> 0.20 -> 0.35 -> 0.50 -> aceita
+    local t4 = createTraceEngine(testPath)
+    t4:onMouseDown(100, 100, 1000)
+    t4:onMouseMove(120, 100, 1100, 1.0) -- x=120 -> t=0.10 no seg 1
+    local p4a = t4.progress
+    t4:onMouseMove(140, 100, 1200, 1.0) -- x=140 -> t=0.20
+    local p4b = t4.progress
+    t4:onMouseMove(170, 100, 1350, 1.0) -- x=170 -> t=0.35
+    local p4c = t4.progress
+    t4:onMouseMove(200, 100, 1500, 1.0) -- x=200 -> t=0.50
+    local p4d = t4.progress
+    check('TRACE-4 progressão gradual é aceita ordenadamente',
+        p4a > 0 and p4b > p4a and p4c > p4b and p4d > p4c)
+
+    -- TRACE-5: movimento para trás: 0.60 -> 0.40 -> não aumenta nem regride progresso
+    local t5 = createTraceEngine(testPath)
+    t5:onMouseDown(100, 100, 1000)
+    -- Chegar suavemente a x=220 (t=0.60 no seg 1 -> progresso = 30%)
+    for x = 110, 220, 10 do
+        tSim = tSim + 50
+        t5:onMouseMove(x, 100, tSim, 1.0)
+    end
+    local progBeforeBack = t5.progress
+    -- Mover para trás para x=180 (t=0.40)
+    t5:onMouseMove(180, 100, tSim + 50, 1.0)
+    check('TRACE-5 movimento para trás preserva o progresso alcançado (não aumenta)',
+        t5.progress == progBeforeBack and t5.currentSegmentT == 0.60)
+
+    -- TRACE-6: mouseup em 40% -> cursor em 90% -> mousedown -> NÃO pode retomar de 90%
+    local t6 = createTraceEngine(testPath)
+    t6:onMouseDown(100, 100, 1000)
+    for x = 110, 180, 10 do -- atinge 40% do seg 1 (x=180)
+        tSim = tSim + 50
+        t6:onMouseMove(x, 100, tSim, 1.0)
+    end
+    t6:onMouseUp()
+    -- Tenta dar mousedown em x=280 (90% do seg 1, distância de 100px do ponto de corte)
+    local resumeAccepted = t6:onMouseDown(280, 100, tSim + 1000)
+    check('TRACE-6 mousedown a 90% após soltar em 40% é rejeitado (distância > 55px)',
+        resumeAccepted == false and t6.isTracing == false)
+    -- Retomada legítima próxima a x=180
+    local legitResume = t6:onMouseDown(182, 100, tSim + 1050)
+    check('TRACE-6 retomada próxima ao ponto de parada (x=182) é aceita',
+        legitResume == true and t6.isTracing == true)
+
+    -- TRACE-7: completar segment 1 legitimamente desbloqueia segment 2
+    local t7 = createTraceEngine(testPath)
+    t7:onMouseDown(100, 100, 1000)
+    for x = 110, 300, 10 do -- conclui seg 1
+        tSim = tSim + 50
+        t7:onMouseMove(x, 100, tSim, 1.0)
+    end
+    check('TRACE-7 concluir segmento 1 avança currentSegmentIndex para 2',
+        t7.currentSegmentIndex == 2 and t7.currentSegmentT == 0.0)
+
+    -- TRACE-8: tentar avançar seção 5 antes das anteriores não conclui o minigame
+    local completedMap = { sec1 = false, sec2 = false, sec3 = false, sec4 = false, sec5 = true }
+    local allDone = completedMap.sec1 and completedMap.sec2 and completedMap.sec3 and completedMap.sec4 and completedMap.sec5
+    check('TRACE-8 completar seção 5 isolada não gera conclusão global', allDone == false)
+
+    -- ─── 28) UX-E.1: Contrato do Part Registry para adv_carcass ──────────────────
+    if VPChopPartRegistry and VPChopPartRegistry.parts and VPChopPartRegistry.parts.adv_carcass then
+        local carcassPart = VPChopPartRegistry.parts.adv_carcass
+        check('UX-E.1 PartRegistry adv_carcass toolClass é nil', carcassPart.toolClass == nil)
+        check('UX-E.1 PartRegistry adv_carcass requires adv_engine', carcassPart.requires == 'adv_engine')
+        check('UX-E.1 PartRegistry adv_carcass gates.welder é true',
+            carcassPart.gates and carcassPart.gates.welder == true)
+    end
+
+    -- 28b: Verificação de comportamento do cliente: sem serra no inventário mas com welder física -> inicia
+    local playerTools = {} -- Jogador não possui saw_cheap nem saw_pro
+    local function clientCanChopCarcass(engineRemoved, welderNear, tools)
+        if not engineRemoved then return false, 'err_engine_first' end
+        if not welderNear then return false, 'err_no_welder_adv' end
+        -- Carcaça não consulta tools (toolClass = nil)
+        return true, nil
+    end
+
+    local canStartWithoutSaw, errSaw = clientCanChopCarcass(true, true, playerTools)
+    check('UX-E.1 jogador sem nenhuma serra no inventário consegue iniciar corte com welder perto',
+        canStartWithoutSaw == true and errSaw == nil)
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end

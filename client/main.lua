@@ -1335,7 +1335,7 @@ local function runEngineUx(veh, ttlMs, isAction, tCfg)
     }) == true
 end
 
---- [v1.16 UX-E] Executa a experiência física interativa de corte estrutural da carcaça do chassi.
+--- [v1.16 UX-E / UX-E.1] Executa a experiência física interativa de corte estrutural da carcaça do chassi.
 --- 1. Orienta o ped para a lateral/estrutura do veículo.
 --- 2. Spawna o maçarico de solda/corte (prop_weld_torch) na mão.
 --- 3. Inicia animação contínua de solda/corte GTA (CarcassAnim).
@@ -1343,7 +1343,7 @@ end
 --- 5. O jogador acompanha e corta fisicamente as 5 seções do chassi.
 --- 6. Toca uma rápida sequência de separação/desprendimento estrutural (800ms).
 --- 7. Retorna true para a ActionSession completar no servidor (o chassi entra no estado terminal).
-local function runCarcassUx(veh, ttlMs, isAction, tCfg)
+local function runCarcassUx(veh, ttlMs, isAction)
     local profile = VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get('carcass')
 
     local uxTimeout
@@ -1357,8 +1357,8 @@ local function runCarcassUx(veh, ttlMs, isAction, tCfg)
         uxTimeout = 45000
     end
 
-    local speedMult = (tCfg and (tCfg.speedMult or tCfg.uxSpeed)) or 1.0
-    local uxSpeed = (speedMult > 0) and (1.0 / speedMult) or 1.0
+    -- [UX-E.1] Velocidade de corte da carcaça é independente de serra de inventário
+    local uxSpeed = (profile and profile.traceSpeed) or 1.0
 
     local animCfg = (Config.AdvancedChop and Config.AdvancedChop.CarcassAnim) or {
         dict = 'amb@world_human_welding@male@base',
@@ -1375,7 +1375,7 @@ local function runCarcassUx(veh, ttlMs, isAction, tCfg)
     orientPedToTarget(ped, GetEntityCoords(veh))
 
     spawnToolProp(animCfg and animCfg.prop)
-    VPChopCheckAlarmAndDispatch(veh, tCfg)
+    VPChopCheckAlarmAndDispatch(veh, nil)
 
     local minigameOk = false
     if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
@@ -1437,7 +1437,7 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 uxOk, uxErr = runEngineUx(veh, ttlMs, true, tCfg)
             elseif opts.useCarcassUx then
                 local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
-                uxOk, uxErr = runCarcassUx(veh, ttlMs, true, tCfg)
+                uxOk, uxErr = runCarcassUx(veh, ttlMs, true)
             else
                 uxOk = ux()
             end
@@ -1467,7 +1467,7 @@ local function doAdvAction(veh, netId, tCfg, opts)
             elseif opts.useEngineUx then
                 uxOk = runEngineUx(veh, nil, false, tCfg)
             elseif opts.useCarcassUx then
-                uxOk = runCarcassUx(veh, nil, false, tCfg)
+                uxOk = runCarcassUx(veh, nil, false)
             else
                 uxOk = ux()
             end
@@ -1539,10 +1539,9 @@ local function doAdvChopCarcass(veh, netId)
     if not hasNearbyWelder(GetEntityCoords(veh), welderRadius) then
         VPChopNotify(L('err_no_welder_adv'), 'error'); return
     end
-    local tName, tCfg = getPlayerTool()
-    if not tName then VPChopNotify(L('notify_no_saw'), 'error'); return end
+    -- [UX-E.1] Carcass tem toolClass = nil. Não exige serra no inventário. O gate é a máquina de solda física no chão.
     JackstandBusy = true
-    doAdvAction(veh, netId, tCfg, {
+    doAdvAction(veh, netId, nil, {
         action       = 'adv_carcass',
         legacyEvent  = 'vp_chopshop:adv:chopCarcass',
         label        = L('adv_progress_carcass'),
