@@ -2029,33 +2029,16 @@ function VPChopJackstandLowerCar(veh)
 end
 
 exports('useBenchItem', function(_, _)
-    CreateThread(function()
-        VPChopStartBenchPlacement()
-    end)
-    return true
+    VPChopStartBenchPlacement()
 end)
 
 exports('useWelderItem', function(_, _)
-    CreateThread(function()
-        VPChopStartWelderPlacement()
-    end)
-    return true
+    VPChopStartWelderPlacement()
 end)
 
 exports('useJackstandItem', function(_, _)
-    CreateThread(function()
-        VPChopJackstandRaiseCar()
-    end)
-    return true
+    VPChopJackstandRaiseCar()
 end)
-
-RegisterCommand('colocarsolda', function()
-    VPChopStartWelderPlacement()
-end, false)
-
-RegisterCommand('colocarbancada', function()
-    VPChopStartBenchPlacement()
-end, false)
 
 -- ─── Tyre carry: keybind [G] para abrir menu de opções ──────────────────────
 
