@@ -1716,14 +1716,11 @@ local function addRaisedCarTargets(veh)
         end
 
         -- Fase 3: motor (requer capô removido)
-        -- Usa o bone 'bonnet' como âncora — engine fica sob o capô;
-        -- 'engine' não existe em todos os rigs GTA V.
         targets[#targets + 1] = {
             name     = 'vp_adv_chop_engine_' .. tostring(veh),
             label    = L('adv_target_engine'),
             icon     = 'fa-solid fa-gear',
-            bones    = { 'bonnet' },
-            distance = 2.5,
+            distance = 3.0,
             canInteract = function()
                 return JackstandData[veh] ~= nil
                     and not JackstandBusy
