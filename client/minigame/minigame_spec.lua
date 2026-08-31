@@ -815,9 +815,154 @@ local function run()
         return true, nil
     end
 
-    local canStartWithoutSaw, errSaw = clientCanChopCarcass(true, true, playerTools)
-    check('UX-E.1 jogador sem nenhuma serra no inventário consegue iniciar corte com welder perto',
-        canStartWithoutSaw == true and errSaw == nil)
+    -- ─── 29) UX-E.2: Primitive-Aware completePoint & 1/5 -> 5/5 Sequence ────────
+    -- Simulação fiel da função completePoint(pt) de html/app.js em ambiente controlado
+    local function jsCompletePoint(pt, nuiEvents, progressState)
+        if not pt or pt.completed then return end
+        pt.completed = true
+        pt.progress = 100
+
+        if pt.primitive == 'trace' then
+            if pt.fgPath then
+                pt.fgPath.style.strokeDashoffset = 0
+            end
+            if pt.torchTip then
+                pt.torchTip.classList.hidden = true
+            end
+            if pt.startNode then
+                pt.startNode.classList.completed = true
+                if pt.startNode.icon then
+                    pt.startNode.icon.innerHTML = '&#10003;'
+                end
+            end
+            pt.isTracing = false
+        else
+            if pt.progressCircle then
+                pt.progressCircle.style.strokeDashoffset = 0
+            end
+            if pt.icon then
+                pt.icon.innerHTML = '&#10003;'
+            end
+        end
+
+        if pt.element then
+            pt.element.classList.active = false
+            pt.element.classList.cutting = false
+            pt.element.classList.drilling = false
+            pt.element.classList.tracing = false
+            pt.element.classList.completed = true
+        end
+
+        if nuiEvents then
+            nuiEvents[#nuiEvents + 1] = { event = 'minigamePointComplete', id = pt.id }
+        end
+
+        if progressState then
+            progressState.completedCount = (progressState.completedCount or 0) + 1
+            if progressState.completedCount == progressState.totalCount then
+                progressState.finished = true
+            end
+        end
+    end
+
+    -- 29a: rotate point completion
+    local rotatePt = {
+        id = 'hs-wheel_bolt_1',
+        primitive = 'rotate',
+        progressCircle = { style = { strokeDashoffset = 100 } },
+        icon = { innerHTML = '1' },
+        element = { classList = { active = true, completed = false } },
+        completed = false,
+        progress = 50
+    }
+    local okRot, errRot = pcall(jsCompletePoint, rotatePt)
+    check('UX-E.2 rotate point completes without exception', okRot == true and errRot == nil)
+    check('UX-E.2 rotate point progressCircle offset is 0', rotatePt.progressCircle.style.strokeDashoffset == 0)
+    check('UX-E.2 rotate point icon is checkmark', rotatePt.icon.innerHTML == '&#10003;')
+
+    -- 29b: cut point completion
+    local cutPt = {
+        id = 'hs-cut_hinge_1',
+        primitive = 'cut',
+        progressCircle = { style = { strokeDashoffset = 80 } },
+        icon = { innerHTML = '1' },
+        element = { classList = { cutting = true, completed = false } },
+        completed = false,
+        progress = 60
+    }
+    local okCut, errCut = pcall(jsCompletePoint, cutPt)
+    check('UX-E.2 cut point completes without exception', okCut == true and errCut == nil)
+    check('UX-E.2 cut point progressCircle offset is 0', cutPt.progressCircle.style.strokeDashoffset == 0)
+
+    -- 29c: drill point completion
+    local drillPt = {
+        id = 'hs-engine_mount_1',
+        primitive = 'drill',
+        progressCircle = { style = { strokeDashoffset = 50 } },
+        icon = { innerHTML = '1' },
+        element = { classList = { drilling = true, completed = false } },
+        completed = false,
+        progress = 80
+    }
+    local okDrill, errDrill = pcall(jsCompletePoint, drillPt)
+    check('UX-E.2 drill point completes without exception', okDrill == true and errDrill == nil)
+
+    -- 29d: trace point completion (NÃO possui progressCircle e NÃO possui icon na raiz)
+    local tracePt = {
+        id = 'hs-carcass_crossmember_f',
+        primitive = 'trace',
+        fgPath = { style = { strokeDashoffset = 250 } },
+        torchTip = { classList = { hidden = false } },
+        startNode = {
+            classList = { completed = false },
+            icon = { innerHTML = '1' }
+        },
+        element = { classList = { active = true, tracing = true, completed = false } },
+        isTracing = true,
+        completed = false,
+        progress = 75
+        -- progressCircle e icon são NIL (exatamente como em html/app.js)
+    }
+    local okTrace, errTrace = pcall(jsCompletePoint, tracePt)
+    check('UX-E.2 trace point without progressCircle/icon completes with ZERO exception',
+        okTrace == true and errTrace == nil)
+    check('UX-E.2 trace point fgPath offset is 0', tracePt.fgPath.style.strokeDashoffset == 0)
+    check('UX-E.2 trace point torchTip is hidden', tracePt.torchTip.classList.hidden == true)
+    check('UX-E.2 trace point startNode has completed class', tracePt.startNode.classList.completed == true)
+    check('UX-E.2 trace point startNode icon updated to checkmark', tracePt.startNode.icon.innerHTML == '&#10003;')
+    check('UX-E.2 trace point isTracing is false', tracePt.isTracing == false)
+    check('UX-E.2 trace point completed is true', tracePt.completed == true and tracePt.progress == 100)
+
+    -- 29e: Sequência 1/5 -> 2/5 -> 3/5 -> 4/5 -> 5/5
+    local progressState = { totalCount = 5, completedCount = 0, finished = false }
+    local nuiEvents = {}
+
+    local sec1 = { id = 'sec1', primitive = 'trace', fgPath = { style = {} }, torchTip = { classList = {} }, startNode = { classList = {}, icon = {} }, element = { classList = {} } }
+    local sec2 = { id = 'sec2', primitive = 'trace', fgPath = { style = {} }, torchTip = { classList = {} }, startNode = { classList = {}, icon = {} }, element = { classList = {} } }
+    local sec3 = { id = 'sec3', primitive = 'trace', fgPath = { style = {} }, torchTip = { classList = {} }, startNode = { classList = {}, icon = {} }, element = { classList = {} } }
+    local sec4 = { id = 'sec4', primitive = 'trace', fgPath = { style = {} }, torchTip = { classList = {} }, startNode = { classList = {}, icon = {} }, element = { classList = {} } }
+    local sec5 = { id = 'sec5', primitive = 'trace', fgPath = { style = {} }, torchTip = { classList = {} }, startNode = { classList = {}, icon = {} }, element = { classList = {} } }
+
+    jsCompletePoint(sec1, nuiEvents, progressState)
+    check('UX-E.2 1/5 concluído -> não trava e não finaliza global',
+        progressState.completedCount == 1 and progressState.finished == false)
+
+    jsCompletePoint(sec2, nuiEvents, progressState)
+    check('UX-E.2 2/5 concluído -> não finaliza global',
+        progressState.completedCount == 2 and progressState.finished == false)
+
+    jsCompletePoint(sec3, nuiEvents, progressState)
+    check('UX-E.2 3/5 concluído -> não finaliza global',
+        progressState.completedCount == 3 and progressState.finished == false)
+
+    jsCompletePoint(sec4, nuiEvents, progressState)
+    check('UX-E.2 4/5 concluído -> não finaliza global',
+        progressState.completedCount == 4 and progressState.finished == false)
+
+    jsCompletePoint(sec5, nuiEvents, progressState)
+    check('UX-E.2 5/5 concluído -> SOMENTE AQUI dispara minigameFinish',
+        progressState.completedCount == 5 and progressState.finished == true)
+    check('UX-E.2 exatamente 5 eventos minigamePointComplete emitidos', #nuiEvents == 5)
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end

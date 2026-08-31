@@ -168,7 +168,8 @@ function Core.Start(vehicle, profileName, opts)
             title = opts.title or profile.title,
             helpText = opts.helpText or profile.helpText,
             toolClass = profile.toolClass,
-            uxSpeed = opts.uxSpeed or 1.0,
+            uxSpeed = opts.uxSpeed or (profile.traceSpeed or 1.0),
+            traceTolerance = profile.traceTolerance or 55.0,
             points = nuiPoints
         }
     })

@@ -15,6 +15,7 @@
   let activeHotspotId = null;
   let prevMouseAngle = 0;
   let uxSpeedMult = 1.0;
+  let traceTolerancePx = 55.0;
   let cutTimer = null;
   let lastCutTimestamp = 0;
 
@@ -28,13 +29,37 @@
   }
 
   function completePoint(pt) {
-    if (pt.completed) return;
+    if (!pt || pt.completed) return;
     pt.completed = true;
     pt.progress = 100;
-    pt.progressCircle.style.strokeDashoffset = 0;
-    pt.element.classList.remove('active', 'cutting', 'drilling');
-    pt.element.classList.add('completed');
-    pt.icon.innerHTML = '&#10003;'; // Checkmark
+
+    if (pt.primitive === 'trace') {
+      if (pt.fgPath) {
+        pt.fgPath.style.strokeDashoffset = 0;
+      }
+      if (pt.torchTip) {
+        pt.torchTip.classList.add('hidden');
+      }
+      if (pt.startNode) {
+        pt.startNode.classList.add('completed');
+        const icon = pt.startNode.querySelector('.trace-icon');
+        if (icon) icon.innerHTML = '&#10003;';
+      }
+      pt.isTracing = false;
+    } else {
+      if (pt.progressCircle) {
+        pt.progressCircle.style.strokeDashoffset = 0;
+      }
+      if (pt.icon) {
+        pt.icon.innerHTML = '&#10003;';
+      }
+    }
+
+    if (pt.element) {
+      pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing');
+      pt.element.classList.add('completed');
+    }
+
     postNui('minigamePointComplete', { id: pt.id });
     activeHotspotId = null;
     stopCuttingLoop();
@@ -90,6 +115,7 @@
     hudTitle.textContent = data.title || 'OPERAÇÃO FÍSICA';
     hudHelp.textContent = data.helpText || 'Mantenha o clique e trabalhe sobre cada ponto';
     uxSpeedMult = data.uxSpeed || 1.0;
+    traceTolerancePx = (typeof data.traceTolerance === 'number' && data.traceTolerance > 0) ? data.traceTolerance : 55.0;
     pointsMap = {};
     hotspotContainer.innerHTML = '';
     activeHotspotId = null;
@@ -386,7 +412,7 @@
           const projY = p0.y + tClamped * dy;
           const distToSeg = Math.hypot(e.clientX - projX, e.clientY - projY);
 
-          const tolerancePx = 55;
+          const tolerancePx = traceTolerancePx;
           if (distToSeg <= tolerancePx) {
             // Speed limit anti-cheese: cap max advance per frame based on time and trace speed
             const maxSpeedPxS = 320 * (uxSpeedMult || 1.0);
