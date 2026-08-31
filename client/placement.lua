@@ -91,9 +91,9 @@ end
 -- [M2 FIX] VPChopStartLiftPlacement removida — elevador removido do sistema (Config.LiftBaseModel = nil).
 
 function VPChopStartBenchPlacement()
-    return ghostPlace(Config.BenchModel, 'vp_chopshop:placeBench')
+    return ghostPlace(Config.BenchModel or 'prop_tool_bench02', 'vp_chopshop:placeBench')
 end
 
 function VPChopStartWelderPlacement()
-    return ghostPlace(Config.WelderModel, 'vp_chopshop:placeWelder')
+    return ghostPlace(Config.WelderModel or 'prop_weldmodel_01', 'vp_chopshop:placeWelder')
 end
