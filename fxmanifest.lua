@@ -27,6 +27,8 @@ shared_scripts {
     'shared/action_gate.lua',   -- [v1.15 PR-G] predicate ActionSession vs legacy (client+server)
 }
 
+ui_page 'html/index.html'
+
 client_scripts {
     'bridge/client_notify.lua',
     'client/placement.lua',
@@ -41,6 +43,13 @@ client_scripts {
     'client/alarm.lua',
     'client/plates.lua',  -- [FASE1 placas] antes de main.lua (usa VPChopTriggerDispatch dele em runtime)
     'client/tyremarks.lua',  -- [TYRE] marcas de pneu (armar burnout + ox_target da polícia); antes de main.lua
+    -- [UX-A] Módulos do minigame de interação física (carregados antes de main.lua)
+    'client/minigame/camera.lua',
+    'client/minigame/projection.lua',
+    'client/minigame/profiles.lua',
+    'client/minigame/fallback.lua',
+    'client/minigame/core.lua',
+    'client/minigame/demo.lua',
     'client/main.lua',
 }
 
@@ -149,4 +158,5 @@ server_scripts {
 files {
     'installation/ox_items_snippet.txt',
     'sounds/*.ogg',
+    'html/**',
 }
