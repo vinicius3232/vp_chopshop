@@ -1,120 +1,105 @@
-# vp_chopshop — Gameplay (v1.6.7)
+# vp_chopshop — Gameplay (v1.16)
 
 ---
 
 ## Visão Geral
 
-Sistema de desmanche ilegal em **4 fases progressivas**. O jogador obtém um veículo, usa o macaco hidráulico para levantá-lo e desmonta peça por peça com ferramentas específicas. Os materiais e peças resultantes são vendidos a um NPC fence rotativo que exige confiança acumulada.
+Sistema de desmanche ilegal server-authoritative em **4 fases físicas e interativas**. O jogador obtém um veículo, usa o macaco hidráulico para levantá-lo e desmonta peça por peça através de minigames físicos contextuais com câmeras dinâmicas e ferramentas específicas. Os materiais e peças resultantes possuem rastreabilidade serial e são negociados com a rede de receptadores (fence).
 
 ---
 
-## Itens Necessários
+## Itens e Estações de Trabalho
 
-| Item | Função |
-|---|---|
-| `chopshop_jackstand` | Levanta o veículo — obrigatório para tudo |
-| `chopshop_bench` | Bancada de trabalho — necessária para crafting |
-| `chopshop_welder` | Soldadora — deve estar a ≤8m da bancada para usar receitas |
-| `metal_saw` (ou `saw_pro` / `mechanic_drill`) | Ferramenta de desmanche — obrigatória para as fases 2 e 3 |
-| `screwdriver` | Chave de fenda — obrigatória para a fase 3 (motor) |
-
-> O veículo também precisa de **chaves** (ESX). Configure seu sistema em `Config.VehicleKeys` ou desative em `Config.RequireVehicleKeys`.
-
----
-
-## Ferramentas de Desmanche
-
-Cada ferramenta tem durabilidade e influencia a velocidade e o risco de despacho policial:
-
-| Item | Usos | Despacho | Velocidade |
-|---|---|---|---|
-| `saw_cheap` | 2 | 100% | ×1.4 (mais lento) |
-| `saw_pro` | 6 | 25% | ×1.0 (normal) |
-| `mechanic_drill` | 10 | 0% | ×0.7 (mais rápido) |
-
-Quando a ferramenta se esgota, o jogador recebe a notificação **"Sua serra quebrou de tanto uso!"** e precisa de outra para continuar.
+| Item | Tipo | Função |
+|---|---|---|
+| `chopshop_jackstand` | Estação | Levanta o veículo — obrigatório para iniciar o desmanche |
+| `chopshop_bench` | Estação | Bancada de trabalho para processamento de peças e forja de placas/séries |
+| `chopshop_welder` | Estação | Máquina de solda física — necessária próxima ao carro para cortar a carcaça e na bancada para forja |
+| `saw_cheap` | Ferramenta | Serra amadora (2 usos, corte rápido, 100% de ruído/despacho) |
+| `saw_pro` | Ferramenta | Serra profissional (6 usos, 25% de despacho) para portas, capô e porta-malas |
+| `mechanic_drill` | Ferramenta | Parafusadeira mecânica de alto torque (10 usos) para desacoplamento do motor |
+| `screwdriver` | Ferramenta | Chave de fenda para desarme de alarmes e remoção de placas |
+| `parts_scanner` | Forense | Scanner policial para leitura de séries de peças em suspeitos |
+| `forensic_kit` | Forense | Kit pericial avançado — revela números de série forjados |
+| `gloves` | Crime | Luvas que evitam deixar impressões digitais na cena do crime |
 
 ---
 
-## Fluxo Principal
+## Ferramentas de Desmanche (Mecânica e Durabilidade)
+
+Cada ferramenta tem durabilidade autoritativa e influencia a velocidade de interação:
+
+| Ferramenta | Usos | Despacho Policial | Multiplicador de Velocidade | Prop Visual |
+|---|---|---|---|---|
+| `saw_cheap` | 2 | 100% | ×1.4 (mais lento) | `prop_tool_consaw` |
+| `saw_pro` | 6 | 25% | ×1.0 (padrão) | `prop_tool_consaw` |
+| `mechanic_drill` | 10 | 0% (silenciosa) | ×0.7 (alta rotação) | `prop_tool_drill` |
+
+---
+
+## Fluxo Principal de Desmanche (v1.16)
 
 ```
 1. Usar item chopshop_jackstand perto do carro
         ↓
    Animação de colocação dos macacos (8s)
-   Carro sobe 18cm — trava no ar
+   Carro sobe e trava no ar com física server-side
         ↓
-2. Targets de ox_target aparecem em cada peça
+2. Targets contextuais aparecem em cada peça via ox_target
         ↓
-3. Desmontar peças (Fases 2 → 3 → 4)
+3. Desmanche Físico Interativo:
+   • Pneus (5 parafusos - Rotação física 360°)
+   • Painéis (3 pontos de corte - Dobradiças e fechadura)
+   • Motor (4 calços de chassi - Parafusadeira mecânica)
+   • Carcaça (5 linhas estruturais - Traçado com maçarico de solda)
         ↓
-4. Craftear materiais na bancada (opcional)
+4. Processamento / Adulteração na bancada (opcional)
         ↓
-5. Vender ao fence NPC
+5. Venda de peças seriadas e contratos de entrega terminal
 ```
 
 ---
 
-## Fase 2 — Desmanche Estrutural
+## 1. Roubo de Pneus (Wheel Minigame)
 
-**Requer:** `metal_saw` (ou equivalente) + veículo levantado no macaco
+**Requer:** Veículo levantado no macaco.
 
-Targets aparecem em cada peça estrutural do carro:
-
-| Peça | Recompensa | Duração |
-|---|---|---|
-| Capô | `car_parts ×1` | 6s |
-| Porta-malas | `car_parts ×1` | 6s |
-| Porta dianteira esq. | `car_parts ×1` | 6s |
-| Porta dianteira dir. | `car_parts ×1` | 6s |
-| Porta traseira esq. | `car_parts ×1` | 6s |
-| Porta traseira dir. | `car_parts ×1` | 6s |
-
-> **Máximo:** 6× `car_parts` nesta fase.
-
-**Alarme:** ao remover a primeira peça, há chance de o alarme do veículo disparar (varia por classe — Super=80%, Motos=10%). O jogador tem **30 segundos** para desarmá-lo com um `screwdriver` + skill check. Se não desarmar, a polícia é chamada via dispatch.
+- **Gameplay:** A câmera aproxima na roda selecionada (`wheel_lf`, `wheel_rf`, `wheel_lr`, `wheel_rr`). A NUI exibe os **5 parafusos da roda**.
+- **Interação:** O jogador clica em cada parafuso e gira o mouse em arco (rotação contínua) para soltá-lo.
+- **Conclusão:** Somente após os 5 parafusos soltos (5/5), o ped executa a puxada física da roda.
+- **Recompensa:** Gera 1x `TyreEntitlement` para carregar o pneu (`chopshop_tyre`).
 
 ---
 
-## Fase 3 — Motor
+## 2. Painéis da Carroceria (Body Panels)
 
-**Requer:** capô removido (Fase 2) + `screwdriver` no inventário
+**Requer:** `saw_cheap` ou `saw_pro` no inventário + veículo no macaco.
 
-- Target **"Remover motor"** aparece após o capô ser desmontado
-- Duração: 8s com animação de chave de impacto
-- Recompensa: **`car_parts ×5`** de uma vez
-
----
-
-## Fase 4 — Carcaça
-
-**Requer:** motor removido (Fase 3) + `chopshop_welder` posicionada a ≤8m do veículo
-
-- Target **"Cortar carcaça"** aparece após o motor ser removido
-- Duração: 10s com animação de serra
-- Recompensas (com chance):
-
-| Item | Quantidade | Chance |
-|---|---|---|
-| `metalscrap` | 8 | 100% |
-| `plastic` | 5 | 80% |
-| `glass` | 2 | 70% |
-| `rubber` | 3 | 60% |
+- **Peças:** Portas dianteiras, portas traseiras, capô (`bonnet`) e porta-malas (`boot`).
+- **Gameplay:** A câmera enquadra a peça em ângulo lateral/frontal. O ped saca a serra elétrica e surgem **3 pontos de corte** (dobradiça superior, dobradiça inferior e fechadura).
+- **Interação:** O jogador clica e segura sobre cada ponto até romper o metal.
+- **Recompensa:** `car_parts ×1` com número de série comitado no servidor.
 
 ---
 
-## Pneus — Sistema Paralelo
+## 3. Motor (Engine Removal)
 
-O roubo de pneus é **independente** das fases de desmanche. Pode ser feito em qualquer carro na rua.
+**Requer:** Capô já removido (`hood_first`) + `mechanic_drill` no inventário.
 
-**Fluxo:**
-1. Usar `chopshop_jackstand` em qualquer carro estacionado
-2. Minigame por pneu: 4 parafusos (bolt minigame 3D ou lib.skillCheck como fallback)
-3. Pneu vai para o inventário como `chopshop_tyre`
-4. Guardar pneus na caçamba de uma **pickup truck** (máx. 4)
-5. Levar ao NPC comprador → **$400 por pneu**
+- **Gameplay:** Câmera mergulha no cofre do motor. O ped empunha a parafusadeira mecânica `prop_tool_drill`.
+- **Interação:** Surgem **4 calços de fixação** nos cantos do cofre. O jogador aciona a parafusadeira em cada ponto com feedback elétrico de alto torque.
+- **Recompensa:** `car_parts ×5` seriadas e motor entra em estado `REMOVED`.
 
-**Trucks aceitas:** bison, sandking, rebel, kamacho, crusader, rancherxl e outras.
+---
+
+## 4. Corte Estrutural da Carcaça (Carcass Structural Trace)
+
+**Requer:** Motor removido (`engine_first`) + `chopshop_welder` física posicionada no chão a $\le 8.0\text{m}$ do veículo (sem necessidade de serra).
+
+- **Gameplay:** Câmera 3/4 isométrica elevada. O ped saca o maçarico de corte `prop_weld_torch` com animação contínua de soldagem.
+- **Interação (Primitive `trace`):** A NUI projeta 5 linhas estruturais do chassi (Travessa Dianteira, Colunas Laterais, Túnel do Assoalho e Longarinas Traseiras). O jogador clica no início da linha e conduz o maçarico continuamente ao longo do traçado com faíscas incandescentes.
+- **Anti-Cheat:** Sistema anti-salto com velocidade física limitada e validação de retomada.
+- **Conclusão:** 5/5 seções concluídas liberam o chassi para o descarte/entrega terminal e entrega dos materiais recicláveis.
 
 ---
 
