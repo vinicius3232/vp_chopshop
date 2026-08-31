@@ -1234,15 +1234,25 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
         else
             -- Fallback defensivo: se a criação/attach na mão falhar, coloca prop de chão com target de pickup
             local ped = PlayerPedId()
+            local fwd = GetEntityForwardVector(ped)
             local px, py, pz = table.unpack(GetEntityCoords(ped))
+            local dropX = px + (fwd.x * 0.75)
+            local dropY = py + (fwd.y * 0.75)
+            local found, gz = GetGroundZFor_3dCoord(dropX, dropY, pz + 2.0, false)
+            local finalZ = (found and (gz + 0.12)) or (pz - 0.85)
+
             local modelHash = GetHashKey('prop_wheel_01')
             RequestModel(modelHash)
             local tLoad = GetGameTimer()
             while not HasModelLoaded(modelHash) and (GetGameTimer() - tLoad < 2000) do Wait(50) end
-            local groundProp = CreateObject(modelHash, px, py, pz - 0.9, true, true, true)
+            local groundProp = CreateObject(modelHash, dropX, dropY, finalZ, true, true, true)
             SetEntityAsMissionEntity(groundProp, true, true)
             SetModelAsNoLongerNeeded(modelHash)
             if groundProp and DoesEntityExist(groundProp) then
+                SetEntityRotation(groundProp, 90.0, 0.0, GetEntityHeading(ped), 2, true)
+                if PlaceObjectOnGroundProperly then
+                    pcall(PlaceObjectOnGroundProperly, groundProp)
+                end
                 FreezeEntityPosition(groundProp, true)
                 registerGroundTyreTarget(groundProp, tyreEntitlementId)
                 VPChopNotify(L('tyre_dropped'), 'inform')
@@ -2077,16 +2087,23 @@ local function placeTyreHandPropOnGround()
 
     if not handProp or not DoesEntityExist(handProp) then return end
 
-    -- Desancorar sem física por ora, reposicionar exatamente no chão via raycast
+    -- Desancorar, posicionar à frente do jogador e deitar horizontalmente no chão
     DetachEntity(handProp, false, false)
 
     local ped  = PlayerPedId()
+    local fwd  = GetEntityForwardVector(ped)
     local px, py, pz = table.unpack(GetEntityCoords(ped))
-    local found, gz = GetGroundZFor_3dCoord(px, py, pz + 2.0, false)
-    local finalZ = found and gz or (pz - 1.0)
+    local dropX = px + (fwd.x * 0.75)
+    local dropY = py + (fwd.y * 0.75)
+    local found, gz = GetGroundZFor_3dCoord(dropX, dropY, pz + 2.0, false)
+    local finalZ = (found and (gz + 0.12)) or (pz - 0.85)
 
-    SetEntityCoordsNoOffset(handProp, px, py, finalZ, false, false, false)
-    SetEntityRotation(handProp, 0.0, 0.0, 0.0, 5, true)
+    SetEntityCoordsNoOffset(handProp, dropX, dropY, finalZ, false, false, false)
+    -- Rotação plana (90 graus em X para deitar o pneu no chão como uma roda deitada)
+    SetEntityRotation(handProp, 90.0, 0.0, GetEntityHeading(ped), 2, true)
+    if PlaceObjectOnGroundProperly then
+        pcall(PlaceObjectOnGroundProperly, handProp)
+    end
     FreezeEntityPosition(handProp, true)
 
     registerGroundTyreTarget(handProp, groundEntitlementId)

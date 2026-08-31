@@ -187,6 +187,8 @@ function IsPedDeadOrDying(_, _) return false end
 function GetCurrentResourceName() return 'vp_chopshop' end
 function GetModelDimensions(_) return vector3(-1.0, -2.5, -0.5), vector3(1.0, 2.5, 1.0) end
 function GetOffsetFromEntityInWorldCoords(_, x, y, z) return vector3(x or 0, y or 0, z or 0) end
+function GetEntityForwardVector(_) return vector3(0.0, 1.0, 0.0) end
+function PlaceObjectOnGroundProperly(_) return true end
 function L(key) return key end
 function VPChopNotify(_, _) end
 function IsControlJustPressed(_, _) return false end
