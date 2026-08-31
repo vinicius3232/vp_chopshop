@@ -189,6 +189,10 @@ function GetModelDimensions(_) return vector3(-1.0, -2.5, -0.5), vector3(1.0, 2.
 function GetOffsetFromEntityInWorldCoords(_, x, y, z) return vector3(x or 0, y or 0, z or 0) end
 function L(key) return key end
 function VPChopNotify(_, _) end
+function IsControlJustPressed(_, _) return false end
+function IsDisabledControlJustPressed(_, _) return false end
+function RegisterKeyMapping(_, _, _, _) end
+function RegisterCommand(_, _, _) end
 
 local base = arg[1] or '.'
 _G._HARNESS_BASE = base

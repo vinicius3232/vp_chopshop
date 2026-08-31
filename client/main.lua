@@ -506,7 +506,7 @@ local function registerGroundTyreTarget(groundProp, groundEntitlementId)
                     isTyre        = true,
                     entitlementId = groundEntitlementId,
                 }
-                lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
+                lib.showTextUI('[G] ' .. L('tyre_carry_textui') .. ' | [E] ' .. L('tyre_option_drop'), {
                     position = 'left-center',
                     icon     = 'circle-dot',
                 })
@@ -1227,7 +1227,7 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
 
             -- [PERF] TextUI exibida UMA vez (persiste até hideTextUI).
             -- VPChopDropCarryPart() (carry.lua) chama hideTextUI ao soltar o pneu.
-            lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
+            lib.showTextUI('[G] ' .. L('tyre_carry_textui') .. ' | [E] ' .. L('tyre_option_drop'), {
                 position = 'left-center',
                 icon     = 'circle-dot',
             })
@@ -2093,10 +2093,7 @@ local function placeTyreHandPropOnGround()
     VPChopNotify(L('tyre_dropped'), 'inform')
 end
 
--- RegisterKeyMapping cria bind real reconhecido pelo GTA V a pé.
--- IsControlJustReleased(0, 71) não funciona para G a pé (input de veículo).
-RegisterKeyMapping('+vp_tyre_options', 'Opções do pneu carregado', 'keyboard', 'g')
-RegisterCommand('+vp_tyre_options', function()
+local function openTyreOptionsMenu()
     if not VPChopCarryingPart or not VPChopCarryingPart.isTyre then return end
 
     local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
@@ -2137,4 +2134,32 @@ RegisterCommand('+vp_tyre_options', function()
 
     lib.registerContext({ id = 'vp_tyre_carry_menu', title = L('tyre_carry_menu_title'), options = menuOptions })
     lib.showContext('vp_tyre_carry_menu')
-end, false)
+end
+
+-- Keymapping e comandos
+RegisterKeyMapping('+vp_tyre_options', 'Opções do pneu carregado', 'keyboard', 'g')
+RegisterCommand('+vp_tyre_options', openTyreOptionsMenu, false)
+RegisterCommand('-vp_tyre_options', function() end, false)
+RegisterCommand('soltarpneu', placeTyreHandPropOnGround, false)
+RegisterCommand('droptyre', placeTyreHandPropOnGround, false)
+
+-- Loop de escuta de controles enquanto transporta o pneu (100% responsivo)
+CreateThread(function()
+    while true do
+        if VPChopCarryingPart and VPChopCarryingPart.isTyre then
+            -- 47 = INPUT_DETONATE (G a pé)
+            if IsControlJustPressed(0, 47) or IsDisabledControlJustPressed(0, 47) then
+                openTyreOptionsMenu()
+            -- 38 = INPUT_PICKUP / INPUT_CONTEXT (E a pé) -> solta direto no chão
+            elseif IsControlJustPressed(0, 38) or IsDisabledControlJustPressed(0, 38) then
+                placeTyreHandPropOnGround()
+            -- 73 = INPUT_VEH_DUCK (X a pé) -> solta no chão
+            elseif IsControlJustPressed(0, 73) or IsDisabledControlJustPressed(0, 73) then
+                placeTyreHandPropOnGround()
+            end
+            Wait(0)
+        else
+            Wait(300)
+        end
+    end
+end)
