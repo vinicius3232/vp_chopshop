@@ -816,48 +816,11 @@ do
     -- ─── Ponta RODA: parafusos em círculo na face da roda ─────────────────────
     function VPChopBoltMinigame(vehicle, wheelIndex)
         local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
-        local boneKey   = boneNames[wheelIndex + 1]
-        if not boneKey then return false end
-        local boneId = GetEntityBoneIndexByName(vehicle, boneKey)
-        if not boneId or boneId == -1 then return VPChopBoltMinigameFallback() end
-
-        local c          = boltCfg()
-        local boltCount  = math.max(3, math.floor(tonumber(c.Bolts) or 5))
-        local isLeft     = (boneKey == 'wheel_lf' or boneKey == 'wheel_lr')
-        local sideSign   = isLeft and -1.0 or 1.0
-        local wheelPos   = GetWorldPositionOfEntityBone(vehicle, boneId)
-        local fwd        = GetEntityForwardVector(vehicle)
-        local up         = vector3(0.0, 0.0, 1.0)
-        local rightV     = vector3(fwd.y, -fwd.x, 0.0)
-        local rlen       = #rightV
-        if rlen > 0.0 then rightV = rightV / rlen end
-        local sideDir    = rightV * sideSign
-        local vehHeading = GetEntityHeading(vehicle)
-
-        local radius = 0.135
-        local outOff = 0.04
-        local points = {}
-        for i = 0, boltCount - 1 do
-            local a      = (2.0 * math.pi / boltCount) * i
-            local ca, sa = math.cos(a), math.sin(a)
-            points[#points + 1] = wheelPos + (up * (ca * radius)) + (fwd * (sa * radius)) + (sideDir * outOff)
+        local boneKey   = boneNames[(wheelIndex or 0) + 1] or 'wheel_lf'
+        if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+            return VPChopDismantleMinigame.Start(vehicle, 'wheel', { boneKey = boneKey })
         end
-
-        local r = runBoltSurface({
-            points  = points,
-            outward = sideDir,
-            camPos  = GetOffsetFromEntityInWorldCoords(vehicle, sideSign * 1.6, 0.0, 0.35),
-            lookAt  = wheelPos,
-            baseRot = { x = 90.0, y = 0.0, z = vehHeading + (sideSign * 90.0) },
-            needed  = (tonumber(c.TurnsToLoosen) or 2.0) * 360.0,
-            sens    = tonumber(c.Sensitivity) or 900.0,
-            hoverR  = tonumber(c.HoverRadius)  or 0.06,
-            timeout = tonumber(c.Timeout)      or 30000,
-        })
-
-        if r == 'fallback' then return VPChopBoltMinigameFallback() end
-        if not r then VPChopNotify(L('tyremission_minigame_fail'), 'error'); return false end
-        return true
+        return VPChopMinigameFallback(vehicle, boneKey, 'minigame_core_missing')
     end
 
     -- ─── Ponta PLACA: parafusos nos cantos da placa (frente OU traseira) ──────
@@ -999,15 +962,30 @@ local function findNearestMountedWheel(veh)
     return bestCoords, bestDist, bestIdx, boneNames[idx1], true
 end
 
---- [v1.15 PR-F] Roda o UX visual da remoção de roda (minigame + progress). Retorna
---- true se o jogador concluiu, false se cancelou/falhou.
-local function runWheelUx(veh, wheelIdx)
-    local mg = Config.Jackstand and Config.Jackstand.Minigame and Config.Jackstand.Minigame.Bolt3D
-    if mg and mg.Enable then
-        if not VPChopBoltMinigame(veh, wheelIdx) then return false end
+--- [v1.16 UX-B] Executa a experiência física interativa da remoção da roda.
+--- Utiliza VPChopDismantleMinigame com o profile 'wheel' (5 parafusos com giro de mouse),
+--- seguido de uma animação física de retirada do pneu antes do commit na ActionSession.
+--- Retorna true se o jogador concluiu 100% dos parafusos; false se cancelou ou falhou.
+local function runWheelUx(veh, wheelIdx, partKey)
+    local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
+    local boneKey   = partKey or boneNames[(wheelIdx or 0) + 1] or 'wheel_lf'
+
+    local minigameOk = false
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        minigameOk = VPChopDismantleMinigame.Start(veh, 'wheel', {
+            boneKey = boneKey,
+            uxSpeed = 1.0,
+            timeout = 45000,
+        })
+    else
+        minigameOk = VPChopBoltMinigame(veh, wheelIdx)
     end
+
+    if not minigameOk then return false end
+
+    -- Animação física de puxar/remover o pneu do cubo da roda (1.5s)
     return lib.progressBar({
-        duration     = 4000,
+        duration     = 1500,
         label        = L('tyremission_pulling_tyre'),
         useWhileDead = false, canCancel = true,
         disable      = { move = true, car = true, combat = true },
@@ -1046,7 +1024,7 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
             local actionId = st.actionId
 
             -- 3) UX
-            local uxOk = runWheelUx(veh, wheelIdx)
+            local uxOk = runWheelUx(veh, wheelIdx, partKey)
             if not uxOk then
                 pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
                 JackstandBusy = false
@@ -1067,7 +1045,7 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
             tyreEntitlementId = res.result and res.result.tyreEntitlementId
         else
             -- Kill-switch: fluxo legacy direto (ActionSession desligada).
-            local uxOk = runWheelUx(veh, wheelIdx)
+            local uxOk = runWheelUx(veh, wheelIdx, partKey)
             if not uxOk then JackstandBusy = false; return end
             local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:chopPart', false, netId, partKey)
             JackstandBusy = false

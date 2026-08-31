@@ -1,6 +1,6 @@
 -- client/minigame/minigame_spec.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  Self-test do Interaction Core & NUI Foundation (PR UX-A)
+--  Self-test do Interaction Core, Profiles e Wheel Minigame (PR UX-A & UX-B)
 --  Self-gated na convar vp_chopshop_selftest 1.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
@@ -49,10 +49,16 @@ local function run()
     _G.GetEntityForwardVector = function(_) return vector3(0.0, 1.0, 0.0) end
 
     local _, _, sideLeft = Proj.GetBoneData(1, 'wheel_lf')
-    check('GetBoneData detects left side sign (-1)', sideLeft == -1.0)
+    check('GetBoneData detects left front as left (-1)', sideLeft == -1.0)
 
     local _, _, sideRight = Proj.GetBoneData(1, 'wheel_rf')
-    check('GetBoneData detects right side sign (1)', sideRight == 1.0)
+    check('GetBoneData detects right front as right (1)', sideRight == 1.0)
+
+    local _, _, sideLeftRear = Proj.GetBoneData(1, 'wheel_lr')
+    check('GetBoneData detects left rear as left (-1)', sideLeftRear == -1.0)
+
+    local _, _, sideRightRear = Proj.GetBoneData(1, 'wheel_rr')
+    check('GetBoneData detects right rear as right (1)', sideRightRear == 1.0)
 
     local _, _, sideDoorL = Proj.GetBoneData(1, 'door_dside_f')
     check('GetBoneData detects dside door as left (-1)', sideDoorL == -1.0)
@@ -79,10 +85,24 @@ local function run()
     local demoPts = Profiles.Get('demo').generatePoints(1, 'wheel_lf')
     check('demo profile generates exactly 3 points', #demoPts == 3)
 
-    local wheelPts = Profiles.Get('wheel').generatePoints(1, 'wheel_lf')
-    check('wheel profile generates exactly 5 bolts', #wheelPts == 5)
+    -- 4) Testes Aprofundados do Profile WHEEL (UX-B)
+    local wheelProfile = Profiles.Get('wheel')
+    local wheelBones = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
 
-    -- 4) Testes do CameraController
+    for _, bKey in ipairs(wheelBones) do
+        local wPts = wheelProfile.generatePoints(1, bKey)
+        check(('wheel profile on %s generates exactly 5 bolts'):format(bKey), #wPts == 5)
+        for i = 1, 5 do
+            check(('bolt %d on %s has id bolt_%d'):format(i, bKey, i), wPts[i].id == ('bolt_' .. i))
+            check(('bolt %d on %s has neededDeg 720'):format(i, bKey), wPts[i].neededDeg == 720.0)
+            check(('bolt %d on %s has valid worldPos'):format(i, bKey), type(wPts[i].worldPos) == 'table')
+        end
+
+        local camPos, lookAt = wheelProfile.calculateCamera(1, bKey)
+        check(('wheel camera for %s is computed'):format(bKey), camPos ~= nil and lookAt ~= nil)
+    end
+
+    -- 5) Testes do CameraController
     check('CameraController loaded', CamCtrl ~= nil)
     _G.CreateCamWithParams = function() return 101 end
     _G.PointCamAtCoord = function() end
@@ -98,7 +118,7 @@ local function run()
     CamCtrl.Destroy(0)
     check('CameraController.Destroy cleans up camera handle', CamCtrl.IsActive() == false)
 
-    -- 5) Testes do DismantleMinigame Core
+    -- 6) Testes do DismantleMinigame Core
     check('DismantleMinigame Core loaded', Core ~= nil)
     check('Core.IsActive is initially false', Core.IsActive() == false)
 
@@ -111,6 +131,10 @@ local function run()
 
     local resFail = Core.Start(1, 'invalid_profile', {})
     check('Core.Start fails gracefully on invalid profile', fallbackCalled == true)
+
+    -- Stop síncrono
+    Core.Stop('test_cancel')
+    check('Core.Stop cleans active state', Core.IsActive() == false)
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
