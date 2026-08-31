@@ -871,12 +871,10 @@ Config.Jackstand = {
     --- Duração da barra "A retirar macacos..." (ms).
     LowerProgressMs = 5000,
 
-    --- Animação ao COLOCAR o macaco.
-    --- amb@world_human_vehicle_mechanic@male@base/base = ped ajoelha de lado e trabalha
-    --- ao nível do chão (idêntico ao wheel_theft). Mais realista que mini@repair.
+    --- Animação ao COLOCAR o macaco (ped ajoelha naturalmente ao lado do chassi).
     RaiseAnim = {
-        dict = 'amb@world_human_vehicle_mechanic@male@base',
-        clip = 'base',
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
         flag = 1,
         prop = {
             model    = 'prop_tool_wrench',
@@ -887,8 +885,8 @@ Config.Jackstand = {
 
     --- Animação ao RETIRAR o macaco.
     LowerAnim = {
-        dict = 'amb@world_human_vehicle_mechanic@male@base',
-        clip = 'base',
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
         flag = 1,
         prop = {
             model    = 'prop_tool_wrench',

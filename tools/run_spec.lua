@@ -177,6 +177,7 @@ function PlaySoundFrontend(_, _, _, _) end
 function RequestAnimDict(_) end
 function HasAnimDictLoaded(_) return true end
 function TaskPlayAnim(_, _, _, _, _, _, _, _, _, _, _) end
+function TaskTurnPedToFaceEntity(_, _, _) end
 function ClearPedTasks(_) end
 function GetHeadingFromVector_2d(dx, dy) return math.deg(math.atan(dy, dx)) end
 function SetEntityCoordsNoOffset(_, _, _, _, _, _, _) end

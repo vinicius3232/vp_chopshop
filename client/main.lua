@@ -1924,6 +1924,11 @@ function VPChopJackstandRaiseCar()
     if not best then VPChopNotify(L('jackstand_no_car'), 'error'); return end
     if JackstandData[best] then VPChopNotify(L('jackstand_already_raised'), 'error'); return end
     JackstandBusy = true
+    local ped = PlayerPedId()
+    if TaskTurnPedToFaceEntity then
+        TaskTurnPedToFaceEntity(ped, best, 800)
+        Wait(300)
+    end
     local raiseAnim = jcfg.RaiseAnim
     spawnToolProp(raiseAnim and raiseAnim.prop)
     local ok = lib.progressBar({
@@ -1965,6 +1970,11 @@ function VPChopJackstandLowerCar(veh)
     if not data then return end
     if JackstandBusy then VPChopNotify(L('jackstand_busy'), 'error'); return end
     JackstandBusy = true
+    local ped = PlayerPedId()
+    if TaskTurnPedToFaceEntity then
+        TaskTurnPedToFaceEntity(ped, veh, 800)
+        Wait(300)
+    end
     local lowerAnim = Config.Jackstand and Config.Jackstand.LowerAnim
     spawnToolProp(lowerAnim and lowerAnim.prop)
     local ok = lib.progressBar({
