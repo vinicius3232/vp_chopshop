@@ -181,6 +181,8 @@ function ClearPedTasks(_) end
 function PlayerPedId() return 1 end
 function IsPedDeadOrDying(_, _) return false end
 function GetCurrentResourceName() return 'vp_chopshop' end
+function GetModelDimensions(_) return vector3(-1.0, -2.5, -0.5), vector3(1.0, 2.5, 1.0) end
+function GetOffsetFromEntityInWorldCoords(_, x, y, z) return vector3(x or 0, y or 0, z or 0) end
 function L(key) return key end
 function VPChopNotify(_, _) end
 
@@ -195,6 +197,7 @@ dofile(base .. '/client/minigame/camera.lua')        -- [UX-A] CameraController
 dofile(base .. '/client/minigame/projection.lua')    -- [UX-A] ProjectionHelper
 dofile(base .. '/client/minigame/profiles/panels.lua')-- [UX-C] Panel Profiles
 dofile(base .. '/client/minigame/profiles/engine.lua')-- [UX-D] Engine Profile
+dofile(base .. '/client/minigame/profiles/carcass.lua')-- [UX-E] Carcass Profile
 dofile(base .. '/client/minigame/profiles.lua')      -- [UX-A] Profiles Registry
 dofile(base .. '/client/minigame/fallback.lua')      -- [UX-A] Minigame Fallback
 dofile(base .. '/client/minigame/core.lua')          -- [UX-A] VPChopDismantleMinigame Core

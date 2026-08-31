@@ -839,13 +839,13 @@ Config.AdvancedChop = {
     --- Animação e prop da mão para corte da carcaça (Fase 4).
     --- flag 1 = ANIM_FLAG_REPEAT — mantém o loop enquanto a barra roda.
     CarcassAnim = {
-        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
-        clip = 'cutting_loop',
+        dict = 'amb@world_human_welding@male@base',
+        clip = 'base',
         flag = 1,
         prop = {
-            model    = 'v_ind_cs_powersaw',
-            offset   = { 0.10, 0.05, 0.0 },
-            rotation = { 15, 0, -55 },
+            model    = 'prop_weld_torch',
+            offset   = { 0.08, 0.03, 0.0 },
+            rotation = { 0, 0, 0 },
         },
     },
 }

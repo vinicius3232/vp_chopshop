@@ -43,11 +43,12 @@ client_scripts {
     'client/alarm.lua',
     'client/plates.lua',  -- [FASE1 placas] antes de main.lua (usa VPChopTriggerDispatch dele em runtime)
     'client/tyremarks.lua',  -- [TYRE] marcas de pneu (armar burnout + ox_target da polícia); antes de main.lua
-    -- [UX-A / UX-C / UX-D] Módulos do minigame de interação física (carregados antes de main.lua)
+    -- [UX-A / UX-C / UX-D / UX-E] Módulos do minigame de interação física (carregados antes de main.lua)
     'client/minigame/camera.lua',
     'client/minigame/projection.lua',
     'client/minigame/profiles/panels.lua',
     'client/minigame/profiles/engine.lua',
+    'client/minigame/profiles/carcass.lua',
     'client/minigame/profiles.lua',
     'client/minigame/fallback.lua',
     'client/minigame/core.lua',

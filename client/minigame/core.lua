@@ -106,17 +106,43 @@ function Core.Start(vehicle, profileName, opts)
         return _G.VPChopMinigameFallback(vehicle, opts.boneKey, 'no_points_generated')
     end
 
-    local nuiPoints = {}
-    for _, pt in ipairs(points) do
-        local onScreen, sx, sy = Proj.WorldToScreen(pt.worldPos)
-        nuiPoints[#nuiPoints + 1] = {
+    local function buildNuiPoint(pt)
+        local onScreen, sx, sy = false, 0.5, 0.5
+        if pt.worldPos then
+            onScreen, sx, sy = Proj.WorldToScreen(pt.worldPos)
+        end
+
+        local path = nil
+        if pt.points and #pt.points > 0 then
+            path = {}
+            local anyVisible = false
+            for _, wp in ipairs(pt.points) do
+                local wpOnScreen, wx, wy = Proj.WorldToScreen(wp)
+                path[#path + 1] = { x = wx, y = wy, visible = wpOnScreen }
+                if wpOnScreen then anyVisible = true end
+            end
+            onScreen = anyVisible
+            if path[1] then
+                sx, sy = path[1].x, path[1].y
+            end
+        end
+
+        return {
             id = pt.id,
             label = pt.label,
+            primitive = pt.primitive,
+            holdTimeMs = pt.holdTimeMs,
+            neededDeg = pt.neededDeg or 720.0,
             x = sx,
             y = sy,
-            neededDeg = pt.neededDeg or 720.0,
+            path = path,
             visible = onScreen
         }
+    end
+
+    local nuiPoints = {}
+    for _, pt in ipairs(points) do
+        nuiPoints[#nuiPoints + 1] = buildNuiPoint(pt)
     end
 
     -- 3) Animação contextual do jogador no mundo GTA
@@ -182,13 +208,7 @@ function Core.Start(vehicle, profileName, opts)
         -- Atualizar coordenadas dos pontos projetados na tela
         local updatedPoints = {}
         for _, pt in ipairs(points) do
-            local onScreen, sx, sy = Proj.WorldToScreen(pt.worldPos)
-            updatedPoints[#updatedPoints + 1] = {
-                id = pt.id,
-                x = sx,
-                y = sy,
-                visible = onScreen
-            }
+            updatedPoints[#updatedPoints + 1] = buildNuiPoint(pt)
         end
 
         SendNUIMessage({

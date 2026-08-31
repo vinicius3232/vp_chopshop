@@ -197,6 +197,8 @@ local function spawnToolProp(propCfg)
     if type(IsModelInCdimage) == 'function' and not IsModelInCdimage(model) then
         if model == 'prop_tool_screwflt01' then
             model = 'prop_tool_drill'
+        elseif model == 'v_ind_cs_powersaw' then
+            model = 'prop_weld_torch'
         end
         if not IsModelInCdimage(model) then
             return -- Segue a operação sem prop sem travar o requestModel
@@ -1333,10 +1335,78 @@ local function runEngineUx(veh, ttlMs, isAction, tCfg)
     }) == true
 end
 
---- [v1.15 PR-G / v1.16 UX-C / UX-D] Fluxo genérico de uma fase avançada via ActionSession:
+--- [v1.16 UX-E] Executa a experiência física interativa de corte estrutural da carcaça do chassi.
+--- 1. Orienta o ped para a lateral/estrutura do veículo.
+--- 2. Spawna o maçarico de solda/corte (prop_weld_torch) na mão.
+--- 3. Inicia animação contínua de solda/corte GTA (CarcassAnim).
+--- 4. Abre a NUI com 5 linhas estruturais (polylines) usando a primitive 'trace'.
+--- 5. O jogador acompanha e corta fisicamente as 5 seções do chassi.
+--- 6. Toca uma rápida sequência de separação/desprendimento estrutural (800ms).
+--- 7. Retorna true para a ActionSession completar no servidor (o chassi entra no estado terminal).
+local function runCarcassUx(veh, ttlMs, isAction, tCfg)
+    local profile = VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get('carcass')
+
+    local uxTimeout
+    if isAction then
+        local minUx = (profile and profile.minUxMs) or 6000
+        local reserve = (profile and profile.reserveMs) or 4000
+        local budget, err = computeUxBudget(ttlMs, minUx, reserve)
+        if not budget then return false, err end
+        uxTimeout = budget
+    else
+        uxTimeout = 45000
+    end
+
+    local speedMult = (tCfg and (tCfg.speedMult or tCfg.uxSpeed)) or 1.0
+    local uxSpeed = (speedMult > 0) and (1.0 / speedMult) or 1.0
+
+    local animCfg = (Config.AdvancedChop and Config.AdvancedChop.CarcassAnim) or {
+        dict = 'amb@world_human_welding@male@base',
+        clip = 'base',
+        flag = 1,
+        prop = {
+            model    = 'prop_weld_torch',
+            offset   = { 0.08, 0.03, 0.0 },
+            rotation = { 0, 0, 0 },
+        },
+    }
+
+    local ped = PlayerPedId()
+    orientPedToTarget(ped, GetEntityCoords(veh))
+
+    spawnToolProp(animCfg and animCfg.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
+
+    local minigameOk = false
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        minigameOk = VPChopDismantleMinigame.Start(veh, 'carcass', {
+            boneKey = 'carcass',
+            uxSpeed = uxSpeed,
+            timeout = uxTimeout,
+            anim    = animCfg,
+        })
+    else
+        minigameOk = VPChopMinigameFallback(veh, 'adv_carcass', 'carcass_core_missing')
+    end
+
+    destroyToolProp()
+
+    if not minigameOk then return false end
+
+    -- Animação física curta de separação/desprendimento estrutural (800ms)
+    return lib.progressBar({
+        duration     = 800,
+        label        = L('adv_carcass_pulling'),
+        useWhileDead = false, canCancel = true,
+        disable      = { move = true, car = true, combat = true },
+        anim         = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
+    }) == true
+end
+
+--- [v1.15 PR-G / v1.16 UX-C / UX-D / UX-E] Fluxo genérico de uma fase avançada via ActionSession:
 --- getActive → action:start → UX (física interativa ou progresso) → action:complete/cancel.
 --- Kill-switch (Config.ActionSession.Enable == false) cai no callback legacy adv:*.
---- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk, usePanelUx, useEngineUx }
+--- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk, usePanelUx, useEngineUx, useCarcassUx }
 local function doAdvAction(veh, netId, tCfg, opts)
     CreateThread(function()
         local useAction = VPChopActionModeAdvanced()   -- [PR-G] exclusivo: ActionSession OU legacy
@@ -1365,6 +1435,9 @@ local function doAdvAction(veh, netId, tCfg, opts)
             elseif opts.useEngineUx then
                 local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
                 uxOk, uxErr = runEngineUx(veh, ttlMs, true, tCfg)
+            elseif opts.useCarcassUx then
+                local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
+                uxOk, uxErr = runCarcassUx(veh, ttlMs, true, tCfg)
             else
                 uxOk = ux()
             end
@@ -1393,6 +1466,8 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 uxOk = runPanelUx(veh, opts.action, nil, false, tCfg)
             elseif opts.useEngineUx then
                 uxOk = runEngineUx(veh, nil, false, tCfg)
+            elseif opts.useCarcassUx then
+                uxOk = runCarcassUx(veh, nil, false, tCfg)
             else
                 uxOk = ux()
             end
@@ -1455,6 +1530,11 @@ end
 
 local function doAdvChopCarcass(veh, netId)
     if JackstandBusy then return end
+    -- [UX-E] Pré-requisito defensivo: o motor precisa ter sido removido primeiro (engine_first)
+    if not advIsChopped(netId, 'adv_engine') then
+        VPChopNotify(L('err_engine_first') or 'Remova o motor primeiro.', 'error')
+        return
+    end
     local welderRadius = (Config.AdvancedChop and Config.AdvancedChop.WelderRadius) or 8.0
     if not hasNearbyWelder(GetEntityCoords(veh), welderRadius) then
         VPChopNotify(L('err_no_welder_adv'), 'error'); return
@@ -1463,12 +1543,16 @@ local function doAdvChopCarcass(veh, netId)
     if not tName then VPChopNotify(L('notify_no_saw'), 'error'); return end
     JackstandBusy = true
     doAdvAction(veh, netId, tCfg, {
-        action = 'adv_carcass', legacyEvent = 'vp_chopshop:adv:chopCarcass',
-        label = L('adv_progress_carcass'),
-        ms = (Config.AdvancedChop and Config.AdvancedChop.CarcassProgressMs) or 10000,
-        anim = Config.AdvancedChop and Config.AdvancedChop.CarcassAnim,
-        dict = 'mini@repair', clip = 'fixing_a_player', flag = 49,
-        notifyOk = 'adv_carcass_done',
+        action       = 'adv_carcass',
+        legacyEvent  = 'vp_chopshop:adv:chopCarcass',
+        label        = L('adv_progress_carcass'),
+        ms           = (Config.AdvancedChop and Config.AdvancedChop.CarcassProgressMs) or 10000,
+        anim         = Config.AdvancedChop and Config.AdvancedChop.CarcassAnim,
+        dict         = 'amb@world_human_welding@male@base',
+        clip         = 'base',
+        flag         = 1,
+        notifyOk     = 'adv_carcass_done',
+        useCarcassUx = true,  -- [UX-E] Carcaça usa o corte estrutural interativo
     })
 end
 

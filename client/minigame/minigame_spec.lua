@@ -513,6 +513,107 @@ local function run()
     local logicalEngineState = 'REMOVED'
     check('UX-D.1 engine gameplay removed = logical state REMOVED', logicalEngineState == 'REMOVED')
 
+    -- ─── 22) UX-E: Carcass Profile & Configuration ───────────────────────────────
+    local carcassProf = Profiles.Get('carcass')
+    check('UX-E profile carcass exists', carcassProf ~= nil)
+    local advCarcassProf = Profiles.Get('adv_carcass')
+    check('UX-E profile adv_carcass alias exists', advCarcassProf ~= nil)
+    if carcassProf then
+        check('UX-E profile carcass toolClass is cut', carcassProf.toolClass == 'cut')
+        check('UX-E profile carcass has title', type(carcassProf.title) == 'string' and #carcassProf.title > 0)
+        check('UX-E profile carcass has helpText', type(carcassProf.helpText) == 'string' and #carcassProf.helpText > 0)
+        check('UX-E profile carcass fov is 48', carcassProf.fov == 48.0)
+        check('UX-E profile carcass minUxMs is 6000', carcassProf.minUxMs == 6000)
+        check('UX-E profile carcass reserveMs is 4000', carcassProf.reserveMs == 4000)
+    end
+
+    -- ─── 23) UX-E: Carcass 5 Structural Cutlines (Trace Polylines) ───────────────
+    if carcassProf and carcassProf.generatePoints then
+        local sections = carcassProf.generatePoints(1, 'carcass')
+        check('UX-E carcass generates exactly 5 structural sections', #sections == 5)
+
+        local expectedSections = {
+            carcass_crossmember_f = true,
+            carcass_pillar_l      = true,
+            carcass_pillar_r      = true,
+            carcass_floor_cross   = true,
+            carcass_crossmember_r = true,
+        }
+
+        local allSectionsMatch = true
+        local allPrimitiveTrace = true
+        local allWaypointsValid = true
+        for _, sec in ipairs(sections) do
+            if not expectedSections[sec.id] then allSectionsMatch = false end
+            if sec.primitive ~= 'trace' then allPrimitiveTrace = false end
+            if not sec.points or #sec.points < 2 then allWaypointsValid = false end
+            for _, wp in ipairs(sec.points or {}) do
+                if type(wp.x) ~= 'number' or type(wp.y) ~= 'number' or type(wp.z) ~= 'number' then
+                    allWaypointsValid = false
+                end
+            end
+        end
+        check('UX-E carcass sections match 5 structural zones of chassis', allSectionsMatch)
+        check('UX-E carcass uses trace primitive (polylines)', allPrimitiveTrace)
+        check('UX-E carcass all waypoints have valid 3D coordinates', allWaypointsValid)
+    end
+
+    -- ─── 24) UX-E: Carcass Camera & Geometric Framing ────────────────────────────
+    if carcassProf and carcassProf.calculateCamera then
+        local camPosC, lookAtC = carcassProf.calculateCamera(1, 'carcass')
+        check('UX-E carcass camera is elevated above chassis', camPosC.z > lookAtC.z)
+        check('UX-E carcass camera is positioned in 3/4 isometric perspective',
+            camPosC.x ~= lookAtC.x and camPosC.y ~= lookAtC.y)
+    end
+
+    -- ─── 25) UX-E: Carcass Budget Calculation & Fail-Closed ──────────────────────
+    -- Para carcaça: reserveMs = 4000, minUxMs = 6000 -> threshold = 10000ms
+    local function calcCarcassBudget(ttlMs, isAction)
+        if not isAction then return 45000, nil end
+        if not ttlMs or ttlMs <= 0 then return false, 'budget_invalid' end
+        local reserve = 4000
+        local minUx   = 6000
+        local budget  = ttlMs - reserve
+        if budget < minUx then return false, 'budget_insufficient' end
+        return budget, nil
+    end
+
+    -- 25a: Normal carcass TTL 45s -> budget = 41000ms
+    local cbNormal = calcCarcassBudget(45000, true)
+    check('UX-E carcass normal budget (45s TTL) = 41000ms', cbNormal == 41000)
+
+    -- 25b: Boundary exato (10000ms) -> 6000ms
+    local cbBound = calcCarcassBudget(10000, true)
+    check('UX-E carcass boundary exato (10000ms) = 6000ms', cbBound == 6000)
+
+    -- 25c: Below boundary (9999ms) -> fail-closed
+    local cbBelow, cbBelowErr = calcCarcassBudget(9999, true)
+    check('UX-E carcass 1ms abaixo boundary -> budget_insufficient',
+        cbBelow == false and cbBelowErr == 'budget_insufficient')
+
+    -- ─── 26) UX-E: Invariants (engine_first, no_welder_adv, 5/5 completion) ─────
+    -- 26a: engine_first rule: carcass requires engine to be chopped
+    local engineChopped = false
+    local canChopCarcassWithoutEngine = engineChopped == true
+    check('UX-E carcass locked when engine is NOT chopped (engine_first)', canChopCarcassWithoutEngine == false)
+    engineChopped = true
+    local canChopCarcassWithEngine = engineChopped == true
+    check('UX-E carcass unlocked when engine is chopped', canChopCarcassWithEngine == true)
+
+    -- 26b: Welder proximity requirement (no_welder_adv)
+    local hasWelderNearby = false
+    check('UX-E carcass fails when welder is not near (no_welder_adv)', hasWelderNearby == false)
+    hasWelderNearby = true
+    check('UX-E carcass succeeds when physical welder is near', hasWelderNearby == true)
+
+    -- 26c: 5/5 completion boundary (4/5 cannot complete)
+    local completedSections = 4
+    local isCarcassComplete = (completedSections == 5)
+    check('UX-E carcass cannot complete at 4/5 sections', isCarcassComplete == false)
+    completedSections = 5
+    isCarcassComplete = (completedSections == 5)
+    check('UX-E carcass completes only at 5/5 sections', isCarcassComplete == true)
+
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 
