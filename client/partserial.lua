@@ -140,19 +140,39 @@ local function playerIsPolice()
     return job ~= nil and policeSet[job] == true
 end
 
+--- [SERIAL] Resolve o nome de exibição legível de um modelo a partir de hash ou string de display.
+---@param rawModel string|number|nil
+---@return string|nil
+local function resolveModelDisplayName(rawModel)
+    if not rawModel or rawModel == '' or rawModel == 'CARMODEL' then return nil end
+    local num = tonumber(rawModel)
+    if num and num ~= 0 then
+        local disp = GetDisplayNameFromVehicleModel(num)
+        if disp and disp ~= '' and disp ~= 'CARNOTFOUND' then
+            local lbl = GetLabelText(disp)
+            if lbl and lbl ~= '' and lbl ~= 'NULL' then return lbl end
+            return disp
+        end
+    end
+    if type(rawModel) == 'string' then
+        local lbl = GetLabelText(rawModel)
+        if lbl and lbl ~= '' and lbl ~= 'NULL' then return lbl end
+        return rawModel
+    end
+    return nil
+end
+
 --- [SERIAL] Traduz uma linha de veredito do servidor em texto exibível. O servidor manda
---- só o display name do modelo (ex.: 'SULTANRS'); o GetLabelText (client) o deixa bonito.
---- NUNCA há placa em nenhuma linha.
+--- o identificador técnico/display do modelo; o GetDisplayNameFromVehicleModel e GetLabelText
+--- (client) o deixam amigável. NUNCA há placa em nenhuma linha.
 ---@param line { verdict: string, model: string|nil, count: number }
 ---@return string
 local function formatInspectLine(line)
     local n = tonumber(line.count) or 1
     if line.verdict == 'stolen' then
-        local pretty = line.model
+        local pretty = resolveModelDisplayName(line.model)
         if pretty then
-            local lbl = GetLabelText(pretty)
-            if not lbl or lbl == '' or lbl == 'NULL' then lbl = pretty end
-            return L('serial_inspect_stolen_model_fmt', n, lbl)
+            return L('serial_inspect_stolen_model_fmt', n, pretty)
         end
         return L('serial_inspect_stolen_fmt', n)
     elseif line.verdict == 'scratched' then

@@ -17,7 +17,7 @@
 --   exports.ox_inventory:AddItem(inv, item, count, metadata) -> success, response
 --   exports.ox_inventory:Search(inv, 'slots'|'count', items, metadata?) -> array|number|false
 --   exports.ox_inventory:SetMetadata(inv, slotId, metadata)  (substitui metadata do slot)
---   GetDisplayNameFromVehicleModel(modelHash) (server-side OK neste build — ver tyremarks)
+--   GetEntityModel(veh) -> modelHash (identidade técnica server-authoritative)
 
 local PS = Config.PartSerial or {}
 
@@ -50,9 +50,28 @@ AddEventHandler('entityRemoved', function(entity)
     end
 end)
 
+--- [SERIAL] Resolve o identificador server-safe do modelo do veículo (hash OneSync ou lookup).
+--- GetDisplayNameFromVehicleModel é CLIENT-ONLY e NUNCA deve ser chamado no servidor.
+---@param modelHash number
+---@return string
+local function resolveServerModelIdentifier(modelHash)
+    if not modelHash or modelHash == 0 then return 'CARMODEL' end
+    if GetResourceState('qbx_core') == 'started' then
+        local ok, vehs = pcall(function() return exports.qbx_core:GetVehiclesByName() or exports.qbx_core:GetVehicles() end)
+        if ok and type(vehs) == 'table' then
+            for modelName, data in pairs(vehs) do
+                if (data and (data.hash == modelHash or joaat(modelName) == modelHash)) or joaat(tostring(modelName)) == modelHash then
+                    return string.upper(tostring(data.model or modelName))
+                end
+            end
+        end
+    end
+    return tostring(modelHash)
+end
+
 --- [SERIAL] Resolve (ou cria e cacheia) a série deste veículo. O modelo de origem é
---- resolvido server-side pelo display name (NUNCA placa — regra absoluta, coerente com
---- as marcas de pneu). Reusa a mesma série para todas as peças do mesmo netId.
+--- resolvido server-side pelo identificador/hash do modelo (NUNCA placa — regra absoluta,
+--- coerente com as marcas de pneu). Reusa a mesma série para todas as peças do mesmo netId.
 ---@param netId number
 ---@return { serial: string, sourceModel: string }
 local function getVehicleSerial(netId)
@@ -64,7 +83,7 @@ local function getVehicleSerial(netId)
     if veh and veh ~= 0 and DoesEntityExist(veh) then
         local modelHash = GetEntityModel(veh)
         if modelHash and modelHash ~= 0 then
-            sourceModel = GetDisplayNameFromVehicleModel(modelHash) or 'CARMODEL'
+            sourceModel = resolveServerModelIdentifier(modelHash)
         end
     end
 
