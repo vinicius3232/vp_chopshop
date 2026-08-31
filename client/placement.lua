@@ -19,12 +19,20 @@ end
 ---@param callbackName string
 ---@return boolean
 local function ghostPlace(modelHash, callbackName)
-    local loaded = lib.requestModel(modelHash, 8000)
-    if not loaded then
+    local hash = type(modelHash) == 'number' and modelHash or GetHashKey(modelHash)
+    if type(IsModelInCdimage) == 'function' and not IsModelInCdimage(hash) then
+        hash = GetHashKey('prop_weldmodel_01')
+    end
+    RequestModel(hash)
+    local t0 = GetGameTimer()
+    while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 3000) do
+        Wait(20)
+    end
+    if not HasModelLoaded(hash) then
         VPChopNotify(L('notify_model_unavailable'), 'error')
-        SetModelAsNoLongerNeeded(modelHash)
         return false
     end
+    modelHash = hash
     local preview ---@type integer|nil
     local heading = GetEntityHeading(PlayerPedId())
     lib.showTextUI(L('placement_textui'))

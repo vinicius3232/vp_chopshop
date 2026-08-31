@@ -13,23 +13,32 @@ end
 function VPChopUpsertWelder(welder)
     clearWelder(welder.id)
     CreateThread(function()
-        local model = Config.WelderModel
-        lib.requestModel(model, 8000)
+        local model = Config.WelderModel or 'prop_weldmodel_01'
+        local hash = type(model) == 'number' and model or GetHashKey(model)
+        if type(IsModelInCdimage) == 'function' and not IsModelInCdimage(hash) then
+            hash = GetHashKey('prop_weldmodel_01')
+        end
+        RequestModel(hash)
+        local t0 = GetGameTimer()
+        while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 3000) do
+            Wait(20)
+        end
+        if not HasModelLoaded(hash) then return end
 
         local x, y, z = welder.x, welder.y, welder.z
         local found, groundZ = GetGroundZFor_3dCoord(x, y, z + 50.0, false)
         local spawnZ = found and groundZ or z
 
-        local ent = CreateObject(model, x, y, spawnZ, false, false, false)
+        local ent = CreateObject(hash, x, y, spawnZ, false, false, false)
         if not ent or ent == 0 then
-            SetModelAsNoLongerNeeded(model)
+            SetModelAsNoLongerNeeded(hash)
             return
         end
         SetEntityHeading(ent, welder.heading + 0.0)
         FreezeEntityPosition(ent, true)
         SetEntityAsMissionEntity(ent, true, true)
         WelderEntities[welder.id] = ent
-        SetModelAsNoLongerNeeded(model)
+        SetModelAsNoLongerNeeded(hash)
 
         exports.ox_target:addLocalEntity(ent, {
             {

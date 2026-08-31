@@ -683,7 +683,7 @@ Config.Tools = {
 
 --- Máquina de solda: objeto colocável (item do inventário). Obrigatória perto da bancada para
 --- craftear/entregar peças. Raio de detecção: WelderBenchRadius metros.
-Config.WelderModel       = `lr_smodd_cm_weldmachine_001`
+Config.WelderModel       = `prop_weldmodel_01`
 Config.WelderBenchRadius = 8.0
 Config.MinWelderSpacing  = 4.0
 
