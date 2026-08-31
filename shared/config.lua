@@ -674,9 +674,9 @@ Config.Tools = {
         dispatchChance = 0.0,
         speedMult = 0.7,
         HandProp = {
-            model    = 'prop_tool_screwflt01',
-            offset   = { 0.10, 0.03, 0.0 },
-            rotation = { 10, 0, -30 },
+            model    = 'prop_tool_drill',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
         },
     },
 }
@@ -830,9 +830,9 @@ Config.AdvancedChop = {
         clip = 'fixing_a_player',
         flag = 1,
         prop = {
-            model    = 'prop_tool_screwflt01',
-            offset   = { 0.10, 0.03, 0.0 },
-            rotation = { 10, 0, -30 },
+            model    = 'prop_tool_drill',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
         },
     },
 

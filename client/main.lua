@@ -191,14 +191,30 @@ local function spawnToolProp(propCfg)
         cfg = tCfg and tCfg.HandProp
     end
     if not cfg or not cfg.model then return end
-    local ok = pcall(lib.requestModel, cfg.model, 5000)
-    if not ok then return end
+
+    local model = cfg.model
+    -- Fail-safe: validação de cdimage / validade do model
+    if type(IsModelInCdimage) == 'function' and not IsModelInCdimage(model) then
+        if model == 'prop_tool_screwflt01' then
+            model = 'prop_tool_drill'
+        end
+        if not IsModelInCdimage(model) then
+            return -- Segue a operação sem prop sem travar o requestModel
+        end
+    end
+
+    local ok = pcall(lib.requestModel, model, 3000)
+    if not ok or (type(HasModelLoaded) == 'function' and not HasModelLoaded(model)) then
+        return
+    end
+
     local ped = PlayerPedId()
     local pos = GetEntityCoords(ped)
-    local prop = CreateObject(cfg.model, pos.x, pos.y, pos.z, true, true, false)
+    local prop = CreateObject(model, pos.x, pos.y, pos.z, true, true, false)
     SetEntityAsMissionEntity(prop, true, true)
-    SetModelAsNoLongerNeeded(cfg.model)
+    SetModelAsNoLongerNeeded(model)
     if not prop or prop == 0 then return end
+
     local handBone = GetPedBoneIndex(ped, 28422)
     local off = cfg.offset   or { 0.0, 0.0, 0.0 }
     local rot = cfg.rotation or { 0, 0, 0 }
@@ -1244,7 +1260,7 @@ end
 
 --- [v1.16 UX-D] Executa a experiência física interativa de desacoplamento do bloco do motor.
 --- 1. Orienta o ped para o cofre do motor.
---- 2. Spawna a parafusadeira mecânica (prop_tool_screwflt01) na mão.
+--- 2. Spawna a parafusadeira mecânica (prop_tool_drill) na mão.
 --- 3. Inicia animação mecânica contínua (EngineAnim).
 --- 4. Abre a NUI com os 4 calços estruturais usando a primitive 'drill'.
 --- 5. Executa a perfuração/soltura dos 4 fixadores.
@@ -1274,9 +1290,9 @@ local function runEngineUx(veh, ttlMs, isAction, tCfg)
         clip = 'fixing_a_player',
         flag = 1,
         prop = {
-            model    = 'prop_tool_screwflt01',
-            offset   = { 0.10, 0.03, 0.0 },
-            rotation = { 10, 0, -30 },
+            model    = 'prop_tool_drill',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
         },
     }
 

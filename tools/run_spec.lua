@@ -119,6 +119,28 @@ _G.Config = {
         DoorReward = { item = 'car_parts', amount = 1 },
         EngineReward = { item = 'car_parts', amount = 5 },
         CarcassRewards = { { item = 'car_parts', amount = 3, chance = 1.0 } },
+        EngineAnim = {
+            dict = 'mini@repair',
+            clip = 'fixing_a_player',
+            flag = 1,
+            prop = {
+                model    = 'prop_tool_drill',
+                offset   = { 0.12, 0.04, -0.02 },
+                rotation = { -80.0, 0.0, 0.0 },
+            },
+        },
+    },
+    Tools = {
+        ['mechanic_drill'] = {
+            MaxUses = 10,
+            dispatchChance = 0.0,
+            speedMult = 0.7,
+            HandProp = {
+                model    = 'prop_tool_drill',
+                offset   = { 0.12, 0.04, -0.02 },
+                rotation = { -80.0, 0.0, 0.0 },
+            },
+        },
     },
     CarPartRewards = {
         wheel_lf = { rubber = { amount = 2, chance = 1.0 } },
