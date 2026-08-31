@@ -178,6 +178,9 @@ function RequestAnimDict(_) end
 function HasAnimDictLoaded(_) return true end
 function TaskPlayAnim(_, _, _, _, _, _, _, _, _, _, _) end
 function ClearPedTasks(_) end
+function GetHeadingFromVector_2d(dx, dy) return math.deg(math.atan(dy, dx)) end
+function SetEntityCoordsNoOffset(_, _, _, _, _, _, _) end
+function SetEntityHeading(_, _) end
 function PlayerPedId() return 1 end
 function IsPedDeadOrDying(_, _) return false end
 function GetCurrentResourceName() return 'vp_chopshop' end

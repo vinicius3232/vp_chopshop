@@ -49,11 +49,38 @@ local defaultList = {
         title = 'REMOÇÃO DE RODA',
         helpText = 'Desparafuse os 5 parafusos da roda girando o mouse',
         toolClass = 'screw',
-        fov = 40.0,
+        fov = 36.0,
         calculateCamera = function(vehicle, boneKey)
             local boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, boneKey)
-            local camPos = bonePos + (rightV * (sideSign * 1.35)) + (up * 0.1)
+            local isFront = (boneKey:find('_f') ~= nil) or (boneKey:find('lf') ~= nil) or (boneKey:find('rf') ~= nil)
+            -- Offset angular oposto ao posicionamento do ped para visão limpa dos 5 parafusos
+            local angleOffset = isFront and -0.22 or 0.22
+            local camPos = bonePos + (rightV * (sideSign * 1.15)) + (fwd * angleOffset) + (up * 0.12)
             return camPos, bonePos
+        end,
+        setupPed = function(ped, vehicle, boneKey)
+            local boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, boneKey)
+            local isFront = (boneKey:find('_f') ~= nil) or (boneKey:find('lf') ~= nil) or (boneKey:find('rf') ~= nil)
+            local fwdOffset = isFront and 0.45 or -0.45
+            local workPos = bonePos + (rightV * (sideSign * 0.65)) + (fwd * fwdOffset)
+
+            local dx = bonePos.x - workPos.x
+            local dy = bonePos.y - workPos.y
+            local heading = 0.0
+            if GetHeadingFromVector_2d then
+                heading = GetHeadingFromVector_2d(dx, dy)
+            elseif math.atan then
+                heading = math.deg(math.atan(dy, dx))
+            end
+
+            if SetEntityCoordsNoOffset then
+                SetEntityCoordsNoOffset(ped, workPos.x, workPos.y, workPos.z, false, false, false)
+            elseif SetEntityCoords then
+                SetEntityCoords(ped, workPos.x, workPos.y, workPos.z, false, false, false, false)
+            end
+            if SetEntityHeading then
+                SetEntityHeading(ped, heading)
+            end
         end,
         generatePoints = function(vehicle, boneKey)
             local boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, boneKey)

@@ -44,6 +44,29 @@ function VPChopIsTruckNearby()
     return _truckNearCache
 end
 
+function VPChopFindNearestTruck(radius)
+    local maxDist = radius or 5.0
+    local ppos = GetEntityCoords(PlayerPedId())
+    local hashes = getTruckHashes()
+    local nearest, minDist = nil, maxDist
+    for _, veh in ipairs(GetGamePool('CVehicle')) do
+        if DoesEntityExist(veh) then
+            local dist = #(ppos - GetEntityCoords(veh))
+            if dist < minDist then
+                local model = GetEntityModel(veh)
+                for _, h in ipairs(hashes) do
+                    if model == h then
+                        nearest = veh
+                        minDist = dist
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return nearest
+end
+
 -- ─── Blip ─────────────────────────────────────────────────────────────────────
 
 local function removeFenceBlip()

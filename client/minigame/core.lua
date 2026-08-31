@@ -147,6 +147,9 @@ function Core.Start(vehicle, profileName, opts)
 
     -- 3) Animação contextual do jogador no mundo GTA
     local ped = PlayerPedId()
+    if profile.setupPed then
+        pcall(profile.setupPed, ped, vehicle, currentSession.boneKey)
+    end
     local animDict = (opts.anim and opts.anim.dict) or 'mini@repair'
     local animClip = (opts.anim and opts.anim.clip) or 'fixing_a_player'
     local animFlag = (opts.anim and opts.anim.flag) or 49

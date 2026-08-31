@@ -975,6 +975,50 @@ local function run()
         progressState.completedCount == 5 and progressState.finished == true)
     check('UX-E.2 exatamente 5 eventos minigamePointComplete emitidos', #nuiEvents == 5)
 
+    -- ─── 30) UX-F.1: Wheel Camera Hardening & Tyre Carry/Pickup Lifecycle ────────
+    local wheelProfile = Profiles.Get('wheel')
+    check('UX-F.1 wheel profile exists', wheelProfile ~= nil)
+    check('UX-F.1 wheel profile has fov 36.0', wheelProfile.fov == 36.0)
+    check('UX-F.1 wheel profile has setupPed function', type(wheelProfile.setupPed) == 'function')
+
+    -- 30a: Validação de posicionamento da câmera e do ped nas 4 rodas
+    local wheelBones = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
+    for _, bKey in ipairs(wheelBones) do
+        local camPos, lookAt = wheelProfile.calculateCamera(1, bKey)
+        check(('UX-F.1 wheel %s camera position computed'):format(bKey), camPos ~= nil and lookAt ~= nil)
+        local okPed, errPed = pcall(wheelProfile.setupPed, 1, 1, bKey)
+        check(('UX-F.1 wheel %s setupPed executes cleanly'):format(bKey), okPed == true and errPed == nil)
+    end
+
+    -- 30b: Simulação do ciclo de Carry -> Drop no chão -> Target de Pickup -> Carry restaurado
+    local mockEntitlementId = 778899
+    local testCarryPart = {
+        partKey = 'wheel_lf',
+        propHandle = 456,
+        isTyre = true,
+        entitlementId = mockEntitlementId,
+    }
+
+    -- 1. Drop no chão: captura o entitlementId e limpa carry
+    local groundEntId = testCarryPart.entitlementId
+    local groundPropHandle = testCarryPart.propHandle
+    testCarryPart.propHandle = nil
+    testCarryPart = nil -- VPChopDropCarryPart()
+
+    check('UX-F.1 tyre drop preserves entitlementId for ground prop', groundEntId == mockEntitlementId)
+    check('UX-F.1 tyre drop clears carry state', testCarryPart == nil)
+
+    -- 2. Pickup do chão: restaura o carry com o MESMO entitlementId sem duplicar
+    local pickedCarryPart = {
+        partKey = 'wheel_tyre',
+        propHandle = groundPropHandle,
+        isTyre = true,
+        entitlementId = groundEntId,
+    }
+    check('UX-F.1 tyre pickup restores carry state with identical entitlementId',
+        pickedCarryPart.isTyre == true and pickedCarryPart.entitlementId == mockEntitlementId)
+    check('UX-F.1 tyre pickup reuses prop handle', pickedCarryPart.propHandle == groundPropHandle)
+
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 

@@ -447,6 +447,96 @@ end
 JackstandData = {}   -- forward-declared no topo; re-inicializa sem criar novo local
 local JackstandBusy = false
 
+local function attachWheelPropToPed(prop)
+    if not prop or not DoesEntityExist(prop) then return false end
+    local ped = PlayerPedId()
+    local bone = GetPedBoneIndex(ped, 4089)
+    AttachEntityToEntity(prop, ped, bone,
+        0.1, 0.08, 0.25,
+        190.0, 0.0, 0.0,
+        true, false, false, false, 2, true)
+
+    RequestAnimDict('anim@heists@box_carry@')
+    local t0 = GetGameTimer()
+    while not HasAnimDictLoaded('anim@heists@box_carry@') and (GetGameTimer() - t0 < 2000) do
+        Wait(50)
+    end
+    if HasAnimDictLoaded('anim@heists@box_carry@') then
+        TaskPlayAnim(ped, 'anim@heists@box_carry@', 'idle', 5.0, 1.0, -1, 49, 0.0, false, false, false)
+    end
+    return true
+end
+
+local function registerGroundTyreTarget(groundProp, groundEntitlementId)
+    if not groundProp or not DoesEntityExist(groundProp) then return end
+
+    local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
+    local targetName = 'vp_ground_tyre_' .. tostring(groundProp)
+
+    exports.ox_target:addLocalEntity(groundProp, {
+        {
+            name        = targetName .. '_pick',
+            label       = L('fence_tyre_pick_label'),
+            icon        = 'fa-solid fa-hand',
+            distance    = 2.0,
+            canInteract = function()
+                return not VPChopCarryingPart
+            end,
+            onSelect    = function()
+                if VPChopCarryingPart then return end
+                exports.ox_target:removeLocalEntity(groundProp)
+                FreezeEntityPosition(groundProp, false)
+
+                -- Animação rápida de pegar
+                local ped = PlayerPedId()
+                RequestAnimDict('anim@mp_snowball')
+                local t0 = GetGameTimer()
+                while not HasAnimDictLoaded('anim@mp_snowball') and (GetGameTimer() - t0 < 1000) do
+                    Wait(20)
+                end
+                if HasAnimDictLoaded('anim@mp_snowball') then
+                    TaskPlayAnim(ped, 'anim@mp_snowball', 'pickup_snowball', 4.0, -4.0, 600, 0, 0.0, false, false, false)
+                    Wait(500)
+                end
+
+                attachWheelPropToPed(groundProp)
+                VPChopCarryingPart = {
+                    partKey       = 'wheel_tyre',
+                    propHandle    = groundProp,
+                    isTyre        = true,
+                    entitlementId = groundEntitlementId,
+                }
+                lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
+                    position = 'left-center',
+                    icon     = 'circle-dot',
+                })
+            end,
+        },
+        {
+            name        = targetName .. '_truck',
+            label       = L('tyre_store_in_truck'),
+            icon        = 'fa-solid fa-truck-pickup',
+            distance    = 2.5,
+            canInteract = function()
+                return VPChopIsTruckNearby()
+            end,
+            onSelect    = function()
+                local t = VPChopFindNearestTruck(5.0)
+                if not t then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
+                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
+                    NetworkGetNetworkIdFromEntity(t), groundEntitlementId)
+                if not cbOk or not res or not res.ok then
+                    VPChopNotify(VPChopTyreLoadErr(res and res.err), 'error')
+                    return
+                end
+                exports.ox_target:removeLocalEntity(groundProp)
+                DeleteEntity(groundProp)
+                VPChopNotify(L('tyre_stored_fmt', res.count, res.max or max), 'success')
+            end,
+        },
+    })
+end
+
 local function VPTyreSpawnWheelPropInHand(partKey)
     local modelName = 'prop_wheel_01'
     RequestModel(modelName)
@@ -461,22 +551,8 @@ local function VPTyreSpawnWheelPropInHand(partKey)
     SetEntityAsMissionEntity(prop, true, true)
     SetModelAsNoLongerNeeded(modelName)
     if not prop or prop == 0 then return nil end
-    -- Attachment idêntico ao PutWheelInHands do wheel_theft (bone 4089, mesmos offsets/rotações)
-    local bone = GetPedBoneIndex(ped, 4089)
-    AttachEntityToEntity(prop, ped, bone,
-        0.1, 0.08, 0.25,
-        190.0, 0.0, 0.0,
-        true, false, false, false, 2, true)
-    -- Carry animation: igual ao PlayAnimFree do wheel_theft (flag 49 = loop, -1 = sem timeout)
-    RequestAnimDict('anim@heists@box_carry@')
-    local t0 = GetGameTimer()
-    while not HasAnimDictLoaded('anim@heists@box_carry@') do
-        if GetGameTimer() - t0 > 2000 then break end
-        Wait(50)
-    end
-    if HasAnimDictLoaded('anim@heists@box_carry@') then
-        TaskPlayAnim(ped, 'anim@heists@box_carry@', 'idle', 5.0, 1.0, -1, 49, 0.0, false, false, false)
-    end
+
+    attachWheelPropToPed(prop)
     return prop
 end
 
@@ -1134,23 +1210,44 @@ local function doJackstandTyreSteal(veh, wheelIdx, partKey)
         end
         SetVehicleWheelXOffset(veh, wheelIdx, 9999999.0)
 
-        -- Prop nas mãos + reiniciar carry animation (igual ao PutWheelInHands do wheel_theft)
-        local wheelProp = VPTyreSpawnWheelPropInHand(partKey)
+        -- 1) Limpar qualquer carry state residual antes de instanciar o novo prop
         VPChopDropCarryPart()
-        -- [v1.15 PR-E/F] guarda o entitlementId do pneu (nunca gerado client-side —
-        -- vem do RESULTADO terminal da ActionSession, ou do callback legacy).
-        VPChopCarryingPart = {
-            partKey = partKey, propHandle = wheelProp, isTyre = true,
-            entitlementId = tyreEntitlementId,
-        }
 
-        -- [PERF] TextUI exibida UMA vez (persiste até hideTextUI). Antes havia uma thread
-        -- repetindo showTextUI a cada 200ms (5 roundtrips NUI/s sem mudar nada).
-        -- VPChopDropCarryPart() (carry.lua) chama hideTextUI ao soltar o pneu.
-        lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
-            position = 'left-center',
-            icon     = 'circle-dot',
-        })
+        -- 2) Prop nas mãos + reiniciar carry animation (igual ao PutWheelInHands do wheel_theft)
+        local wheelProp = VPTyreSpawnWheelPropInHand(partKey)
+        if wheelProp and DoesEntityExist(wheelProp) then
+            -- [v1.15 PR-E/F] guarda o entitlementId do pneu (nunca gerado client-side —
+            -- vem do RESULTADO terminal da ActionSession, ou do callback legacy).
+            VPChopCarryingPart = {
+                partKey       = partKey,
+                propHandle    = wheelProp,
+                isTyre        = true,
+                entitlementId = tyreEntitlementId,
+            }
+
+            -- [PERF] TextUI exibida UMA vez (persiste até hideTextUI).
+            -- VPChopDropCarryPart() (carry.lua) chama hideTextUI ao soltar o pneu.
+            lib.showTextUI('[G] ' .. L('tyre_carry_textui'), {
+                position = 'left-center',
+                icon     = 'circle-dot',
+            })
+        else
+            -- Fallback defensivo: se a criação/attach na mão falhar, coloca prop de chão com target de pickup
+            local ped = PlayerPedId()
+            local px, py, pz = table.unpack(GetEntityCoords(ped))
+            local modelHash = GetHashKey('prop_wheel_01')
+            RequestModel(modelHash)
+            local tLoad = GetGameTimer()
+            while not HasModelLoaded(modelHash) and (GetGameTimer() - tLoad < 2000) do Wait(50) end
+            local groundProp = CreateObject(modelHash, px, py, pz - 0.9, true, true, true)
+            SetEntityAsMissionEntity(groundProp, true, true)
+            SetModelAsNoLongerNeeded(modelHash)
+            if groundProp and DoesEntityExist(groundProp) then
+                FreezeEntityPosition(groundProp, true)
+                registerGroundTyreTarget(groundProp, tyreEntitlementId)
+                VPChopNotify(L('tyre_dropped'), 'inform')
+            end
+        end
     end)
 end
 
@@ -1975,33 +2072,7 @@ local function placeTyreHandPropOnGround()
     SetEntityRotation(handProp, 0.0, 0.0, 0.0, 5, true)
     FreezeEntityPosition(handProp, true)
 
-    -- Target: carregar no truck
-    local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
-    exports.ox_target:addLocalEntity(handProp, {
-        {
-            name        = 'vp_ground_tyre_truck_' .. tostring(handProp),
-            label       = L('tyre_store_in_truck'),
-            icon        = 'fa-solid fa-truck-pickup',
-            distance    = 2.0,
-            canInteract = function() return VPChopIsTruckNearby() end,  -- [AUDIT A1] cache 500ms (era GetGamePool por frame)
-            onSelect    = function()
-                local t = VPChopFindNearestTruck(5.0)
-                if not t then VPChopNotify(L('tyre_no_truck_nearby'), 'error'); return end
-                -- [v1.15 #1] Request/response: só remove o prop e notifica sucesso se o
-                -- servidor confirmou (ok==true). count vem do servidor, nunca de cur+1.
-                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
-                    NetworkGetNetworkIdFromEntity(t), groundEntitlementId)
-                if not cbOk or not res or not res.ok then
-                    VPChopNotify(VPChopTyreLoadErr(res and res.err), 'error')
-                    return
-                end
-                exports.ox_target:removeLocalEntity(handProp)
-                DeleteEntity(handProp)
-                VPChopNotify(L('tyre_stored_fmt', res.count, res.max or max), 'success')
-            end,
-        },
-    })
-
+    registerGroundTyreTarget(handProp, groundEntitlementId)
     VPChopNotify(L('tyre_dropped'), 'inform')
 end
 
