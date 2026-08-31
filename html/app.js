@@ -15,6 +15,8 @@
   let activeHotspotId = null;
   let prevMouseAngle = 0;
   let uxSpeedMult = 1.0;
+  let cutTimer = null;
+  let lastCutTimestamp = 0;
 
   function postNui(event, data = {}) {
     const resourceName = window.GetParentResourceName ? window.GetParentResourceName() : 'vp_chopshop';
@@ -25,25 +27,88 @@
     }).catch(() => {});
   }
 
+  function completePoint(pt) {
+    if (pt.completed) return;
+    pt.completed = true;
+    pt.progress = 100;
+    pt.progressCircle.style.strokeDashoffset = 0;
+    pt.element.classList.remove('active', 'cutting');
+    pt.element.classList.add('completed');
+    pt.icon.innerHTML = '&#10003;'; // Checkmark
+    postNui('minigamePointComplete', { id: pt.id });
+    activeHotspotId = null;
+    stopCuttingLoop();
+    updateOverallProgress();
+  }
+
+  function startCuttingLoop(ptId) {
+    stopCuttingLoop();
+    lastCutTimestamp = performance.now();
+
+    function cutTick(now) {
+      if (!activeMinigame || activeHotspotId !== ptId) {
+        stopCuttingLoop();
+        return;
+      }
+      const pt = pointsMap[ptId];
+      if (!pt || pt.completed) {
+        stopCuttingLoop();
+        return;
+      }
+
+      const deltaMs = now - lastCutTimestamp;
+      lastCutTimestamp = now;
+
+      // Rate of progress: 100% / totalDurationMs
+      const durationMs = pt.holdTimeMs || 2000;
+      const progressDelta = (deltaMs / durationMs) * 100 * uxSpeedMult;
+
+      pt.progress = Math.min(100, pt.progress + progressDelta);
+      const offset = CIRCLE_CIRCUMFERENCE * (1 - pt.progress / 100);
+      pt.progressCircle.style.strokeDashoffset = offset;
+
+      if (pt.progress >= 100) {
+        completePoint(pt);
+      } else {
+        updateOverallProgress();
+        cutTimer = requestAnimationFrame(cutTick);
+      }
+    }
+
+    cutTimer = requestAnimationFrame(cutTick);
+  }
+
+  function stopCuttingLoop() {
+    if (cutTimer) {
+      cancelAnimationFrame(cutTimer);
+      cutTimer = null;
+    }
+  }
+
   function startMinigame(data) {
     activeMinigame = true;
     hudTitle.textContent = data.title || 'OPERAÇÃO FÍSICA';
-    hudHelp.textContent = data.helpText || 'Mantenha o clique e gire o mouse ao redor do fixador';
+    hudHelp.textContent = data.helpText || 'Mantenha o clique e trabalhe sobre cada ponto';
     uxSpeedMult = data.uxSpeed || 1.0;
     pointsMap = {};
     hotspotContainer.innerHTML = '';
     activeHotspotId = null;
+    stopCuttingLoop();
 
     const points = data.points || [];
     points.forEach((pt, index) => {
       const ptId = pt.id || `point_${index}`;
-      const neededDeg = (pt.neededDeg || 720.0) / uxSpeedMult;
+      const primitive = pt.primitive || (data.toolClass === 'cut' ? 'cut' : 'rotate');
+      const neededDeg = pt.neededDeg || 720.0;
+      const holdTimeMs = pt.holdTimeMs || 2200.0;
       
       const el = document.createElement('div');
-      el.className = 'hotspot';
+      el.className = `hotspot primitive-${primitive}`;
       el.id = `hs-${ptId}`;
       el.style.left = `${(pt.x || 0.5) * 100}%`;
       el.style.top = `${(pt.y || 0.5) * 100}%`;
+
+      const iconLabel = primitive === 'cut' ? '&#9986;' : `${index + 1}`;
 
       el.innerHTML = `
         <svg class="hotspot-svg" viewBox="0 0 64 64">
@@ -51,8 +116,8 @@
           <circle class="hotspot-progress-circle" cx="32" cy="32" r="${CIRCLE_RADIUS}" />
         </svg>
         <div class="hotspot-inner">
-          <span class="hotspot-icon">${index + 1}</span>
-          <span class="hotspot-label">${pt.label || 'PARAFUSO'}</span>
+          <span class="hotspot-icon">${iconLabel}</span>
+          <span class="hotspot-label">${pt.label || (primitive === 'cut' ? 'CORTE' : 'PARAFUSO')}</span>
         </div>
       `;
 
@@ -66,6 +131,12 @@
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
         prevMouseAngle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+
+        if (primitive === 'cut' || primitive === 'hold') {
+          el.classList.add('cutting');
+          startCuttingLoop(ptId);
+        }
+
         e.preventDefault();
       });
 
@@ -73,10 +144,12 @@
 
       pointsMap[ptId] = {
         id: ptId,
+        primitive: primitive,
         element: el,
         progressCircle: el.querySelector('.hotspot-progress-circle'),
         icon: el.querySelector('.hotspot-icon'),
         neededDeg: neededDeg,
+        holdTimeMs: holdTimeMs,
         accumulatedDeg: 0,
         progress: 0,
         completed: false,
@@ -108,6 +181,7 @@
   function stopMinigame() {
     activeMinigame = false;
     activeHotspotId = null;
+    stopCuttingLoop();
     app.classList.add('hidden');
     hotspotContainer.innerHTML = '';
     pointsMap = {};
@@ -133,11 +207,13 @@
     }
   }
 
-  // ─── Mouse Motion & Gesture Tracking ────────────────────────────────────────
+  // ─── Mouse Motion & Gesture Tracking (Rotate Primitive) ─────────────────────
   window.addEventListener('mousemove', (e) => {
     if (!activeMinigame || !activeHotspotId) return;
     const pt = pointsMap[activeHotspotId];
     if (!pt || pt.completed) return;
+
+    if (pt.primitive !== 'rotate') return;
 
     const rect = pt.element.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
@@ -153,22 +229,17 @@
     const deltaDeg = Math.abs(delta) * (180 / Math.PI);
     // Discard erratic mouse jumps
     if (deltaDeg > 0 && deltaDeg < 60) {
-      pt.accumulatedDeg += deltaDeg;
+      pt.accumulatedDeg += deltaDeg * uxSpeedMult;
       pt.progress = Math.min(100, Math.floor((pt.accumulatedDeg / pt.neededDeg) * 100));
 
       const offset = CIRCLE_CIRCUMFERENCE * (1 - pt.progress / 100);
       pt.progressCircle.style.strokeDashoffset = offset;
 
-      if (pt.progress >= 100 && !pt.completed) {
-        pt.completed = true;
-        pt.element.classList.remove('active');
-        pt.element.classList.add('completed');
-        pt.icon.innerHTML = '&#10003;'; // Checkmark
-        postNui('minigamePointComplete', { id: pt.id });
-        activeHotspotId = null;
+      if (pt.progress >= 100) {
+        completePoint(pt);
+      } else {
+        updateOverallProgress();
       }
-
-      updateOverallProgress();
     }
 
     prevMouseAngle = currentAngle;
@@ -176,8 +247,10 @@
 
   window.addEventListener('mouseup', () => {
     if (activeHotspotId && pointsMap[activeHotspotId]) {
-      pointsMap[activeHotspotId].element.classList.remove('active');
+      const pt = pointsMap[activeHotspotId];
+      pt.element.classList.remove('active', 'cutting');
     }
+    stopCuttingLoop();
     activeHotspotId = null;
   });
 

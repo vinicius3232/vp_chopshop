@@ -7,9 +7,10 @@
 
 _G.VPChopProfiles = _G.VPChopProfiles or {}
 local Profiles = _G.VPChopProfiles
+Profiles.list = Profiles.list or {}
 local Proj = _G.VPChopProjection
 
-Profiles.list = {
+local defaultList = {
     -- ─── Profile DEMO (Técnico / Validação UX-A) ──────────────────────────────
     demo = {
         title = 'DEMO TÉCNICA — FIXADORES',
@@ -174,6 +175,13 @@ Profiles.list = {
         end
     }
 }
+
+-- Mesclar defaultList preservando chaves já registradas
+for k, v in pairs(defaultList) do
+    if Profiles.list[k] == nil then
+        Profiles.list[k] = v
+    end
+end
 
 --- Obtém a definição de um profile por nome.
 ---@param name string

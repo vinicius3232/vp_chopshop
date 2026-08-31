@@ -177,6 +177,24 @@ html, body {
   margin-top: 1px;
 }
 
+.hotspot.cutting {
+  animation: cutPulse 0.18s infinite alternate ease-in-out;
+}
+
+@keyframes cutPulse {
+  0% { transform: translate(-50%, -50%) scale(1.10) rotate(-1deg); }
+  100% { transform: translate(-50%, -50%) scale(1.14) rotate(1deg); }
+}
+
+.hotspot.primitive-cut .hotspot-progress-circle {
+  stroke: var(--accent-amber);
+}
+
+.hotspot.primitive-cut.cutting .hotspot-progress-circle {
+  stroke: #fbbf24;
+  filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.8));
+}
+
 .hotspot.completed .hotspot-icon {
   color: var(--accent-green);
 }

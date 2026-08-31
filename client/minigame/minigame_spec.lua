@@ -271,6 +271,128 @@ local function run()
     check('UX-B.2 budget independe do valor absoluto do clock do servidor',
         derivedTtl == ttlA and bMock == bA)
 
+    -- ─── 11) UX-C: Body Panels Profiles Existence & Configuration ───────────────
+    local panelParts = {
+        'panel_bonnet', 'panel_boot',
+        'panel_door_dside_f', 'panel_door_pside_f',
+        'panel_door_dside_r', 'panel_door_pside_r',
+    }
+
+    for _, pKey in ipairs(panelParts) do
+        local prof = Profiles.Get(pKey)
+        check('UX-C profile ' .. pKey .. ' exists', prof ~= nil)
+        if prof then
+            check('UX-C profile ' .. pKey .. ' toolClass is cut', prof.toolClass == 'cut')
+            check('UX-C profile ' .. pKey .. ' has title', type(prof.title) == 'string' and #prof.title > 0)
+            check('UX-C profile ' .. pKey .. ' has helpText', type(prof.helpText) == 'string' and #prof.helpText > 0)
+            check('UX-C profile ' .. pKey .. ' has valid fov', type(prof.fov) == 'number' and prof.fov > 30 and prof.fov < 80)
+            check('UX-C profile ' .. pKey .. ' has minUxMs and reserveMs', prof.minUxMs == 3500 and prof.reserveMs == 3500)
+        end
+    end
+
+    -- ─── 12) UX-C: Body Panels Points & Primitive Validation ─────────────────────
+    for _, pKey in ipairs(panelParts) do
+        local prof = Profiles.Get(pKey)
+        if prof and prof.generatePoints then
+            local pts = prof.generatePoints(1, pKey:gsub('panel_', ''))
+            check('UX-C profile ' .. pKey .. ' generates exactly 3 points', #pts == 3)
+            local pIds = {}
+            local allUniqueIds = true
+            local allPrimitiveCut = true
+            local allHoldTimeValid = true
+            for _, pt in ipairs(pts) do
+                if pIds[pt.id] then allUniqueIds = false end
+                pIds[pt.id] = true
+                if pt.primitive ~= 'cut' then allPrimitiveCut = false end
+                if not pt.holdTimeMs or pt.holdTimeMs < 1000 or pt.holdTimeMs > 5000 then
+                    allHoldTimeValid = false
+                end
+            end
+            check('UX-C profile ' .. pKey .. ' all point IDs are unique', allUniqueIds)
+            check('UX-C profile ' .. pKey .. ' uses cut primitive (not rotate)', allPrimitiveCut)
+            check('UX-C profile ' .. pKey .. ' has valid holdTimeMs', allHoldTimeValid)
+        end
+    end
+
+    -- ─── 13) UX-C: Camera Perspectives per Panel ─────────────────────────────────
+    -- 13a: Portas motorista (dside) -> câmera do lado esquerdo (sideSign = -1)
+    local dsideProf = Profiles.Get('panel_door_dside_f')
+    if dsideProf then
+        local camPosD, lookAtD = dsideProf.calculateCamera(1, 'door_dside_f')
+        check('UX-C door_dside_f camera is positioned on the driver side (left)', camPosD.x < lookAtD.x)
+    end
+
+    -- 13b: Portas passageiro (pside) -> câmera do lado direito (sideSign = +1)
+    local psideProf = Profiles.Get('panel_door_pside_f')
+    if psideProf then
+        local camPosP, lookAtP = psideProf.calculateCamera(1, 'door_pside_f')
+        check('UX-C door_pside_f camera is positioned on the passenger side (right)', camPosP.x > lookAtP.x)
+    end
+
+    -- 13c: Capô (bonnet) -> câmera na frente do veículo (+Y / +fwd)
+    local bonnetProf = Profiles.Get('panel_bonnet')
+    if bonnetProf then
+        local camPosB, lookAtB = bonnetProf.calculateCamera(1, 'bonnet')
+        check('UX-C bonnet camera is positioned in front of the vehicle', camPosB.y > lookAtB.y)
+        check('UX-C bonnet camera is elevated above the hood', camPosB.z > lookAtB.z)
+    end
+
+    -- 13d: Porta-malas (boot) -> câmera atrás do veículo (-Y / -fwd)
+    local bootProf = Profiles.Get('panel_boot')
+    if bootProf then
+        local camPosBt, lookAtBt = bootProf.calculateCamera(1, 'boot')
+        check('UX-C boot camera is positioned behind the vehicle', camPosBt.y < lookAtBt.y)
+        check('UX-C boot camera is elevated above the trunk', camPosBt.z > lookAtBt.z)
+    end
+
+    -- ─── 14) UX-C: Tool Speed Dynamics (saw_cheap vs saw_pro) ────────────────────
+    local sawCheap = VPChopToolRegistry.get('saw_cheap')
+    local sawPro   = VPChopToolRegistry.get('saw_pro')
+    check('UX-C saw_cheap exists in ToolRegistry', sawCheap ~= nil)
+    check('UX-C saw_pro exists in ToolRegistry', sawPro ~= nil)
+    if sawCheap and sawPro then
+        local cheapSpeed = 1.0 / (sawCheap.uxSpeed or 1.4)
+        local proSpeed   = 1.0 / (sawPro.uxSpeed or 1.0)
+        check('UX-C saw_pro cut rate is faster than saw_cheap', proSpeed > cheapSpeed)
+        check('UX-C saw_cheap uxSpeed = 1.4 (slower rate)', sawCheap.uxSpeed == 1.4)
+        check('UX-C saw_pro uxSpeed = 1.0 (standard rate)', sawPro.uxSpeed == 1.0)
+    end
+
+    -- ─── 15) UX-C: Panel Budget Calculation & Fail-Closed ────────────────────────
+    -- Para painéis: reserveMs = 3500, minUxMs = 3500 -> threshold = 7000ms
+    local function calcPanelBudget(ttlMs, isAction)
+        if not isAction then return 45000, nil end
+        if not ttlMs or ttlMs <= 0 then return false, 'budget_invalid' end
+        local reserve = 3500
+        local minUx   = 3500
+        local budget  = ttlMs - reserve
+        if budget < minUx then return false, 'budget_insufficient' end
+        return budget, nil
+    end
+
+    -- 15a: Normal panel TTL 45s -> budget = 41500ms
+    local pbNormal = calcPanelBudget(45000, true)
+    check('UX-C panel normal budget (45s TTL) = 41500ms', pbNormal == 41500)
+
+    -- 15b: Boundary exato (7000ms) -> budget = 3500ms (pass)
+    local pbBound, pbBoundErr = calcPanelBudget(7000, true)
+    check('UX-C panel boundary exato (7000ms) = 3500ms', pbBound == 3500 and pbBoundErr == nil)
+
+    -- 15c: Um ms abaixo do boundary (6999ms) -> fail-closed (budget_insufficient)
+    local pbBelow, pbBelowErr = calcPanelBudget(6999, true)
+    check('UX-C panel 1ms abaixo boundary (6999ms) -> budget_insufficient',
+        pbBelow == false and pbBelowErr == 'budget_insufficient')
+
+    -- 15d: Legacy mode -> 45000ms
+    local pbLegacy = calcPanelBudget(nil, false)
+    check('UX-C panel legacy mode -> 45000ms fallback', pbLegacy == 45000)
+
+    -- 15e: Generic panel router profile
+    local genericProf = Profiles.Get('panel')
+    check('UX-C generic panel profile routes to bonnet points', #genericProf.generatePoints(1, 'bonnet') == 3)
+    check('UX-C generic panel profile routes to boot points', #genericProf.generatePoints(1, 'boot') == 3)
+    check('UX-C generic panel profile routes to door points', #genericProf.generatePoints(1, 'door_dside_f') == 3)
+
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 

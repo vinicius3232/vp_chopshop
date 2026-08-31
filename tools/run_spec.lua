@@ -171,6 +171,7 @@ dofile(base .. '/shared/action_gate.lua')             -- [PR-G] VPChopActionMode
 dofile(base .. '/server/partserial.lua')              -- [SERIAL] provê VPChopSerialGen / VPChopAddStolenCarParts
 dofile(base .. '/client/minigame/camera.lua')        -- [UX-A] CameraController
 dofile(base .. '/client/minigame/projection.lua')    -- [UX-A] ProjectionHelper
+dofile(base .. '/client/minigame/profiles/panels.lua')-- [UX-C] Panel Profiles
 dofile(base .. '/client/minigame/profiles.lua')      -- [UX-A] Profiles Registry
 dofile(base .. '/client/minigame/fallback.lua')      -- [UX-A] Minigame Fallback
 dofile(base .. '/client/minigame/core.lua')          -- [UX-A] VPChopDismantleMinigame Core

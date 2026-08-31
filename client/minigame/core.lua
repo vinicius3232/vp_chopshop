@@ -119,15 +119,19 @@ function Core.Start(vehicle, profileName, opts)
         }
     end
 
-    -- 3) Animação inicial do jogador
+    -- 3) Animação contextual do jogador no mundo GTA
     local ped = PlayerPedId()
-    RequestAnimDict('mini@repair')
+    local animDict = (opts.anim and opts.anim.dict) or 'mini@repair'
+    local animClip = (opts.anim and opts.anim.clip) or 'fixing_a_player'
+    local animFlag = (opts.anim and opts.anim.flag) or 49
+
+    RequestAnimDict(animDict)
     local t0 = GetGameTimer()
-    while not HasAnimDictLoaded('mini@repair') and (GetGameTimer() - t0 < 1000) do
+    while not HasAnimDictLoaded(animDict) and (GetGameTimer() - t0 < 1000) do
         Wait(10)
     end
-    if HasAnimDictLoaded('mini@repair') then
-        TaskPlayAnim(ped, 'mini@repair', 'fixing_a_player', 8.0, -1.0, -1, 49, 0.0, false, false, false)
+    if HasAnimDictLoaded(animDict) then
+        TaskPlayAnim(ped, animDict, animClip, 8.0, -1.0, -1, animFlag, 0.0, false, false, false)
     end
 
     -- 4) Abrir NUI

@@ -962,6 +962,18 @@ local function findNearestMountedWheel(veh)
     return bestCoords, bestDist, bestIdx, boneNames[idx1], true
 end
 
+--- [v1.16 UX-B.2 / UX-C] Helper comum para cálculo de budget de UX clock-safe.
+--- ttlMs = st.expiresAt - st.startedAt (ambos no domínio do servidor).
+--- Retorna (budget, nil) se válido, ou (false, errCode) em fail-closed.
+local function computeUxBudget(ttlMs, minUxMs, reserveMs)
+    if not ttlMs or ttlMs <= 0 then return false, 'budget_invalid' end
+    local reserve = reserveMs or 4000
+    local minUx   = minUxMs or 4000
+    local budget  = ttlMs - reserve
+    if budget < minUx then return false, 'budget_insufficient' end
+    return budget, nil
+end
+
 --- [v1.16 UX-B.2] Executa a experiência física interativa da remoção da roda.
 --- Utiliza VPChopDismantleMinigame com o profile 'wheel' (5 parafusos com giro de mouse),
 --- seguido de uma animação física de retirada do pneu antes do commit na ActionSession.
@@ -983,28 +995,14 @@ local function runWheelUx(veh, wheelIdx, partKey, ttlMs, isAction)
     local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
     local boneKey   = partKey or boneNames[(wheelIdx or 0) + 1] or 'wheel_lf'
 
-    -- Reserve: trânsito da resp. START + animação de pull + round-trip COMPLETE + jitter.
-    -- INVARIANTE: uxTimeout + RESERVE_MS <= ttlMs (o COMPLETE chega antes do expiresAt).
     local PULL_ANIM_MS  = 1500
     local RESERVE_MS    = 4000  -- START transit(1000) + COMPLETE RTT(1000) + jitter(500) + pull(1500)
     local MIN_UX_MS     = 5000  -- mínimo para uma experiência de 5 parafusos ser viável
 
     local uxTimeout
     if isAction then
-        -- Modo ActionSession: ttlMs DEVE ser um número positivo derivado do servidor.
-        -- expiresAt=0 ou nil neste contexto é resposta inválida → fail-closed.
-        if not ttlMs or ttlMs <= 0 then
-            return false, 'budget_invalid'
-        end
-        -- Budget disponível para a UX (excluindo a reserva necessária para fechar o fluxo).
-        -- NÃO mistura domínios de clock: ttlMs vem de (expiresAt - startedAt) no servidor.
-        -- Aqui aplicamos ao clock do CLIENT: clientDeadline = GetGameTimer() + ttlMs.
-        local budget = ttlMs - RESERVE_MS
-        if budget < MIN_UX_MS then
-            -- Fail-closed: não há tempo suficiente para uma UX significativa.
-            -- NÃO abre NUI, NÃO cria câmera, NÃO inicia minigame.
-            return false, 'budget_insufficient'
-        end
+        local budget, err = computeUxBudget(ttlMs, MIN_UX_MS, RESERVE_MS)
+        if not budget then return false, err end
         uxTimeout = budget
     else
         -- Fluxo legacy (kill-switch desligado): sem ActionSession, usa timeout padrão.
@@ -1149,7 +1147,7 @@ RegisterNetEvent('vp_chopshop:adv:breakDoor', function(netId, partKey, doorIndex
     advMarkChopped(netId, partKey)
 end)
 
---- [v1.15 PR-G] UX de uma fase avançada (tool prop + alarm dispatch + progress bar).
+--- [v1.15 PR-G] UX de uma fase avançada legada (tool prop + alarm dispatch + progress bar).
 --- Retorna true se o jogador concluiu; false se cancelou/falhou.
 local function runAdvUx(veh, tCfg, label, ms, anim, defaultDict, defaultClip, defaultFlag)
     spawnToolProp(anim and anim.prop)
@@ -1168,10 +1166,79 @@ local function runAdvUx(veh, tCfg, label, ms, anim, defaultDict, defaultClip, de
     return ok == true
 end
 
---- [v1.15 PR-G] Fluxo genérico de uma fase avançada via ActionSession:
---- getActive → action:start → UX → action:complete/cancel. Kill-switch
---- (Config.ActionSession.Enable == false) cai no callback legacy adv:*.
---- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk }
+--- [v1.16 UX-C] Executa a experiência física interativa de desmanche de painel (bonnet, boot, portas).
+--- 1. Spawna a ferramenta de corte na mão do ped (prop_tool_consaw).
+--- 2. Toca a animação nativa contínua de corte do GTA (SawAnim).
+--- 3. Abre a NUI com os pontos contextuais de corte (dobradiças / travas) usando primitive 'cut'.
+--- 4. Conclui os pontos com velocidade escalada pela ferramenta (saw_cheap vs saw_pro).
+--- 5. Toca uma rápida animação física de soltura (800ms).
+--- 6. Retorna true para a ActionSession completar no servidor (a peça é removida pelo commit).
+local function runPanelUx(veh, partKey, ttlMs, isAction, tCfg)
+    local profileName = 'panel_' .. partKey
+    local profile = (VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get(profileName))
+                    or (VPChopProfiles and VPChopProfiles.Get and VPChopProfiles.Get('panel'))
+
+    local uxTimeout
+    if isAction then
+        local minUx = (profile and profile.minUxMs) or 3500
+        local reserve = (profile and profile.reserveMs) or 3500
+        local budget, err = computeUxBudget(ttlMs, minUx, reserve)
+        if not budget then return false, err end
+        uxTimeout = budget
+    else
+        uxTimeout = 45000
+    end
+
+    -- uxSpeed derivado da ferramenta:
+    -- saw_cheap: speedMult = 1.4 -> uxSpeed = 1.0 / 1.4 = ~0.714 (mais tempo de corte)
+    -- saw_pro:   speedMult = 1.0 -> uxSpeed = 1.0 (baseline)
+    local speedMult = (tCfg and (tCfg.speedMult or tCfg.uxSpeed)) or 1.0
+    local uxSpeed = (speedMult > 0) and (1.0 / speedMult) or 1.0
+
+    local animCfg = (Config.AdvancedChop and Config.AdvancedChop.SawAnim) or {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+        prop = {
+            model    = 'prop_tool_consaw',
+            offset   = { 0.05, 0.02, 0.0 },
+            rotation = { 20, 0, -50 },
+        },
+    }
+
+    spawnToolProp(animCfg and animCfg.prop)
+    VPChopCheckAlarmAndDispatch(veh, tCfg)
+
+    local minigameOk = false
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        minigameOk = VPChopDismantleMinigame.Start(veh, profileName, {
+            boneKey = partKey,
+            uxSpeed = uxSpeed,
+            timeout = uxTimeout,
+            anim    = animCfg,
+        })
+    else
+        minigameOk = VPChopMinigameFallback(veh, partKey, 'panel_core_missing')
+    end
+
+    destroyToolProp()
+
+    if not minigameOk then return false end
+
+    -- Animação física curta de soltura / puxão do painel cortado (800ms)
+    return lib.progressBar({
+        duration     = 800,
+        label        = L('adv_panel_pulling'),
+        useWhileDead = false, canCancel = true,
+        disable      = { move = true, car = true, combat = true },
+        anim         = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 1 },
+    }) == true
+end
+
+--- [v1.15 PR-G / v1.16 UX-C] Fluxo genérico de uma fase avançada via ActionSession:
+--- getActive → action:start → UX (física interativa ou progresso) → action:complete/cancel.
+--- Kill-switch (Config.ActionSession.Enable == false) cai no callback legacy adv:*.
+--- @param opts { action, legacyEvent, label, ms, anim, dict, clip, flag, notifyOk, usePanelUx }
 local function doAdvAction(veh, netId, tCfg, opts)
     CreateThread(function()
         local useAction = VPChopActionModeAdvanced()   -- [PR-G] exclusivo: ActionSession OU legacy
@@ -1192,9 +1259,21 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 return
             end
             local actionId = st.actionId
-            if not ux() then
+
+            local uxOk, uxErr
+            if opts.usePanelUx then
+                local ttlMs = (st.expiresAt and st.startedAt) and (st.expiresAt - st.startedAt) or 0
+                uxOk, uxErr = runPanelUx(veh, opts.action, ttlMs, true, tCfg)
+            else
+                uxOk = ux()
+            end
+
+            if not uxOk then
                 pcall(lib.callback.await, 'vp_chopshop:action:cancel', false, actionId)
                 JackstandBusy = false
+                if uxErr == 'budget_insufficient' or uxErr == 'budget_invalid' then
+                    VPChopNotify(L('notify_chop_failed_fmt', uxErr), 'error')
+                end
                 return
             end
             local cOk, res = pcall(lib.callback.await, 'vp_chopshop:action:complete', false, actionId)
@@ -1208,7 +1287,13 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 return
             end
         else
-            if not ux() then JackstandBusy = false; return end
+            local uxOk
+            if opts.usePanelUx then
+                uxOk = runPanelUx(veh, opts.action, nil, false, tCfg)
+            else
+                uxOk = ux()
+            end
+            if not uxOk then JackstandBusy = false; return end
             local cbOk, result = pcall(lib.callback.await, opts.legacyEvent, false, netId, opts.action)
             JackstandBusy = false
             if not cbOk or not result or not result.ok then
@@ -1228,12 +1313,16 @@ local function doAdvChopPart(veh, netId, partKey)
     if not tName then VPChopNotify(L('notify_no_saw'), 'error'); return end
     JackstandBusy = true
     doAdvAction(veh, netId, tCfg, {
-        action = partKey, legacyEvent = 'vp_chopshop:adv:chopPart',
-        label = L('adv_progress_door'),
-        ms = (Config.AdvancedChop and Config.AdvancedChop.DoorProgressMs) or 6000,
-        anim = Config.AdvancedChop and Config.AdvancedChop.SawAnim,
-        dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1,
-        notifyOk = 'adv_part_removed',
+        action      = partKey,
+        legacyEvent = 'vp_chopshop:adv:chopPart',
+        label       = L('adv_progress_door'),
+        ms          = (Config.AdvancedChop and Config.AdvancedChop.DoorProgressMs) or 6000,
+        anim        = Config.AdvancedChop and Config.AdvancedChop.SawAnim,
+        dict        = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip        = 'cutting_loop',
+        flag        = 1,
+        notifyOk    = 'adv_part_removed',
+        usePanelUx  = true,  -- [UX-C] Body panels usam a desmontagem física interativa
     })
 end
 
