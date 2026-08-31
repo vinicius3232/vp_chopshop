@@ -1900,8 +1900,14 @@ function VPChopSessionErr(err)
     if err == 'no_item' then return L('jackstand_no_item') end
     if err == 'cooldown' then return L('jackstand_busy') end
     if err == 'already' or err == 'completed' then return L('jackstand_already_raised') end
-    if err == 'class' or err == 'vehicle' or err == 'net' or err == 'range' then return L('jackstand_no_car') end
-    return L('notify_generic_error')  -- player / disabled / session / not_participant
+    if err == 'class' then return 'Tipo de veículo incompatível com macaco.' end
+    if err == 'range' then return 'Você está muito longe do veículo.' end
+    if err == 'vehicle' or err == 'net' then return L('jackstand_no_car') end
+    if err == 'carcass_consumed' then return 'Esta carcaça já foi consumida.' end
+    if err == 'player' then return 'Jogador ainda não carregado no servidor.' end
+    if err == 'disabled' then return 'Sistema de macaco desativado.' end
+    if err == 'session' then return 'Falha ao registrar sessão no servidor.' end
+    return (err and ('Erro: ' .. tostring(err))) or L('notify_generic_error')
 end
 
 function VPChopJackstandRaiseCar()
@@ -1951,6 +1957,7 @@ function VPChopJackstandRaiseCar()
     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:session:requestRaise', false, netId)
     if not cbOk or not res or not res.ok then
         JackstandBusy = false
+        print(('[vp_chopshop] requestRaise failed for netId %s: cbOk=%s err=%s'):format(tostring(netId), tostring(cbOk), tostring(res and res.err)))
         VPChopNotify(VPChopSessionErr(res and res.err), 'error')
         return
     end

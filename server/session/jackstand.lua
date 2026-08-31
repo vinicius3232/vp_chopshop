@@ -67,43 +67,43 @@ end
 -- ok:   { ok=true, sessionId=<cs:n>, vsid=<vsid:n>, already=<bool> }
 -- deny: { ok=false, err='disabled'|'player'|'cooldown'|'net'|'vehicle'|'class'
 --                       |'range'|'no_item'|'session' }
+local function denyRaise(src, netId, err)
+    print(('[vp_chopshop][jackstand] requestRaise DENIED for src %s (netId %s): %s'):format(tostring(src), tostring(netId), tostring(err)))
+    return { ok = false, err = err }
+end
+
 lib.callback.register('vp_chopshop:session:requestRaise', function(src, netId)
-    if not (Config.Jackstand and Config.Jackstand.Enable) then return { ok = false, err = 'disabled' } end
-    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+    if not (Config.Jackstand and Config.Jackstand.Enable) then return denyRaise(src, netId, 'disabled') end
+    if not ServerPlayerIsReady(src) then return denyRaise(src, netId, 'player') end
 
     local now = GetGameTimer()
-    if _raiseCd[src] and now < _raiseCd[src] then return { ok = false, err = 'cooldown' } end
+    if _raiseCd[src] and now < _raiseCd[src] then return denyRaise(src, netId, 'cooldown') end
     _raiseCd[src] = now + RAISE_CD_MS
 
     netId = tonumber(netId)
-    if not netId then return { ok = false, err = 'net' } end
+    if not netId then return denyRaise(src, netId, 'net') end
 
     local veh = NetworkGetEntityFromNetworkId(netId)
-    if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
-    if not isJackableClass(veh) then return { ok = false, err = 'class' } end
-    if not ValidatePlayerNearVehicle(src, veh, maxRaiseDist()) then return { ok = false, err = 'range' } end
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return denyRaise(src, netId, 'vehicle') end
+    if not isJackableClass(veh) then return denyRaise(src, netId, 'class') end
+    if not ValidatePlayerNearVehicle(src, veh, maxRaiseDist()) then return denyRaise(src, netId, 'range') end
 
     -- Item exigido (trust-no-client — o export client só implica posse).
-    -- tonumber(...) or 0: se InvCount devolver nil (bridge de inventário ainda não
-    -- pronta / framework não carregado) o check falha FECHADO, não aberto.
     local item = Config.Jackstand.Item or 'chopshop_jackstand'
-    if (tonumber(InvCount(src, item)) or 0) < 1 then return { ok = false, err = 'no_item' } end
+    if (tonumber(InvCount(src, item)) or 0) < 1 then return denyRaise(src, netId, 'no_item') end
 
-    -- Create pode negar: 'disabled' / 'completed' (sessão concluída, veículo ainda
-    -- existe) / 'vehicle'. CANCELLED é reutilizável → Create cunha nova por dentro.
+    -- Create pode negar: 'disabled' / 'completed' / 'carcass_consumed' / 'vehicle'
     local session, err = ChopSession.Create(netId, src)
-    if not session then return { ok = false, err = err or 'session' } end
+    if not session then return denyRaise(src, netId, err or 'session') end
 
-    -- [v1.15 #2] Checar EXPLICITAMENTE cada mutação — nunca responder ok se a
-    -- sessão recusou (ex.: terminou entre o Create e aqui).
     if not ChopSession.AddParticipant(session.id, src) then
-        return { ok = false, err = 'session' }
+        return denyRaise(src, netId, 'session')
     end
 
     local already = session.raised == true
     if not already then
         if not ChopSession.MarkRaised(session.id, src) then
-            return { ok = false, err = 'session' }
+            return denyRaise(src, netId, 'session')
         end
     else
         ChopSession.Touch(session.id)
