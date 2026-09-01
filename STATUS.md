@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de integração:** `feat/v1.17-broker-1-market-engine` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `53683d7`)
+**Branch de integração:** `feat/v1.17-broker-2-fence-integration` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `c9778ef`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1193 PASS / 0 FAIL / 1193 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1204 PASS / 0 FAIL / 1204 asserts**
 
 ---
 
@@ -22,13 +22,14 @@ Stack UX & Gameplay v1.16:              ✅ HOMOLOGADO & MERGED   (#40)
 ─────────────────────────────────────────────────────────────────────────
 v1.17 Chop Broker, Dynamic Market & Workshop Economy:
 BROKER-0   — Architecture Frozen & Canonical Design ✅ CONCLUÍDO (Docs)
-BROKER-1.2 — Final Parity & Fail-Closed Boot Engine ✅ CODE READY (PR #42)
-             (vp_chop_broker_market schema, pcall closure patterns,
-              dirty state retry on DB error/nil, low-frequency flush thread,
-              fail-closed BrokerMarket.IsReady() on DB absent/error,
-              Config.Fence.NightBonus 21->6 paridade, FencePriceMult tier parity,
-              NaN/Inf guards, 108.000+ simulation iterations @ 1193 PASS)
-BROKER-2   — Fence Integration & Dynamic Payouts    ⏸
+BROKER-1.2 — Final Parity & Fail-Closed Boot Engine ✅ HOMOLOGADO & MERGED (PR #42)
+BROKER-2   — Fence Integration, Dynamic Payouts &   ✅ CODE READY (PR #43)
+              Physical Part Market
+             (sellItems dynamic + legacy routing, sellTyres commodity demand,
+              vp_chopshop:fence:sellCarriedPart & sellCatalytic delegation,
+              marginal diminishing returns batch pricing, PartEntitlement provenance,
+              all-or-nothing RecordSalesBatch, concurrency locks, circuit breaker,
+              1204 PASS @ zero regressions)
 BROKER-3   — Contracts & High-Demand Lists          ⏸
 BROKER-4   — WorkshopBridge & SAGA Journal          ⏸
 BROKER-5   — NPC Ambient Speech & Context UI        ⏸

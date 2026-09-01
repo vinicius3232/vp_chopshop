@@ -130,6 +130,7 @@ server_scripts {
     'server/heat.lua',
     'server/ambush.lua',
     'server/fence.lua',
+    'server/broker/fence_integration_spec.lua',  -- [v1.17 BROKER-2] self-gated (vp_chopshop_selftest 1)
     'server/progression.lua',
     -- [INT-01A] ponte vp_chopshop → vp_gangs (contractVersion 1). Escuta VPChopEvt.PART_CHOPPED
     -- pós-commit. DEPOIS de chop_session.lua (usa ChopSession.GetByVehicle) e progression.lua.

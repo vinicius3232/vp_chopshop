@@ -26,6 +26,17 @@ function CreateThread(fn) threads[#threads+1] = fn end
 function Wait(_) end
 function AddEventHandler() end
 function GetPlayerName(src) return src and ('player_'..tostring(src)) or nil end
+function GetNumPlayerIdentifiers(src) return 1 end
+function GetPlayerIdentifier(src, i) return 'license:test_' .. tostring(src) end
+function GetHashKey(str)
+    if not str then return 0 end
+    if type(str) == 'number' then return str end
+    local hash = 0
+    for i = 1, #str do
+        hash = (hash * 31 + string.byte(str, i)) % 2147483647
+    end
+    return hash
+end
 function GetConvarInt(_, _) return 1 end             -- ativa os self-tests
 function GetConvar(_, _) return '1' end              -- expõe ChopSession._test
 local _t0 = os.clock()
@@ -62,19 +73,39 @@ if not _G.json then
 end
 function SetTimeout(_, _) end          -- [PR-D] retries de deleção não rodam no static test
 -- Mundo falso p/ os specs que tocam natives CRUS (server/chop.lua não usa o seam
--- EntityAPI). base_state_spec aponta o EntityAPI da ChopSession p/ a MESMA tabela.
 _G.FAKE_VEH = {}
-function NetworkGetEntityFromNetworkId(netId) return FAKE_VEH[netId] and (netId + 70000) or 0 end
-function NetworkGetNetworkIdFromEntity(h) return h and (h - 70000) or 0 end
+_G.FAKE_TRUCK = {}
+function NetworkGetEntityFromNetworkId(netId)
+    if not netId or netId == 0 then return 0 end
+    if _G.FAKE_TRUCK and _G.FAKE_TRUCK[netId] then return netId + 90000 end
+    return FAKE_VEH[netId] and (netId + 70000) or 0
+end
+function NetworkGetNetworkIdFromEntity(h)
+    if not h or h == 0 then return 0 end
+    if h >= 90000 then return h - 90000 end
+    return h - 70000
+end
 function DoesEntityExist(h)
     if h == nil or h == 0 then return false end
+    if h >= 90000 then
+        local n = h - 90000
+        return _G.FAKE_TRUCK and _G.FAKE_TRUCK[n] ~= nil
+    end
     local n = h - 70000
     -- handles no padrão +70000 seguem FAKE_VEH; outros (testes que passam um handle
     -- solto) mantêm o comportamento antigo (nonzero = existe).
     if FAKE_VEH[n] ~= nil then return true end
     return (h > 0 and h < 70000)
 end
-function GetEntityModel(h) local n = (h or 0) - 70000; return FAKE_VEH[n] and FAKE_VEH[n].model or 0 end
+function GetEntityModel(h)
+    if not h or h == 0 then return 0 end
+    if h >= 90000 then
+        local n = h - 90000
+        return _G.FAKE_TRUCK and _G.FAKE_TRUCK[n] and _G.FAKE_TRUCK[n].model or 0
+    end
+    local n = (h or 0) - 70000
+    return FAKE_VEH[n] and FAKE_VEH[n].model or 0
+end
 function GetVehicleNumberPlateText(_) return 'PLATE' end
 function GetVehicleClass(_) return 0 end
 function Entity(h)
@@ -87,6 +118,7 @@ end
 _G.NEAR = true                                                -- specs alternam p/ testar 'distance'
 function ValidatePlayerNearVehicle(_, _, _) return _G.NEAR ~= false end
 function ValidatePlayerNearPoint(_, _, _) return _G.NEAR ~= false end
+function ValidatePlayerNearCoords(_, _, _) return _G.NEAR ~= false end
 _G.HAS_TOOL = true                                            -- serra (wantDrill=false)
 _G.HAS_DRILL = true                                           -- chave de fenda (wantDrill=true)
 function VPChopHasTool(_, wantDrill)
@@ -130,7 +162,14 @@ function VPChopChopPartCommit(_, _, _) return { ok = true } end  -- overridden p
 
 -- [PR-D] Stubs de resource/export p/ bridge/server_vehicle.lua (discard ownership).
 _G.FAKE_RESOURCES = { qbx_core = 'started', qbx_vehicles = 'started' }
-_G.FAKE_EXPORTS   = {}
+_G.FAKE_EXPORTS   = {
+    qbx_core = {
+        GetPlayer = function(self, src)
+            if not src or src <= 0 then return nil end
+            return { citizenid = 'player_' .. tostring(src) }
+        end,
+    }
+}
 function GetResourceState(r) return _G.FAKE_RESOURCES[r] or 'missing' end
 _G.exports = setmetatable({}, {
     __index = function(_, res)
@@ -161,7 +200,7 @@ _G.Config = {
         OwnedPolicy = 'deny', PayoutByModel = {},
         CopsBonus = { Enable = false },
     },
-    TyreSelling = { Enable = true, MaxTyresInTruck = 4 },   -- [PR-E]
+    TyreSelling = { Enable = true, MaxTyresInTruck = 4, PickupTruckModels = { 'bison', 'sadler', 'bobcatxl' } },   -- [PR-E]
     ActionSession = {                                       -- [PR-F / PR-G]
         Enable = true, RequireBaseTyres = true, RequireAdvanced = true,
         ActionTtlMs = 45000,
@@ -283,44 +322,75 @@ _G.Config = {
                 recoveryPerHour = 0.15,
             },
             adv_engine = {
-                basePrice = 2800,
+                basePrice = 2500,
                 salePressure = 0.05,
                 recoveryPerHour = 0.12,
             },
             tyre = {
-                basePrice = 450,
+                basePrice = 400,
                 salePressure = 0.015,
                 recoveryPerHour = 0.20,
             },
             stolen_plate = {
-                basePrice = 1200,
+                basePrice = 250,
+                salePressure = 0.03,
+                recoveryPerHour = 0.15,
+            },
+            body_panel = {
+                basePrice = 600,
                 salePressure = 0.03,
                 recoveryPerHour = 0.15,
             },
             metalscrap = {
-                basePrice = 120,
+                basePrice = 80,
                 salePressure = 0.002,
                 recoveryPerHour = 0.25,
             },
             steel = {
-                basePrice = 180,
+                basePrice = 100,
                 salePressure = 0.003,
                 recoveryPerHour = 0.25,
             },
             aluminum = {
-                basePrice = 200,
+                basePrice = 130,
                 salePressure = 0.004,
                 recoveryPerHour = 0.20,
             },
             copper = {
-                basePrice = 300,
+                basePrice = 150,
                 salePressure = 0.005,
                 recoveryPerHour = 0.20,
             },
             car_parts = {
-                basePrice = 350,
+                basePrice = 400,
                 salePressure = 0.004,
                 recoveryPerHour = 0.20,
+            },
+        },
+        Integration = {
+            ItemToCommodity = {
+                metalscrap    = 'metalscrap',
+                steel         = 'steel',
+                aluminum      = 'aluminum',
+                copper        = 'copper',
+                car_parts     = 'car_parts',
+                stolen_plate  = 'stolen_plate',
+                chopshop_tyre = 'tyre',
+            },
+            PhysicalPartToCommodity = {
+                catalytic_converter = 'catalytic_converter',
+                adv_engine          = 'adv_engine',
+                bonnet              = 'body_panel',
+                boot                = 'body_panel',
+                door_dside_f        = 'body_panel',
+                door_pside_f        = 'body_panel',
+                door_dside_r        = 'body_panel',
+                door_pside_r        = 'body_panel',
+            },
+            LegacyStaticItems = {
+                rubber  = true,
+                plastic = true,
+                glass   = true,
             },
         },
     },
@@ -436,6 +506,7 @@ dofile(base .. '/server/partserial_spec.lua')                 -- [UX-0 QA findin
 dofile(base .. '/client/minigame/minigame_spec.lua')         -- [UX-A Interaction Core]
 dofile(base .. '/server/session/fence_payment_spec.lua')     -- [v1.16-FENCE-PAY-1]
 dofile(base .. '/server/broker/market_sim_spec.lua')         -- [v1.17 BROKER-1]
+dofile(base .. '/server/broker/fence_integration_spec.lua')     -- [v1.17 BROKER-2]
 
 local anyFail = false
 for i = specStart, #threads do

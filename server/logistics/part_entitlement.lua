@@ -81,6 +81,10 @@ function PartEntitlement.Issue(sessionId, src, partKey, sourceNetId, opts)
         sessionId      = sessionId,
         sourceNetId    = tonumber(sourceNetId) or 0,
         origin         = (opts and opts.origin) or 'advanced',
+        provenance     = (opts and opts.provenance and {
+            realPlate = opts.provenance.realPlate,
+            model     = opts.provenance.model,
+        }) or nil,
         state          = 'ISSUED',
         createdAt      = now,
         updatedAt      = now,
@@ -109,6 +113,10 @@ function PartEntitlement.Get(id)
         sessionId      = e.sessionId,
         sourceNetId    = e.sourceNetId,
         origin         = e.origin,
+        provenance     = e.provenance and {
+            realPlate = e.provenance.realPlate,
+            model     = e.provenance.model,
+        } or nil,
         state          = e.state,
         createdAt      = e.createdAt,
         updatedAt      = e.updatedAt,
@@ -160,7 +168,7 @@ end
 ---@param src number
 ---@param actionName string
 ---@param expectedPartKey? string
----@return { ok: boolean, err?: string, partKey?: string, sourceNetId?: number, sessionId?: string, entitlement?: table }
+---@return { ok: boolean, err?: string, partKey?: string, sourceNetId?: number, sessionId?: string, provenance?: table, entitlement?: table }
 function PartEntitlement.Consume(id, src, actionName, expectedPartKey)
     local okVal, valRes = PartEntitlement.Validate(id, src, expectedPartKey)
     if not okVal then
@@ -181,6 +189,10 @@ function PartEntitlement.Consume(id, src, actionName, expectedPartKey)
         partKey     = e.partKey,
         sourceNetId = e.sourceNetId,
         sessionId   = e.sessionId,
+        provenance  = e.provenance and {
+            realPlate = e.provenance.realPlate,
+            model     = e.provenance.model,
+        } or nil,
         entitlement = PartEntitlement.Get(id),
     }
 end

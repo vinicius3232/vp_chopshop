@@ -777,7 +777,14 @@ lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, 
     -- [v1.16 SEC-1.2] Emissão autoritativa baseada no theft token (imune a reciclagem de netId)
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        peId = PartEntitlement.Issue(('cat:%s'):format(theft.token), source, 'catalytic_converter', netId, { origin = 'theft' })
+        local prov = nil
+        if veh and veh ~= 0 and DoesEntityExist(veh) then
+            local rawPlate = GetVehicleNumberPlateText(veh)
+            local realPlate = (type(VPChopMDT) == 'table' and type(VPChopMDT.GetRealPlate) == 'function' and VPChopMDT.GetRealPlate(rawPlate)) or rawPlate
+            local model = GetEntityModel(veh)
+            prov = { realPlate = realPlate, model = model }
+        end
+        peId = PartEntitlement.Issue(('cat:%s'):format(theft.token), source, 'catalytic_converter', netId, { origin = 'theft', provenance = prov })
     end
     TriggerEvent(VPChopEvt.PART_CHOPPED, source, netId, 'catalytic_converter', 1)
 
@@ -790,57 +797,7 @@ lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, 
     return { ok = true, entitlementId = peId, partKey = 'catalytic_converter' }
 end)
 
---- [CATALYTIC THEFT] Venda de catalisador carregado diretamente no Fence NPC
-lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source, entitlementId)
-    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
-    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'fenceSell', 400) then
-        return { ok = false, err = 'cooldown' }
-    end
 
-    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
-    if loc and loc.coords and not ValidatePlayerNearCoords(source, loc.coords, 6.0) then
-        return { ok = false, err = 'distance' }
-    end
-
-    if type(entitlementId) ~= 'string' or entitlementId == '' then
-        if PartEntitlement and PartEntitlement.LogSuspicious then
-            PartEntitlement.LogSuspicious(source, 'fence_invalid_entitlement_param', tostring(entitlementId))
-        end
-        return { ok = false, err = 'invalid' }
-    end
-
-    -- [v1.16 SEC-1] Consome atomicamente o entitlement de catalisador ANTES de adicionar dinheiro
-    if PartEntitlement and PartEntitlement.Consume then
-        local res = PartEntitlement.Consume(entitlementId, source, 'fence_sell_catalytic', 'catalytic_converter')
-        if not res.ok then
-            if PartEntitlement.LogSuspicious and (res.err == 'owner_mismatch' or res.err == 'already_consumed' or res.err == 'invalid_type') then
-                PartEntitlement.LogSuspicious(source, res.err, ('fence_sell | entitlement: %s'):format(tostring(entitlementId)))
-            end
-            return { ok = false, err = res.err }
-        end
-    else
-        return { ok = false, err = 'internal' }
-    end
-
-    local cfg = (Config.CatalyticTheft and Config.CatalyticTheft.Payout) or { min = 1200, max = 2200 }
-    local minPay = tonumber(cfg.min) or 1200
-    local maxPay = tonumber(cfg.max) or 2200
-    local payout = math.random(minPay, maxPay)
-
-    -- [v1.16 SEC-1.3] Paga via API canônica BridgeAddCash e valida retorno booleano
-    local paid = BridgeAddCash(source, payout, 'chopshop_fence_catalytic')
-    if not paid then
-        local playerKey = (type(ServerChopPlayerKey) == 'function' and ServerChopPlayerKey(source)) or tostring(source)
-        print(('[vp_chopshop][fence] CRITICAL: BridgeAddCash failed post-consume for src %d (playerKey: %s, entitlement: %s, payout: %d)'):format(
-            source, playerKey, tostring(entitlementId), payout
-        ))
-        -- Fail-closed post-consume: o entitlement já foi consumido para impedir dupes.
-        -- Não tenta pagar novamente e não restaura o entitlement.
-        return { ok = false, err = 'payment_failed' }
-    end
-
-    return { ok = true, payout = payout }
-end)
 
 --- [v1.15 PR-D hardening] Retries locais de deleção de mundo. Cada tentativa REVALIDA:
 ---   1. sessão continua COMPLETED (tombstone);
