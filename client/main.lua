@@ -1767,13 +1767,15 @@ local function addRaisedCarTargets(veh)
                         return JackstandData[veh] ~= nil
                             and not JackstandBusy
                             and not advIsChopped(netId, aKey)
+                            and not isPartMissing(veh, def)
                     end,
                     onSelect = function() doAdvChopPart(veh, netId, aKey) end,
                 }
             end
         end
 
-        -- Fase 3: motor (requer capô removido)
+        -- Fase 3: motor (requer capô removido no desmanche OU capô já danificado/ausente)
+        local bonnetDef = VPChopPartRegistry.get('bonnet')
         targets[#targets + 1] = {
             name     = 'vp_adv_chop_engine_' .. tostring(veh),
             label    = L('adv_target_engine'),
@@ -1782,7 +1784,7 @@ local function addRaisedCarTargets(veh)
             canInteract = function()
                 return JackstandData[veh] ~= nil
                     and not JackstandBusy
-                    and advIsChopped(netId, 'bonnet')
+                    and (advIsChopped(netId, 'bonnet') or isPartMissing(veh, bonnetDef))
                     and not advIsChopped(netId, 'adv_engine')
             end,
             onSelect = function() doAdvChopEngine(veh, netId) end,
