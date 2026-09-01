@@ -1,6 +1,6 @@
 -- server/broker/contracts_spec.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.17 BROKER-3] CONTRACTS & HIGH-DEMAND LISTS SPEC
+--  [v1.17 BROKER-3 / BROKER-3.1] CONTRACTS & HIGH-DEMAND LISTS SPEC
 --  Testa o domínio BrokerContracts, matching server-authoritative, concorrência,
 --  reserva atômica de quota, fail-closed economics e segurança BROKER-SEC-01..10.
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -55,33 +55,57 @@ local function run()
                         return { affectedRows = count }
                     end
 
-                    -- UPDATE de compensação de reserva
+                    -- UPDATE de compensação de reserva (com ou sem state)
                     if sql:find("SET `remaining` = `remaining` +", 1, true) then
-                        local addCnt, cId = params[1], params[2]
+                        if sql:find("`state` = ?", 1, true) then
+                            local addCnt, restoredState, cId = params[1], params[2], params[3]
+                            local c = mockDbRows[cId]
+                            if c then
+                                c.remaining = c.remaining + addCnt
+                                c.state = restoredState
+                                c.fulfilled_at = nil
+                                return { affectedRows = 1 }
+                            end
+                        else
+                            local addCnt, cId = params[1], params[2]
+                            local c = mockDbRows[cId]
+                            if c then
+                                c.remaining = c.remaining + addCnt
+                                return { affectedRows = 1 }
+                            end
+                        end
+                        return { affectedRows = 0 }
+                    end
+
+                    -- 1. UPDATE atômico FINAL (remaining == 1 -> 0 / COMPLETED)
+                    if sql:find("SET `remaining` = 0", 1, true) then
+                        local curT, cId, pKey, tLev = params[1], params[2], params[3], params[4]
                         local c = mockDbRows[cId]
-                        if c then
-                            c.remaining = c.remaining + addCnt
-                            c.state = (c.for_identifier == nil) and 'AVAILABLE' or 'ACCEPTED'
-                            c.fulfilled_at = nil
+                        local allowsGlobal = (c and c.for_identifier == nil and c.state == 'AVAILABLE')
+                        local allowsPersonal = (c and c.for_identifier == pKey and c.state == 'ACCEPTED')
+                        if c and (allowsGlobal or allowsPersonal)
+                           and c.remaining == 1
+                           and c.min_trust <= tLev
+                           and c.expires_at > curT then
+                            c.remaining = 0
+                            c.state = 'COMPLETED'
+                            c.fulfilled_at = curT
                             return { affectedRows = 1 }
                         end
                         return { affectedRows = 0 }
                     end
 
-                    -- UPDATE atômico de reserva de fulfillment
+                    -- 2. UPDATE atômico NÃO-FINAL (remaining > 1 -> remaining - 1)
                     if sql:find("SET `remaining` = `remaining` - 1", 1, true) then
-                        local curT, cId, pKey, tLev = params[1], params[2], params[3], params[4]
+                        local cId, pKey, tLev, curT = params[1], params[2], params[3], params[4]
                         local c = mockDbRows[cId]
-                        if c and (c.for_identifier == nil or c.for_identifier == pKey)
-                           and (c.state == 'AVAILABLE' or c.state == 'ACCEPTED')
-                           and c.remaining > 0
+                        local allowsGlobal = (c and c.for_identifier == nil and c.state == 'AVAILABLE')
+                        local allowsPersonal = (c and c.for_identifier == pKey and c.state == 'ACCEPTED')
+                        if c and (allowsGlobal or allowsPersonal)
+                           and c.remaining > 1
                            and c.min_trust <= tLev
                            and c.expires_at > curT then
                             c.remaining = c.remaining - 1
-                            if c.remaining == 0 then
-                                c.state = 'COMPLETED'
-                                c.fulfilled_at = curT
-                            end
                             return { affectedRows = 1 }
                         end
                         return { affectedRows = 0 }
@@ -191,7 +215,7 @@ local function run()
                     forId, cType, tKey, qty, rem, rMult, bCash, mTrust, cAt, expAt =
                         params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10]
                 end
-                
+
                 mockDbRows[id] = {
                     id             = id,
                     for_identifier = forId,
@@ -257,7 +281,6 @@ local function run()
         return true
     end
 
-    -- Obter callbacks registrados no ox_lib
     local getContractsCb = _G.CapturedCallbacks and _G.CapturedCallbacks['vp_chopshop:broker:getContracts']
     local acceptContractCb = _G.CapturedCallbacks and _G.CapturedCallbacks['vp_chopshop:broker:acceptContract']
     local fulfillContractCb = _G.CapturedCallbacks and _G.CapturedCallbacks['vp_chopshop:broker:fulfillContract']
@@ -265,7 +288,6 @@ local function run()
     local fulfillOrderCb = _G.CapturedCallbacks and _G.CapturedCallbacks['vp_chopshop:fence:fulfillOrder']
     local deliverCarCb = _G.CapturedCallbacks and _G.CapturedCallbacks['vp_chopshop:fence:deliverCar']
 
-    -- ─── Helper para criar contratos sintéticos no mock DB ───────────────────
     local function createContract(forId, cType, tKey, qty, rMult, bCash, mTrust, expSecs, st)
         contractSeq = contractSeq + 1
         local id = contractSeq
@@ -282,283 +304,514 @@ local function run()
             created_at     = virtualTime,
             expires_at     = virtualTime + (expSecs or 3600),
             fulfilled_at   = nil,
-            state          = st or 'AVAILABLE',
+            state          = st or (forId and 'ACCEPTED' or 'AVAILABLE'),
         }
         return id
     end
 
-    -- ─── BROKER-SEC-01: entitlementId forjado rejeitado sem pagamento ────────
-    resetEnv()
-    local cIdSec1 = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
-    local resSec1 = fulfillContractCb(1, cIdSec1, 'forged_fake_id_999')
-    check('BROKER-SEC-01 Entitlement inexistente/forjado rejeitado', resSec1.ok == false and (resSec1.err == 'not_found' or resSec1.err == 'invalid_entitlement' or resSec1.err == 'invalid'))
-    check('BROKER-SEC-01 Zero pagamento efetuado para entitlement forjado', (cashPaid[1] or 0) == 0)
-    check('BROKER-SEC-01 Contrato segue intacto após tentativa forjada', mockDbRows[cIdSec1].remaining == 1)
-
-    -- ─── BROKER-SEC-02: Player B tenta entitlement do Player A -> owner_mismatch ─
-    resetEnv()
-    local cIdSec2 = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
-    local entAId, _ = PE.Issue('session_sec2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC02A', model = 1234 } })
-    local resSec2 = fulfillContractCb(2, cIdSec2, entAId)
-    check('BROKER-SEC-02 Venda de entitlement alheio rejeitada com owner_mismatch', resSec2.ok == false and resSec2.err == 'owner_mismatch')
-    check('BROKER-SEC-02 Zero pagamento efetuado para o impostor B', (cashPaid[2] or 0) == 0)
-    check('BROKER-SEC-02 Entitlement do Player A segue ISSUED', PE.State(entAId) == 'ISSUED')
-
-    -- ─── BROKER-SEC-03: entitlement já CONSUMED -> already_consumed ───────────
-    resetEnv()
-    local cIdSec3 = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
-    local ent3Id, _ = PE.Issue('session_sec3', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC03', model = 1234 } })
-    PE.Consume(ent3Id, 1, 'bench_test', 'adv_engine')
-    local resSec3 = fulfillContractCb(1, cIdSec3, ent3Id)
-    check('BROKER-SEC-03 Entitlement já consumido rejeitado com already_consumed', resSec3.ok == false and resSec3.err == 'already_consumed')
-    check('BROKER-SEC-03 Zero pagamento efetuado para peça já consumida', (cashPaid[1] or 0) == 0)
-
-    -- ─── BROKER-SEC-04: Peça não atende ao contrato -> wrong_part ────────────
-    resetEnv()
-    local cIdSec4 = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
-    local doorEntId, _ = PE.Issue('session_sec4', 1, 'door_dside_f', 10, { origin = 'advanced', provenance = { realPlate = 'SEC04', model = 1234 } })
-    local resSec4 = fulfillContractCb(1, cIdSec4, doorEntId)
-    check('BROKER-SEC-04 Entrega de peça incompatível rejeitada com wrong_part', resSec4.ok == false and resSec4.err == 'wrong_part')
-    check('BROKER-SEC-04 Entitlement incompatível segue ISSUED', PE.State(doorEntId) == 'ISSUED')
-    check('BROKER-SEC-04 Quota do contrato segue intacta', mockDbRows[cIdSec4].remaining == 1)
-
-    -- ─── BROKER-SEC-05: Deadline vencido -> contract_expired ──────────────────
-    resetEnv()
-    local cIdSec5 = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1, -100) -- expirado há 100s
-    local eng5Id, _ = PE.Issue('session_sec5', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC05', model = 1234 } })
-    local resSec5 = fulfillContractCb(1, cIdSec5, eng5Id)
-    check('BROKER-SEC-05 Entrega para contrato expirado rejeitada com contract_expired', resSec5.ok == false and resSec5.err == 'contract_expired')
-    check('BROKER-SEC-05 Entitlement segue ISSUED após contrato expirado', PE.State(eng5Id) == 'ISSUED')
-
-    -- ─── BROKER-SEC-06: Concorrência remaining=1 -> exatamente 1 liquidação ───
-    resetEnv()
-    local cIdSec6 = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
-    local eng6A, _ = PE.Issue('session_sec6A', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC06A', model = 1234 } })
-    local eng6B, _ = PE.Issue('session_sec6B', 2, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'SEC06B', model = 1234 } })
-
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local res6A = fulfillContractCb(1, cIdSec6, eng6A)
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local res6B = fulfillContractCb(2, cIdSec6, eng6B)
-
-    check('BROKER-SEC-06 Primeira chamada concorrente tem sucesso', res6A.ok == true)
-    check('BROKER-SEC-06 Segunda chamada concorrente rejeitada com contract_fulfilled', res6B.ok == false and (res6B.err == 'contract_fulfilled' or res6B.err == 'contract_unavailable'))
-    check('BROKER-SEC-06 Player A foi pago e Player B recebeu ZERO', (cashPaid[1] or 0) > 0 and (cashPaid[2] or 0) == 0)
-    check('BROKER-SEC-06 Entitlement B segue ISSUED', PE.State(eng6B) == 'ISSUED')
-
-    -- ─── BROKER-SEC-07: Client tenta forjar model -> provenance OneSync é autoridade ───
-    resetEnv()
-    local cIdSec7 = createContract(nil, 'model', 'sultan', 1, 1.35, 0, 1)
-    local sultanHash = GetHashKey('sultan')
-    local bisonHash = GetHashKey('bison')
-    -- Peça com provenance real de 'bison'
-    local eng7Bison, _ = PE.Issue('session_sec7', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'BISON01', model = bisonHash } })
-    local resSec7 = fulfillContractCb(1, cIdSec7, eng7Bison)
-    check('BROKER-SEC-07 Modelo incorreto rejeitado pelo servidor com wrong_part', resSec7.ok == false and resSec7.err == 'wrong_part')
-
-    -- ─── BROKER-SEC-08: Client tenta forjar class -> provenance OneSync é autoridade ───
-    resetEnv()
-    local cIdSec8 = createContract(nil, 'class', 'sports', 1, 1.30, 0, 1)
-    local eng8SUV, _ = PE.Issue('session_sec8', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SUV01', model = 1234, vehicleClass = 2, className = 'suvs' } })
-    local resSec8 = fulfillContractCb(1, cIdSec8, eng8SUV)
-    check('BROKER-SEC-08 Classe incorreta rejeitada pelo servidor com wrong_part', resSec8.ok == false and resSec8.err == 'wrong_part')
-
-    -- ─── BROKER-SEC-09: Client tenta injetar price -> BrokerMarket calcula autoritativo ───
-    resetEnv()
-    local cIdSec9 = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1)
-    local eng9, _ = PE.Issue('session_sec9', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC09', model = 1234 } })
-    local resSec9 = fulfillContractCb(1, cIdSec9, eng9)
-    local expectedBase = BM.ResolvePrice('adv_engine', { trustLevel = 3, progressionTier = 2, heatMultiplier = 1.0, jitter = 0.0 }).unitPrice
-    local expectedPayout = math.floor(expectedBase * 1.20)
-    check('BROKER-SEC-09 Payout calculado exclusivamente pelo servidor', resSec9.ok == true and resSec9.payout == expectedPayout)
-
-    -- ─── BROKER-SEC-10: Client tenta injetar Trust/mult -> servidor consulta DB ───
-    resetEnv()
-    trustLevels[3] = 1 -- Player 3 tem trust 1
-    local cIdSec10 = createContract(nil, 'part_type', 'adv_engine', 1, 1.50, 0, 3) -- exige trust 3
-    local eng10, _ = PE.Issue('session_sec10', 3, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC10', model = 1234 } })
-    local resSec10 = fulfillContractCb(3, cIdSec10, eng10)
-    check('BROKER-SEC-10 Jogador com Trust insuficiente rejeitado com trust_gate', resSec10.ok == false and resSec10.err == 'trust_gate')
-    check('BROKER-SEC-10 Entitlement de Trust insuficiente segue ISSUED', PE.State(eng10) == 'ISSUED')
-
-    -- ─── CONTRACT-DB-01: Sem DB -> IsReady false -> fail-closed ───────────────
-    resetEnv()
-    BC.Init(false) -- desabilita DB
-    local resDb01 = getContractsCb(1)
-    check('CONTRACT-DB-01 getContracts falha com contracts_not_ready quando DB ausente', resDb01.ok == false and resDb01.err == 'contracts_not_ready')
-    local resDbFulfill = fulfillContractCb(1, 101, 'pe:test')
-    check('CONTRACT-DB-01 fulfillContract falha com contracts_not_ready quando DB ausente', resDbFulfill.ok == false and resDbFulfill.err == 'contracts_not_ready')
-    BC.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
-
-    -- ─── CONTRACT-GLOBAL-01: Contrato global multi-unidade concluído em etapas ─
-    resetEnv()
-    local cIdGlob1 = createContract(nil, 'part_type', 'adv_engine', 2, 1.20, 0, 1)
-    local engG1, _ = PE.Issue('session_glob1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'GLOB1', model = 1234 } })
-    local engG2, _ = PE.Issue('session_glob2', 2, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'GLOB2', model = 1234 } })
-
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resG1 = fulfillContractCb(1, cIdGlob1, engG1)
-    check('CONTRACT-GLOBAL-01 Player A entrega 1a unidade do contrato global', resG1.ok == true and resG1.remaining == 1 and resG1.completed == false)
-    check('CONTRACT-GLOBAL-01 Contrato global permanece AVAILABLE com remaining=1', mockDbRows[cIdGlob1].state == 'AVAILABLE' and mockDbRows[cIdGlob1].remaining == 1)
-
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resG2 = fulfillContractCb(2, cIdGlob1, engG2)
-    check('CONTRACT-GLOBAL-01 Player B entrega 2a unidade concluindo o contrato global', resG2.ok == true and resG2.remaining == 0 and resG2.completed == true)
-    check('CONTRACT-GLOBAL-01 Contrato global transiciona para COMPLETED', mockDbRows[cIdGlob1].state == 'COMPLETED' and mockDbRows[cIdGlob1].remaining == 0)
-
-    -- ─── CONTRACT-RACE-02: Double-fire do mesmo entitlement -> compensação ────
-    resetEnv()
-    local cIdRace2 = createContract(nil, 'part_type', 'adv_engine', 2, 1.20, 0, 1)
-    local engRace, _ = PE.Issue('session_race2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'RACE2', model = 1234 } })
-
-    -- 1o disparo consome e liquida
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resR1 = fulfillContractCb(1, cIdRace2, engRace)
-    check('CONTRACT-RACE-02 Primeiro disparo tem sucesso', resR1.ok == true)
-
-    -- 2o disparo tenta com peça já consumida
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resR2 = fulfillContractCb(1, cIdRace2, engRace)
-    check('CONTRACT-RACE-02 Segundo disparo rejeitado com already_consumed', resR2.ok == false and resR2.err == 'already_consumed')
-    check('CONTRACT-RACE-02 Quota do contrato não foi perdida (permanece 1)', mockDbRows[cIdRace2].remaining == 1)
-
-    -- ─── CONTRACT-PERSONAL-01: Contrato pessoal não aceitável/cumprível por B ───
-    resetEnv()
-    local pKeyA = 'qbx:player_1'
-    local cIdPers = createContract(pKeyA, 'part_type', 'adv_engine', 1, 1.30, 2000, 3)
-
-    -- Player 2 tenta aceitar contrato de Player 1
-    local resAccB = acceptContractCb(2, cIdPers)
-    check('CONTRACT-PERSONAL-01 Player B não pode aceitar contrato pessoal de A (owner_mismatch)', resAccB.ok == false and resAccB.err == 'owner_mismatch')
-
-    -- Player 1 aceita seu contrato
-    local resAccA = acceptContractCb(1, cIdPers)
-    check('CONTRACT-PERSONAL-01 Player A aceita seu contrato com sucesso', resAccA.ok == true)
-    check('CONTRACT-PERSONAL-01 Estado do contrato pessoal avança para ACCEPTED', mockDbRows[cIdPers].state == 'ACCEPTED')
-
-    -- Player 2 tenta cumprir contrato aceito por A
-    local engPersB, _ = PE.Issue('session_pb', 2, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PERB', model = 1234 } })
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resFulB = fulfillContractCb(2, cIdPers, engPersB)
-    check('CONTRACT-PERSONAL-01 Player B não pode cumprir contrato pessoal de A (owner_mismatch)', resFulB.ok == false and resFulB.err == 'owner_mismatch')
-
-    -- ─── CONTRACT-MODEL-01 & 02: Model matching ──────────────────────────────
-    resetEnv()
-    local sultanH = GetHashKey('sultan')
-    local cIdModel = createContract(nil, 'model', 'sultan', 1, 1.35, 0, 1)
-
-    -- Model correto
-    local engSultan, _ = PE.Issue('session_sultan', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SULTAN1', model = sultanH } })
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resModOk = fulfillContractCb(1, cIdModel, engSultan)
-    check('CONTRACT-MODEL-01 Modelo correto (sultan) dá match e liquida', resModOk.ok == true)
-
-    -- ─── CONTRACT-CLASS-01 & 02: Class matching & fail-closed on missing ──────
-    resetEnv()
-    local cIdClass = createContract(nil, 'class', 'sports', 1, 1.30, 0, 1)
-
-    -- Sem class provenance
-    local engNoClass, _ = PE.Issue('session_noclass', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'NOCLASS', model = 1234, className = nil, vehicleClass = nil } })
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resNoClass = fulfillContractCb(1, cIdClass, engNoClass)
-    check('CONTRACT-CLASS-02 Provenance de classe ausente falha closed com provenance_class_missing', resNoClass.ok == false and resNoClass.err == 'provenance_class_missing')
-
-    -- Com classe sports correta
-    local engSports, _ = PE.Issue('session_sports', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SPORTS1', model = 1234, className = 'sports', vehicleClass = 6 } })
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resSports = fulfillContractCb(1, cIdClass, engSports)
-    check('CONTRACT-CLASS-01 Classe correta (sports) dá match e liquida', resSports.ok == true)
-
-    -- ─── CONTRACT-HIGHVALUE-01: Target fora da allowlist ──────────────────────
-    resetEnv()
-    local cIdBadHigh = createContract(nil, 'high_value', 'unauthorized_target_item', 1, 1.50, 0, 1)
-    local engBadHigh, _ = PE.Issue('session_badhigh', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'BADHIGH', model = 1234 } })
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resBadHigh = fulfillContractCb(1, cIdBadHigh, engBadHigh)
-    check('CONTRACT-HIGHVALUE-01 Target fora da allowlist rejeitado com invalid_high_value_target', resBadHigh.ok == false and resBadHigh.err == 'invalid_high_value_target')
-
-    -- ─── CONTRACT-EXPIRY-01: ExpireDue atualiza contratos vencidos ────────────
-    resetEnv()
-    local cIdExp1 = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1, 500)
-    virtualTime = virtualTime + 600 -- avança além do expires_at
-    local expiredCount = BC.ExpireDue(virtualTime)
-    check('CONTRACT-EXPIRY-01 ExpireDue identifica e purga contrato vencido', expiredCount == 1 and mockDbRows[cIdExp1].state == 'EXPIRED')
-
-    -- ─── CONTRACT-RESTART-01: Contrato persiste após reboot do resource ───────
-    resetEnv()
-    local cIdRest = createContract(nil, 'part_type', 'adv_engine', 2, 1.25, 0, 1)
-    mockDbRows[cIdRest].remaining = 1 -- já entregou 1 unidade antes do reboot
-    -- Simula reboot
-    BC.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
-    local loadedRest = BC.Get(cIdRest)
-    check('CONTRACT-RESTART-01 Contrato recuperado pós-reboot com remaining=1 intacto', loadedRest ~= nil and loadedRest.remaining == 1 and loadedRest.quantity == 2)
-
-    -- ─── CONTRACT-PAY-01: BridgeAddCash=false pós-consumo -> terminalConsumed ─
-    resetEnv()
-    local cIdPayFail = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
-    local engPayFail, _ = PE.Issue('session_payfail', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PAYFAIL', model = 1234 } })
-    shouldFailPayment = true
-
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resPayFail = fulfillContractCb(1, cIdPayFail, engPayFail)
-    check('CONTRACT-PAY-01 Falha de pagamento retorna payment_failed', resPayFail.ok == false and resPayFail.err == 'payment_failed')
-    check('CONTRACT-PAY-01 Flag terminalConsumed=true retornada ao client', resPayFail.terminalConsumed == true)
-    check('CONTRACT-PAY-01 Entitlement permanece terminal CONSUMED (fail-closed anti-dupe)', PE.State(engPayFail) == 'CONSUMED')
-    check('CONTRACT-PAY-01 Quota do contrato permanece reservada', mockDbRows[cIdPayFail].remaining == 0 and mockDbRows[cIdPayFail].state == 'COMPLETED')
-    shouldFailPayment = false
-
-    -- ─── CONTRACT-BONUS-01: bonus_cash pago UMA vez apenas na conclusão ────────
-    resetEnv()
-    local cIdBonus = createContract('qbx:player_1', 'part_type', 'adv_engine', 2, 1.20, 5000, 3)
-    acceptContractCb(1, cIdBonus)
-
-    local engB1, _ = PE.Issue('session_b1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'BONUS1', model = 1234 } })
-    local engB2, _ = PE.Issue('session_b2', 1, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'BONUS2', model = 1234 } })
-
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resB1 = fulfillContractCb(1, cIdBonus, engB1)
-    check('CONTRACT-BONUS-01 1a entrega (remaining 2->1) NÃO paga bonus_cash', resB1.ok == true and resB1.bonusCash == 0 and resB1.completed == false)
-
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resB2 = fulfillContractCb(1, cIdBonus, engB2)
-    check('CONTRACT-BONUS-01 2a entrega (remaining 1->0) PAGA bonus_cash exatamente 1x', resB2.ok == true and resB2.bonusCash == 5000 and resB2.completed == true)
-
-    -- ─── CONTRACT-MARKET-01: Contrato não aplica RecordSalesBatch ─────────────
-    resetEnv()
-    local cIdMkt = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1)
-    local engMkt, _ = PE.Issue('session_mkt', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'MKT01', model = 1234 } })
-
-    local demBefore = BM.GetDemandIndex('adv_engine', virtualTime)
-    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
-    local resMkt = fulfillContractCb(1, cIdMkt, engMkt)
-    local demAfter = BM.GetDemandIndex('adv_engine', virtualTime)
-    check('CONTRACT-MARKET-01 Fulfillment de contrato tem sucesso financeiro', resMkt.ok == true)
-    check('CONTRACT-MARKET-01 Demanda do mercado geral permaneceu inalterada (zero RecordSalesBatch)', math.abs(demAfter - demBefore) < 0.0001)
-
-    -- ─── CONTRACT-LEGACY-01 & 02: getOrder e fulfillOrder legados funcionais ──
-    resetEnv()
-    if getOrderCb then
-        local oldSingle = _G.MySQL.single.await
-        local oldInsert = _G.MySQL.insert.await
-        _G.MySQL.single.await = function(...) return nil end
-        _G.MySQL.insert.await = function(...) return 42 end
-        local resLegOrder = getOrderCb(1)
-        check('CONTRACT-LEGACY-01 getOrder legado permanece operacional', resLegOrder ~= nil and resLegOrder.id ~= nil)
-        _G.MySQL.single.await = oldSingle
-        _G.MySQL.insert.await = oldInsert
-    end
-    if fulfillOrderCb then
-        local resLegFulfill = fulfillOrderCb(1, 99999)
-        check('CONTRACT-LEGACY-02 fulfillOrder legado rejeita ID inexistente com no_order', resLegFulfill.ok == false and resLegFulfill.err == 'no_order')
+    -- ─── BROKER-SEC Suite ───────────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
+        local res = fulfillContractCb(1, cId, 'forged_fake_id_999')
+        check('BROKER-SEC-01 Entitlement inexistente/forjado rejeitado', res.ok == false and (res.err == 'not_found' or res.err == 'invalid_entitlement' or res.err == 'invalid'))
+        check('BROKER-SEC-01 Zero pagamento efetuado para entitlement forjado', (cashPaid[1] or 0) == 0)
+        check('BROKER-SEC-01 Contrato segue intacto após tentativa forjada', mockDbRows[cId].remaining == 1)
     end
 
-    -- ─── DELIVERCAR-CANARY: deliverCar permanece intocado ─────────────────────
-    resetEnv()
-    trustLevels[1] = 4
-    if VPChopFence and VPChopFence._test then VPChopFence._test.setTrust(1, 4) end
-    _G.VPChopGetProgression = function(src) return { tier = 4, xp = 1000 } end
-    local resCanary = deliverCarCb(1, 0)
-    check('DELIVERCAR-CANARY deliverCar segue rejeitando netId 0 com vehicle', resCanary.ok == false and resCanary.err == 'vehicle')
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
+        local entA, _ = PE.Issue('session_sec2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC02A', model = 1234 } })
+        local res = fulfillContractCb(2, cId, entA)
+        check('BROKER-SEC-02 Venda de entitlement alheio rejeitada com owner_mismatch', res.ok == false and res.err == 'owner_mismatch')
+        check('BROKER-SEC-02 Zero pagamento efetuado para o impostor B', (cashPaid[2] or 0) == 0)
+        check('BROKER-SEC-02 Entitlement do Player A segue ISSUED', PE.State(entA) == 'ISSUED')
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
+        local ent3, _ = PE.Issue('session_sec3', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC03', model = 1234 } })
+        PE.Consume(ent3, 1, 'bench_test', 'adv_engine')
+        local res = fulfillContractCb(1, cId, ent3)
+        check('BROKER-SEC-03 Entitlement já consumido rejeitado com already_consumed', res.ok == false and res.err == 'already_consumed')
+        check('BROKER-SEC-03 Zero pagamento efetuado para peça já consumida', (cashPaid[1] or 0) == 0)
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
+        local doorEnt, _ = PE.Issue('session_sec4', 1, 'door_dside_f', 10, { origin = 'advanced', provenance = { realPlate = 'SEC04', model = 1234 } })
+        local res = fulfillContractCb(1, cId, doorEnt)
+        check('BROKER-SEC-04 Entrega de peça incompatível rejeitada com wrong_part', res.ok == false and res.err == 'wrong_part')
+        check('BROKER-SEC-04 Entitlement incompatível segue ISSUED', PE.State(doorEnt) == 'ISSUED')
+        check('BROKER-SEC-04 Quota do contrato segue intacta', mockDbRows[cId].remaining == 1)
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1, -100)
+        local eng5, _ = PE.Issue('session_sec5', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC05', model = 1234 } })
+        local res = fulfillContractCb(1, cId, eng5)
+        check('BROKER-SEC-05 Entrega para contrato expirado rejeitada com contract_expired', res.ok == false and res.err == 'contract_expired')
+        check('BROKER-SEC-05 Entitlement segue ISSUED após contrato expirado', PE.State(eng5) == 'ISSUED')
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
+        local eng6A, _ = PE.Issue('session_sec6A', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC06A', model = 1234 } })
+        local eng6B, _ = PE.Issue('session_sec6B', 2, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'SEC06B', model = 1234 } })
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local res6A = fulfillContractCb(1, cId, eng6A)
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local res6B = fulfillContractCb(2, cId, eng6B)
+
+        check('BROKER-SEC-06 Primeira chamada concorrente tem sucesso', res6A.ok == true)
+        check('BROKER-SEC-06 Segunda chamada concorrente rejeitada com contract_fulfilled ou contract_busy', res6B.ok == false and (res6B.err == 'contract_fulfilled' or res6B.err == 'contract_unavailable' or res6B.err == 'contract_busy'))
+        check('BROKER-SEC-06 Player A foi pago e Player B recebeu ZERO', (cashPaid[1] or 0) > 0 and (cashPaid[2] or 0) == 0)
+        check('BROKER-SEC-06 Entitlement B segue ISSUED', PE.State(eng6B) == 'ISSUED')
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'model', 'sultan', 1, 1.35, 0, 1)
+        local sultanHash = GetHashKey('sultan')
+        local bisonHash = GetHashKey('bison')
+        local eng7Bison, _ = PE.Issue('session_sec7', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'BISON01', model = bisonHash } })
+        local res = fulfillContractCb(1, cId, eng7Bison)
+        check('BROKER-SEC-07 Modelo incorreto rejeitado pelo servidor com wrong_part', res.ok == false and res.err == 'wrong_part')
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'class', 'sports', 1, 1.30, 0, 1)
+        local eng8SUV, _ = PE.Issue('session_sec8', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SUV01', model = 1234, vehicleClass = 2, className = 'suvs' } })
+        local res = fulfillContractCb(1, cId, eng8SUV)
+        check('BROKER-SEC-08 Classe incorreta rejeitada pelo servidor com wrong_part', res.ok == false and res.err == 'wrong_part')
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1)
+        local eng9, _ = PE.Issue('session_sec9', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC09', model = 1234 } })
+        local res = fulfillContractCb(1, cId, eng9)
+        local expectedBase = BM.ResolvePrice('adv_engine', { trustLevel = 3, progressionTier = 2, heatMultiplier = 1.0, jitter = 0.0 }).unitPrice
+        local expectedPayout = math.floor(expectedBase * 1.20)
+        check('BROKER-SEC-09 Payout calculado exclusivamente pelo servidor', res.ok == true and res.payout == expectedPayout)
+    end
+
+    do
+        resetEnv()
+        trustLevels[3] = 1
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.50, 0, 3)
+        local eng10, _ = PE.Issue('session_sec10', 3, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SEC10', model = 1234 } })
+        local res = fulfillContractCb(3, cId, eng10)
+        check('BROKER-SEC-10 Jogador com Trust insuficiente rejeitado com trust_gate', res.ok == false and res.err == 'trust_gate')
+        check('BROKER-SEC-10 Entitlement de Trust insuficiente segue ISSUED', PE.State(eng10) == 'ISSUED')
+    end
+
+    -- ─── CONTRACT-BOOT Suite ────────────────────────────────────────────────
+    do
+        resetEnv()
+        BC._test.setReady(false)
+        BC._test.setDb(nil)
+        check('CONTRACT-BOOT-01 Inicialmente não ready', BC.IsReady() == false)
+        _G.TriggerEvent('vp_chopshop:server:dbReady')
+        check('CONTRACT-BOOT-01 IsReady=true após evento dbReady', BC.IsReady() == true)
+
+        BC.Init({ query = {} })
+        check('CONTRACT-BOOT-02 DB com API incompleta resulta em IsReady=false', BC.IsReady() == false)
+        BC.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
+    end
+
+    -- ─── CONTRACT-DB Suite ──────────────────────────────────────────────────
+    do
+        resetEnv()
+        BC.Init(false)
+        local resDb = getContractsCb(1)
+        check('CONTRACT-DB-01 getContracts falha com contracts_not_ready quando DB ausente', resDb.ok == false and resDb.err == 'contracts_not_ready')
+        local resFulfill = fulfillContractCb(1, 101, 'pe:test')
+        check('CONTRACT-DB-01 fulfillContract falha com contracts_not_ready quando DB ausente', resFulfill.ok == false and resFulfill.err == 'contracts_not_ready')
+        BC.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
+    end
+
+    -- ─── CONTRACT-GLOBAL Suite ──────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 2, 1.20, 0, 1)
+        local engG1, _ = PE.Issue('session_glob1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'GLOB1', model = 1234 } })
+        local engG2, _ = PE.Issue('session_glob2', 2, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'GLOB2', model = 1234 } })
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resG1 = fulfillContractCb(1, cId, engG1)
+        check('CONTRACT-GLOBAL-01 Player A entrega 1a unidade do contrato global', resG1.ok == true and resG1.remaining == 1 and resG1.completed == false)
+        check('CONTRACT-GLOBAL-01 Contrato global permanece AVAILABLE com remaining=1', mockDbRows[cId].state == 'AVAILABLE' and mockDbRows[cId].remaining == 1)
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resG2 = fulfillContractCb(2, cId, engG2)
+        check('CONTRACT-GLOBAL-01 Player B entrega 2a unidade concluindo o contrato global', resG2.ok == true and resG2.remaining == 0 and resG2.completed == true)
+        check('CONTRACT-GLOBAL-01 Contrato global transiciona para COMPLETED', mockDbRows[cId].state == 'COMPLETED' and mockDbRows[cId].remaining == 0)
+    end
+
+    -- ─── CONTRACT-RACE-REAL Suite ───────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract('qbx:player_1', 'part_type', 'adv_engine', 2, 1.20, 5000, 3, 3600, 'ACCEPTED')
+        local engA, _ = PE.Issue('session_race_a', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'RACEA', model = 1234 } })
+        local engB, _ = PE.Issue('session_race_b', 1, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'RACEB', model = 1234 } })
+
+        local raceInterleavedRes = nil
+        BC._test.setHookBeforeConsume(function(hookCId, hookSrc, hookEntId)
+            _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+            raceInterleavedRes = fulfillContractCb(1, cId, engB)
+        end)
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resA = fulfillContractCb(1, cId, engA)
+        BC._test.setHookBeforeConsume(nil)
+
+        check('CONTRACT-RACE-REAL-01 Operação intercalada B é rejeitada com contract_busy', raceInterleavedRes ~= nil and raceInterleavedRes.ok == false and raceInterleavedRes.err == 'contract_busy')
+        check('CONTRACT-RACE-REAL-01 Entitlement B seguiu ISSUED durante lock de A', PE.State(engB) == 'ISSUED')
+        check('CONTRACT-RACE-REAL-01 Operação A concluiu 1a unidade (remaining 2->1, bonus 0)', resA.ok == true and resA.remaining == 1 and resA.bonusCash == 0)
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resBRetry = fulfillContractCb(1, cId, engB)
+        check('CONTRACT-RACE-REAL-01 Retry de B conclui 2a unidade (remaining 1->0, completed=true, bonus=5000)', resBRetry.ok == true and resBRetry.remaining == 0 and resBRetry.completed == true and resBRetry.bonusCash == 5000)
+    end
+
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 2, 1.20, 0, 1)
+        local engSame, _ = PE.Issue('session_same', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SAME', model = 1234 } })
+
+        local doubleFireRes = nil
+        BC._test.setHookBeforeConsume(function(hookCId, hookSrc, hookEntId)
+            _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+            doubleFireRes = fulfillContractCb(1, cId, engSame)
+        end)
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resSame = fulfillContractCb(1, cId, engSame)
+        BC._test.setHookBeforeConsume(nil)
+
+        check('CONTRACT-RACE-REAL-02 Double-fire concorrente com mesmo entitlement rejeitado com contract_busy', doubleFireRes ~= nil and doubleFireRes.ok == false and doubleFireRes.err == 'contract_busy')
+        check('CONTRACT-RACE-REAL-02 Apenas 1 consumo efetivo e quota do contrato preservada em 1', mockDbRows[cId].remaining == 1)
+    end
+
+    -- ─── CONTRACT-BONUS-RACE Suite ──────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract('qbx:player_1', 'part_type', 'adv_engine', 2, 1.20, 5000, 3, 3600, 'ACCEPTED')
+        local engBR1, _ = PE.Issue('session_br1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'BR1', model = 1234 } })
+        local engBR2, _ = PE.Issue('session_br2', 1, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'BR2', model = 1234 } })
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resBR1 = fulfillContractCb(1, cId, engBR1)
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resBR2 = fulfillContractCb(1, cId, engBR2)
+        local totalBonusPaid = (resBR1.bonusCash or 0) + (resBR2.bonusCash or 0)
+        check('CONTRACT-BONUS-RACE-01 Soma de bonusCash paga no ciclo inteiro é exatamente 5000 (nunca 10000)', totalBonusPaid == 5000)
+    end
+
+    -- ─── CONTRACT-POOL Suite ────────────────────────────────────────────────
+    do
+        resetEnv()
+        local pPool = Config.Broker.Contracts.Pools.part_type or {}
+        local hasTyre = false
+        for _, item in ipairs(pPool) do
+            if item.key == 'tyre' then hasTyre = true end
+        end
+        check('CONTRACT-POOL-01 tyre removido do pool part_type', hasTyre == false)
+    end
+
+    -- ─── CONTRACT-LOC Suite ─────────────────────────────────────────────────
+    do
+        resetEnv()
+        _G.VPChopFenceCurrentLocation = function() return nil end
+        local resLoc1 = getContractsCb(1)
+        check('CONTRACT-LOC-01 getContracts retorna no_fence quando fence location ausente', resLoc1.ok == false and resLoc1.err == 'no_fence')
+        local resLoc2 = acceptContractCb(1, 101)
+        check('CONTRACT-LOC-02 acceptContract retorna no_fence quando fence location ausente', resLoc2.ok == false and resLoc2.err == 'no_fence')
+        local resLoc3 = fulfillContractCb(1, 101, 'pe:test')
+        check('CONTRACT-LOC-03 fulfillContract retorna no_fence quando fence location ausente', resLoc3.ok == false and resLoc3.err == 'no_fence')
+        _G.VPChopFenceCurrentLocation = function() return { coords = vector3(0.0, 0.0, 0.0) } end
+    end
+
+    -- ─── CONTRACT-TERMS Suite ───────────────────────────────────────────────
+    do
+        resetEnv()
+        local cIdT1 = createContract(nil, 'part_type', 'adv_engine', 1, 2.50, 0, 1)
+        local engT1, _ = PE.Issue('session_t1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'T1', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resT1 = fulfillContractCb(1, cIdT1, engT1)
+        check('CONTRACT-TERMS-01 rewardMult acima do config max rejeitado com invalid_contract_terms', resT1.ok == false and resT1.err == 'invalid_contract_terms')
+        check('CONTRACT-TERMS-01 Entitlement segue ISSUED', PE.State(engT1) == 'ISSUED')
+
+        local cIdT2 = createContract(nil, 'part_type', 'adv_engine', 1, 0/0, 0, 1)
+        local engT2, _ = PE.Issue('session_t2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'T2', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resT2 = fulfillContractCb(1, cIdT2, engT2)
+        check('CONTRACT-TERMS-02 rewardMult NaN rejeitado com invalid_contract_terms', resT2.ok == false and resT2.err == 'invalid_contract_terms')
+
+        local cIdT3 = createContract('qbx:player_1', 'part_type', 'adv_engine', 1, 1.20, 25000, 3, 3600, 'ACCEPTED')
+        local engT3, _ = PE.Issue('session_t3', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'T3', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resT3 = fulfillContractCb(1, cIdT3, engT3)
+        check('CONTRACT-TERMS-03 bonusCash acima do config max rejeitado com invalid_contract_terms', resT3.ok == false and resT3.err == 'invalid_contract_terms')
+
+        local cIdT4 = createContract('qbx:player_1', 'part_type', 'adv_engine', 1, 1.20, -500, 3, 3600, 'ACCEPTED')
+        local engT4, _ = PE.Issue('session_t4', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'T4', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resT4 = fulfillContractCb(1, cIdT4, engT4)
+        check('CONTRACT-TERMS-04 bonusCash negativo rejeitado com invalid_contract_terms', resT4.ok == false and resT4.err == 'invalid_contract_terms')
+
+        local cIdT5 = createContract(nil, 'part_type', 'adv_engine', 2, 1.20, 0, 1)
+        mockDbRows[cIdT5].remaining = 5
+        local engT5, _ = PE.Issue('session_t5', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'T5', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resT5 = fulfillContractCb(1, cIdT5, engT5)
+        check('CONTRACT-TERMS-05 remaining > quantity rejeitado com invalid_contract_terms', resT5.ok == false and resT5.err == 'invalid_contract_terms')
+    end
+
+    -- ─── CONTRACT-GEN Suite ─────────────────────────────────────────────────
+    do
+        resetEnv()
+        BC.EnsureGlobalContracts(virtualTime)
+        BC.EnsureGlobalContracts(virtualTime)
+        local globContracts = BC.GetAvailable('qbx:player_1', 3, virtualTime)
+        local gCount = 0
+        for _, c in ipairs(globContracts) do if c.isGlobal then gCount = gCount + 1 end end
+        check('CONTRACT-GEN-RACE-01 Total de contratos globais gerados <= GlobalSlots (3)', gCount <= 3)
+
+        local pCount = 0
+        for _, c in ipairs(globContracts) do if not c.isGlobal then pCount = pCount + 1 end end
+        check('CONTRACT-GEN-RACE-02 Total de contratos pessoais gerados <= PersonalSlots (3)', pCount <= 3)
+    end
+
+    -- ─── CONTRACT-RNG Suite ─────────────────────────────────────────────────
+    do
+        resetEnv()
+        BC._test.setRng(function() return 0.0 end)
+        local q0 = BC._test.randInt(1, 10)
+        BC._test.setRng(function() return 0.999 end)
+        local q1 = BC._test.randInt(1, 10)
+        check('CONTRACT-RNG-01 randInt respeita o seam _rng determinístico', q0 == 1 and q1 == 10)
+        BC._test.setRng(function() return 0.5 end)
+    end
+
+    -- ─── CONTRACT-GEN-DB Suite ──────────────────────────────────────────────
+    do
+        resetEnv()
+        local origInsert = mockDb.insert.await
+        mockDb.insert.await = function() return nil end
+        local genNil = BC.EnsureGlobalContracts(virtualTime)
+        check('CONTRACT-GEN-DB-01 db.insert retornando nil resulta em 0 gerados', genNil == 0)
+        mockDb.insert.await = origInsert
+    end
+
+    -- ─── CONTRACT-PERSONAL-ACCEPT Suite ─────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract('qbx:player_1', 'part_type', 'adv_engine', 1, 1.25, 2000, 3, 3600, 'AVAILABLE')
+        local eng, _ = PE.Issue('session_pa', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PA01', model = 1234 } })
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local res1 = fulfillContractCb(1, cId, eng)
+        check('CONTRACT-PERSONAL-ACCEPT-01 Contrato pessoal AVAILABLE rejeitado no fulfill com contract_not_accepted', res1.ok == false and res1.err == 'contract_not_accepted')
+        check('CONTRACT-PERSONAL-ACCEPT-01 Entitlement segue ISSUED após rejeição', PE.State(eng) == 'ISSUED')
+
+        local resAcc = acceptContractCb(1, cId)
+        check('CONTRACT-PERSONAL-ACCEPT-01 Player aceita contrato pessoal com sucesso', resAcc.ok == true)
+        check('CONTRACT-PERSONAL-ACCEPT-01 Estado do contrato tornou-se ACCEPTED', mockDbRows[cId].state == 'ACCEPTED')
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local res2 = fulfillContractCb(1, cId, eng)
+        check('CONTRACT-PERSONAL-ACCEPT-01 Contrato pessoal ACCEPTED liquidado com sucesso', res2.ok == true and res2.completed == true)
+    end
+
+    -- ─── CONTRACT-MODEL-HASH Suite ──────────────────────────────────────────
+    do
+        resetEnv()
+        local signedModel = -1002345
+        local unsignedModel = signedModel + 4294967296
+        local h1 = BC._test.normHash32(signedModel)
+        local h2 = BC._test.normHash32(unsignedModel)
+        check('CONTRACT-MODEL-HASH-01 normHash32 produz uint32 idêntico para signed e unsigned', h1 == h2 and h1 >= 0 and h1 < 4294967296)
+
+        local hDiff = BC._test.normHash32(123456)
+        check('CONTRACT-MODEL-HASH-02 Hash diferente produz valor distinto', h1 ~= hDiff)
+    end
+
+    -- ─── CONTRACT-RACE-02 Suite ─────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 2, 1.20, 0, 1)
+        local engRace, _ = PE.Issue('session_race2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'RACE2', model = 1234 } })
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resR1 = fulfillContractCb(1, cId, engRace)
+        check('CONTRACT-RACE-02 Primeiro disparo tem sucesso', resR1.ok == true)
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resR2 = fulfillContractCb(1, cId, engRace)
+        check('CONTRACT-RACE-02 Segundo disparo rejeitado com already_consumed', resR2.ok == false and resR2.err == 'already_consumed')
+        check('CONTRACT-RACE-02 Quota do contrato não foi perdida (permanece 1)', mockDbRows[cId].remaining == 1)
+    end
+
+    -- ─── CONTRACT-PERSONAL-01 Suite ─────────────────────────────────────────
+    do
+        resetEnv()
+        local pKeyA = 'qbx:player_1'
+        local cId = createContract(pKeyA, 'part_type', 'adv_engine', 1, 1.30, 2000, 3, 3600, 'AVAILABLE')
+
+        local resAccB = acceptContractCb(2, cId)
+        check('CONTRACT-PERSONAL-01 Player B não pode aceitar contrato pessoal de A (owner_mismatch)', resAccB.ok == false and resAccB.err == 'owner_mismatch')
+
+        local resAccA = acceptContractCb(1, cId)
+        check('CONTRACT-PERSONAL-01 Player A aceita seu contrato com sucesso', resAccA.ok == true)
+        check('CONTRACT-PERSONAL-01 Estado do contrato pessoal avança para ACCEPTED', mockDbRows[cId].state == 'ACCEPTED')
+
+        local engPersB, _ = PE.Issue('session_pb', 2, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PERB', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resFulB = fulfillContractCb(2, cId, engPersB)
+        check('CONTRACT-PERSONAL-01 Player B não pode cumprir contrato pessoal de A (owner_mismatch)', resFulB.ok == false and resFulB.err == 'owner_mismatch')
+    end
+
+    -- ─── CONTRACT-MODEL-01 Suite ────────────────────────────────────────────
+    do
+        resetEnv()
+        local sultanH = GetHashKey('sultan')
+        local cId = createContract(nil, 'model', 'sultan', 1, 1.35, 0, 1)
+
+        local engSultan, _ = PE.Issue('session_sultan', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SULTAN1', model = sultanH } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resModOk = fulfillContractCb(1, cId, engSultan)
+        check('CONTRACT-MODEL-01 Modelo correto (sultan) dá match e liquida', resModOk.ok == true)
+    end
+
+    -- ─── CONTRACT-CLASS Suite ───────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'class', 'sports', 1, 1.30, 0, 1)
+
+        local engNoClass, _ = PE.Issue('session_noclass', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'NOCLASS', model = 1234, className = nil, vehicleClass = nil } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resNoClass = fulfillContractCb(1, cId, engNoClass)
+        check('CONTRACT-CLASS-02 Provenance de classe ausente falha closed com provenance_class_missing', resNoClass.ok == false and resNoClass.err == 'provenance_class_missing')
+
+        local engSports, _ = PE.Issue('session_sports', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'SPORTS1', model = 1234, className = 'sports', vehicleClass = 6 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resSports = fulfillContractCb(1, cId, engSports)
+        check('CONTRACT-CLASS-01 Classe correta (sports) dá match e liquida', resSports.ok == true)
+    end
+
+    -- ─── CONTRACT-HIGHVALUE Suite ───────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'high_value', 'unauthorized_target_item', 1, 1.50, 0, 1)
+        local engBadHigh, _ = PE.Issue('session_badhigh', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'BADHIGH', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resBadHigh = fulfillContractCb(1, cId, engBadHigh)
+        check('CONTRACT-HIGHVALUE-01 Target fora da allowlist rejeitado com invalid_high_value_target', resBadHigh.ok == false and resBadHigh.err == 'invalid_high_value_target')
+    end
+
+    -- ─── CONTRACT-EXPIRY Suite ──────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1, 500)
+        virtualTime = virtualTime + 600
+        local expiredCount = BC.ExpireDue(virtualTime)
+        check('CONTRACT-EXPIRY-01 ExpireDue identifica e purga contrato vencido', expiredCount == 1 and mockDbRows[cId].state == 'EXPIRED')
+    end
+
+    -- ─── CONTRACT-RESTART Suite ─────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 2, 1.25, 0, 1)
+        mockDbRows[cId].remaining = 1
+        BC.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
+        local loadedRest = BC.Get(cId)
+        check('CONTRACT-RESTART-01 Contrato recuperado pós-reboot com remaining=1 intacto', loadedRest ~= nil and loadedRest.remaining == 1 and loadedRest.quantity == 2)
+    end
+
+    -- ─── CONTRACT-PAY Suite ─────────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.25, 0, 1)
+        local engPayFail, _ = PE.Issue('session_payfail', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PAYFAIL', model = 1234 } })
+        shouldFailPayment = true
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resPayFail = fulfillContractCb(1, cId, engPayFail)
+        check('CONTRACT-PAY-01 Falha de pagamento retorna payment_failed', resPayFail.ok == false and resPayFail.err == 'payment_failed')
+        check('CONTRACT-PAY-01 Flag terminalConsumed=true retornada ao client', resPayFail.terminalConsumed == true)
+        check('CONTRACT-PAY-01 Entitlement permanece terminal CONSUMED (fail-closed anti-dupe)', PE.State(engPayFail) == 'CONSUMED')
+        check('CONTRACT-PAY-01 Quota do contrato permanece reservada', mockDbRows[cId].remaining == 0 and mockDbRows[cId].state == 'COMPLETED')
+        shouldFailPayment = false
+    end
+
+    -- ─── CONTRACT-BONUS Suite ───────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract('qbx:player_1', 'part_type', 'adv_engine', 2, 1.20, 5000, 3, 3600, 'ACCEPTED')
+
+        local engB1, _ = PE.Issue('session_b1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'BONUS1', model = 1234 } })
+        local engB2, _ = PE.Issue('session_b2', 1, 'adv_engine', 11, { origin = 'advanced', provenance = { realPlate = 'BONUS2', model = 1234 } })
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resB1 = fulfillContractCb(1, cId, engB1)
+        check('CONTRACT-BONUS-01 1a entrega (remaining 2->1) NÃO paga bonus_cash', resB1.ok == true and resB1.bonusCash == 0 and resB1.completed == false)
+
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resB2 = fulfillContractCb(1, cId, engB2)
+        check('CONTRACT-BONUS-01 2a entrega (remaining 1->0) PAGA bonus_cash exatamente 1x', resB2.ok == true and resB2.bonusCash == 5000 and resB2.completed == true)
+    end
+
+    -- ─── CONTRACT-MARKET Suite ──────────────────────────────────────────────
+    do
+        resetEnv()
+        local cId = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1)
+        local engMkt, _ = PE.Issue('session_mkt', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'MKT01', model = 1234 } })
+
+        local demBefore = BM.GetDemandIndex('adv_engine', virtualTime)
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resMkt = fulfillContractCb(1, cId, engMkt)
+        local demAfter = BM.GetDemandIndex('adv_engine', virtualTime)
+        check('CONTRACT-MARKET-01 Fulfillment de contrato tem sucesso financeiro', resMkt.ok == true)
+        check('CONTRACT-MARKET-01 Demanda do mercado geral permaneceu inalterada (zero RecordSalesBatch)', math.abs(demAfter - demBefore) < 0.0001)
+    end
+
+    -- ─── CONTRACT-LEGACY Suite ──────────────────────────────────────────────
+    do
+        resetEnv()
+        if getOrderCb then
+            local oldSingle = _G.MySQL.single.await
+            local oldInsert = _G.MySQL.insert.await
+            _G.MySQL.single.await = function(...) return nil end
+            _G.MySQL.insert.await = function(...) return 42 end
+            local resLegOrder = getOrderCb(1)
+            check('CONTRACT-LEGACY-01 getOrder legado permanece operacional', resLegOrder ~= nil and resLegOrder.id ~= nil)
+            _G.MySQL.single.await = oldSingle
+            _G.MySQL.insert.await = oldInsert
+        end
+        if fulfillOrderCb then
+            local resLegFulfill = fulfillOrderCb(1, 99999)
+            check('CONTRACT-LEGACY-02 fulfillOrder legado rejeita ID inexistente com no_order', resLegFulfill.ok == false and resLegFulfill.err == 'no_order')
+        end
+    end
+
+    -- ─── DELIVERCAR-CANARY Suite ────────────────────────────────────────────
+    do
+        resetEnv()
+        trustLevels[1] = 4
+        if VPChopFence and VPChopFence._test then VPChopFence._test.setTrust(1, 4) end
+        _G.VPChopGetProgression = function(src) return { tier = 4, xp = 1000 } end
+        local resCanary = deliverCarCb(1, 0)
+        check('DELIVERCAR-CANARY deliverCar segue rejeitando netId 0 com vehicle', resCanary.ok == false and resCanary.err == 'vehicle')
+    end
 
     _G.VPChopFenceGetTrust = origVPChopFenceGetTrust
     _G.VPChopGetProgression = origVPChopGetProgression
@@ -571,3 +824,5 @@ local function run()
 end
 
 run()
+
+

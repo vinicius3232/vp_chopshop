@@ -1333,7 +1333,10 @@ lib.callback.register('vp_chopshop:broker:getContracts', function(src)
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
 
     local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
-    if loc and loc.coords and not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
+    if not loc or not loc.coords then
+        return { ok = false, err = 'no_fence' }
+    end
+    if not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
         return { ok = false, err = 'distance' }
     end
 
@@ -1355,7 +1358,10 @@ lib.callback.register('vp_chopshop:broker:acceptContract', function(src, contrac
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
 
     local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
-    if loc and loc.coords and not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
+    if not loc or not loc.coords then
+        return { ok = false, err = 'no_fence' }
+    end
+    if not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
         return { ok = false, err = 'distance' }
     end
 
@@ -1380,7 +1386,10 @@ lib.callback.register('vp_chopshop:broker:fulfillContract', function(src, contra
     if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
 
     local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
-    if loc and loc.coords and not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
+    if not loc or not loc.coords then
+        return { ok = false, err = 'no_fence' }
+    end
+    if not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
         return { ok = false, err = 'distance' }
     end
 
@@ -1416,11 +1425,20 @@ lib.callback.register('vp_chopshop:broker:fulfillContract', function(src, contra
     local contract = BrokerContracts.Get(cId)
     if not contract then return { ok = false, err = 'not_found' } end
 
+    -- Validar termos econômicos persistidos (fail-closed)
+    local okTerms, termsErr = BrokerContracts.ValidateEconomicTerms(contract)
+    if not okTerms then
+        return { ok = false, err = termsErr or 'invalid_contract_terms' }
+    end
+
     if contract.expiresAt and contract.expiresAt <= now then
         return { ok = false, err = 'contract_expired' }
     end
     if contract.playerKey and contract.playerKey ~= playerKey then
         return { ok = false, err = 'owner_mismatch' }
+    end
+    if contract.playerKey and contract.state ~= 'ACCEPTED' then
+        return { ok = false, err = 'contract_not_accepted' }
     end
     if contract.minTrust > trust then
         return { ok = false, err = 'trust_gate' }
@@ -1467,9 +1485,23 @@ lib.callback.register('vp_chopshop:broker:fulfillContract', function(src, contra
     local rewardMult = math.max(1.0, math.min(2.5, tonumber(contract.rewardMult) or 1.0))
     local unitPayout = math.floor(quote.unitPrice * rewardMult)
 
+    -- Mutex por contractId protegendo a seção crítica econômica
+    if not BrokerContracts.AcquireLock(cId) then
+        return { ok = false, err = 'contract_busy' }
+    end
+
+    local lockAcquired = true
+    local function releaseContractLock()
+        if lockAcquired then
+            BrokerContracts.ReleaseLock(cId)
+            lockAcquired = false
+        end
+    end
+
     -- 5. Reserva atômica no banco de dados (remaining decrement)
-    local resReserve = BrokerContracts.ReserveFulfillment(cId, playerKey, trust)
+    local resReserve = BrokerContracts.ReserveFulfillment(cId, playerKey, trust, now)
     if not resReserve.ok then
+        releaseContractLock()
         return { ok = false, err = resReserve.err }
     end
 
@@ -1477,21 +1509,36 @@ lib.callback.register('vp_chopshop:broker:fulfillContract', function(src, contra
     local bonusCash = appliesBonus and contract.bonusCash or 0
     local totalPayout = unitPayout + bonusCash
 
+    -- Seam de teste de concorrência antes do Consume
+    if BrokerContracts._test and BrokerContracts._test.getHookBeforeConsume then
+        local hook = BrokerContracts._test.getHookBeforeConsume()
+        if hook then
+            hook(cId, src, entId)
+        end
+    end
+
     -- 6. Consumir atômico da peça no PartEntitlement
     local resConsume = PartEntitlement.Consume(entId, src, 'broker_contract_' .. tostring(cId), entOrErr.partKey)
     if not resConsume.ok then
-        BrokerContracts.CompensateReservation(cId, 1)
+        local compOk = BrokerContracts.CompensateReservation(cId, 1, resReserve.completed, contract.playerKey)
+        releaseContractLock()
+        if not compOk then
+            return { ok = false, err = 'contract_compensation_failed' }
+        end
         return { ok = false, err = resConsume.err }
     end
 
     -- 7. Pagamento financeiro (BridgeAddCash)
     local paid = BridgeAddCash(src, totalPayout, 'chopshop_broker_contract')
     if not paid then
+        releaseContractLock()
         print(('[vp_chopshop][fence:fulfillContract] CRITICAL: falha no BridgeAddCash — playerKey=%s, contractId=%s, entitlementId=%s, amount=$%d, operation=broker_contract'):format(
             tostring(playerKey), tostring(cId), tostring(entId), totalPayout))
         -- Fail-closed: quota permanece consumida, peça permanece CONSUMED, ZERO refund, ZERO retry
         return { ok = false, err = 'payment_failed', terminalConsumed = true }
     end
+
+    releaseContractLock()
 
     -- 8. Sucesso: Trust XP & Evento
     local xpBonus = (Config.Fence and Config.Fence.XpOrderBonus) or 80

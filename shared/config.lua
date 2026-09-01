@@ -1359,7 +1359,6 @@ Config.Broker = {
                 { key = 'adv_engine', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
                 { key = 'catalytic_converter', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 1800 },
                 { key = 'body_panel', minTrust = 1, minQty = 2, maxQty = 6, mult = 1.15, bonus = 1000 },
-                { key = 'tyre', minTrust = 1, minQty = 4, maxQty = 8, mult = 1.15, bonus = 1200 },
             },
             model = {
                 { key = 'sultan', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.35, bonus = 3000 },

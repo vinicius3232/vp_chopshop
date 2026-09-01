@@ -24,7 +24,21 @@ end
 local threads = {}
 function CreateThread(fn) threads[#threads+1] = fn end
 function Wait(_) end
-function AddEventHandler() end
+local _eventHandlers = {}
+_G.AddEventHandler = function(name, fn)
+    if not _eventHandlers[name] then _eventHandlers[name] = {} end
+    table.insert(_eventHandlers[name], fn)
+end
+AddEventHandler = _G.AddEventHandler
+
+_G.TriggerEvent = function(name, ...)
+    if _eventHandlers[name] then
+        for _, fn in ipairs(_eventHandlers[name]) do
+            fn(...)
+        end
+    end
+end
+TriggerEvent = _G.TriggerEvent
 function GetPlayerName(src) return src and ('player_'..tostring(src)) or nil end
 function GetNumPlayerIdentifiers(src) return 1 end
 function GetPlayerIdentifier(src, i) return 'license:test_' .. tostring(src) end
@@ -194,9 +208,17 @@ _G.VPChopDBReady = true   -- [PR-D] default do harness: DB pronto (specs sobresc
 function SetEntityAsMissionEntity(_, _, _) end
 function DeleteEntity(h) local n = (h or 0) - 70000; FAKE_VEH[n] = nil end
 _G.VPChopEvt = setmetatable({}, { __index = function(_, k) return 'vpevt:' .. k end })
-_G._TRIGGERED = {}
-function TriggerEvent(evt, ...) _G._TRIGGERED[#_G._TRIGGERED + 1] = { evt = evt, args = { ... } } end
 function LogSuspicious(_, _, _) end
+_G._TRIGGERED = {}
+function TriggerEvent(evt, ...)
+    _G._TRIGGERED[#_G._TRIGGERED + 1] = { evt = evt, args = { ... } }
+    if _eventHandlers and _eventHandlers[evt] then
+        for _, fn in ipairs(_eventHandlers[evt]) do
+            fn(...)
+        end
+    end
+end
+_G.TriggerEvent = TriggerEvent
 _G.Config = {
     Debug = false,
     VehicleNearLiftRadius = 5.0,
@@ -453,7 +475,6 @@ _G.Config = {
                     { key = 'adv_engine', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
                     { key = 'catalytic_converter', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 1800 },
                     { key = 'body_panel', minTrust = 1, minQty = 2, maxQty = 6, mult = 1.15, bonus = 1000 },
-                    { key = 'tyre', minTrust = 1, minQty = 4, maxQty = 8, mult = 1.15, bonus = 1200 },
                 },
                 model = {
                     { key = 'sultan', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.35, bonus = 3000 },
