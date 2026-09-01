@@ -147,7 +147,18 @@ end
 
 ---@return { ok:boolean, err:string|nil }
 function VPChopAdvEngineCommit(src, netId, sessionId)
-    if not VPChopAdvancedState.wasRemoved(sessionId, 'bonnet') then return { ok = false, err = 'hood_first' } end
+    local bonnetDone = VPChopAdvancedState.wasRemoved(sessionId, 'bonnet')
+    if not bonnetDone and netId and netId > 0 then
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        if veh and veh ~= 0 and DoesEntityExist(veh) then
+            if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
+                bonnetDone = true
+            elseif type(IsVehicleDoorDamaged) == 'function' and IsVehicleDoorDamaged(veh, 4) then
+                bonnetDone = true
+            end
+        end
+    end
+    if not bonnetDone then return { ok = false, err = 'hood_first' } end
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'done' } end
     if not VPChopConsumeTool(src, true) then return { ok = false, err = 'no_screwdriver' } end
 
@@ -203,6 +214,11 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     end
     if type(ChopSession) == 'table' and type(ChopSession.Complete) == 'function' then
         ChopSession.Complete(sessionId)
+    end
+
+    local jackItem = (Config.Jackstand and Config.Jackstand.Item) or 'chopshop_jackstand'
+    if jackItem and type(InvAdd) == 'function' then
+        InvAdd(src, jackItem, 1)
     end
 
     return { ok = true }
@@ -270,8 +286,18 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     if not ValidatePlayerNearPoint(src, vehCoords, 6.0) then return { ok = false, err = 'distance' } end
 
     sessionId = resolveSession(sessionId, netId, src)
-    if not sessionId then return { ok = false, err = 'session' } end
-    if not VPChopAdvancedState.wasRemoved(sessionId, 'bonnet') then return { ok = false, err = 'hood_first' } end
+    local bonnetDone = VPChopAdvancedState.wasRemoved(sessionId, 'bonnet')
+    if not bonnetDone and netId and netId > 0 then
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        if veh and veh ~= 0 and DoesEntityExist(veh) then
+            if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
+                bonnetDone = true
+            elseif type(IsVehicleDoorDamaged) == 'function' and IsVehicleDoorDamaged(veh, 4) then
+                bonnetDone = true
+            end
+        end
+    end
+    if not bonnetDone then return { ok = false, err = 'hood_first' } end
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'done' } end
     if not VPChopHasTool(src, true) then return { ok = false, err = 'no_screwdriver' } end
 

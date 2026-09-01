@@ -674,6 +674,11 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     -- CAR_DISCARDED: 1×, SÓ após o terminal commit.
     TriggerEvent(VPChopEvt.CAR_DISCARDED, source, netId, plate, payout)
 
+    local jackItem = (Config.Jackstand and Config.Jackstand.Item) or 'chopshop_jackstand'
+    if jackItem and type(InvAdd) == 'function' then
+        InvAdd(source, jackItem, 1)
+    end
+
     -- [v1.16 P0.4] persiste no ledger. cleanup_pending = a carcaça ficou no mundo
     -- (del falhou). Se foi deletada agora, a linha ainda serve de barreira até o TTL
     -- (protege contra um netId reciclado rápido no MESMO frame de spawn — improvável,

@@ -91,18 +91,24 @@ lib.callback.register('vp_chopshop:session:requestRaise', function(src, netId)
     -- Item exigido (trust-no-client — o export client só implica posse).
     local item = Config.Jackstand.Item or 'chopshop_jackstand'
     if (tonumber(InvCount(src, item)) or 0) < 1 then return denyRaise(src, netId, 'no_item') end
+    if not InvRemove(src, item, 1) then return denyRaise(src, netId, 'no_item') end
 
     -- Create pode negar: 'disabled' / 'completed' / 'carcass_consumed' / 'vehicle'
     local session, err = ChopSession.Create(netId, src)
-    if not session then return denyRaise(src, netId, err or 'session') end
+    if not session then
+        InvAdd(src, item, 1)
+        return denyRaise(src, netId, err or 'session')
+    end
 
     if not ChopSession.AddParticipant(session.id, src) then
+        InvAdd(src, item, 1)
         return denyRaise(src, netId, 'session')
     end
 
     local already = session.raised == true
     if not already then
         if not ChopSession.MarkRaised(session.id, src) then
+            InvAdd(src, item, 1)
             return denyRaise(src, netId, 'session')
         end
     else
@@ -128,9 +134,14 @@ lib.callback.register('vp_chopshop:session:requestLower', function(src, netId)
     if not netId then return { ok = false, err = 'net' } end
 
     local session = ChopSession.GetByVehicle(netId)
+    local jackItem = (Config.Jackstand and Config.Jackstand.Item) or 'chopshop_jackstand'
+
     if not session then
         -- Sessão já foi invalidada (veículo removido / timeout). O client ainda
-        -- precisa limpar o visual dele → devolve ok+stale.
+        -- precisa limpar o visual dele → devolve ok+stale e devolve o item do macaco.
+        if jackItem and type(InvAdd) == 'function' then
+            InvAdd(src, jackItem, 1)
+        end
         return { ok = true, stale = true }
     end
     -- [v1.15 #5] Autorização EXPLÍCITA: só participante da sessão baixa o veículo.
@@ -140,6 +151,12 @@ lib.callback.register('vp_chopshop:session:requestLower', function(src, netId)
     end
 
     ChopSession.ClearRaised(session.id)
+
+    -- [UX] Devolver o item do macaco para o jogador
+    if jackItem and type(InvAdd) == 'function' then
+        InvAdd(src, jackItem, 1)
+    end
+
     return { ok = true }
 end)
 

@@ -41,7 +41,20 @@ local function registryValidate(v)
 
     for _, req in ipairs(d.requires or {}) do
         if req.state == 'REMOVED' and not VPChopAdvancedState.wasRemoved(v.sessionId, req.part) then
-            return (req.part == 'bonnet') and 'hood_first' or 'engine_first'
+            local missing = false
+            if req.part == 'bonnet' and v.netId and v.netId > 0 then
+                local veh = NetworkGetEntityFromNetworkId(v.netId)
+                if veh and veh ~= 0 and DoesEntityExist(veh) then
+                    if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
+                        missing = true
+                    elseif type(IsVehicleDoorDamaged) == 'function' and IsVehicleDoorDamaged(veh, 4) then
+                        missing = true
+                    end
+                end
+            end
+            if not missing then
+                return (req.part == 'bonnet') and 'hood_first' or 'engine_first'
+            end
         end
     end
 

@@ -1674,8 +1674,9 @@ end
 
 local function doAdvChopEngine(veh, netId)
     if JackstandBusy then return end
-    -- [UX-D] Pré-requisito defensivo: o capô precisa ter sido removido primeiro
-    if not advIsChopped(netId, 'bonnet') then
+    -- [UX-D] Pré-requisito defensivo: o capô precisa ter sido removido primeiro (ou já danificado/ausente)
+    local bonnetDef = VPChopPartRegistry.get('bonnet')
+    if not advIsChopped(netId, 'bonnet') and not isPartMissing(veh, bonnetDef) then
         VPChopNotify(L('err_hood_first') or 'Remova o capô primeiro.', 'error')
         return
     end

@@ -69,6 +69,8 @@ function GetEntityCoords(_) return { x = 0, y = 0, z = 0 } end
 function TriggerClientEvent(_, _, ...) end
 function VPChopAddStolenCarParts(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
 function InvAdd(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
+function InvRemove(_, _, _) return true end
+function InvCount(_, _) return 1 end
 function VPChopLeaveEvidence(_, _, _, _) end
 function VPChopArmTyreWindow(_, _) end
 function VPChopChopPartCommit(_, _, _) return { ok = true } end  -- overridden pelo spec de tyre
