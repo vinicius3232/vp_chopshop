@@ -236,6 +236,19 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_carcass') then return { ok = false, err = 'done' } end
     if not VPChopWelderNearVehicle(netId) then return { ok = false, err = 'no_welder_adv' } end
 
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    local model = (veh and veh ~= 0 and DoesEntityExist(veh)) and GetEntityModel(veh) or 0
+
+    -- [v1.16 SEC-1.1] Barreira persistente anti-rechop / double-carcass
+    if VPChopCarcassLedger and VPChopCarcassLedger.alreadyProcessed and model ~= 0 then
+        if VPChopCarcassLedger.alreadyProcessed(netId, model) then
+            return { ok = false, err = 'done' }
+        end
+    end
+    if veh and veh ~= 0 and DoesEntityExist(veh) and Entity(veh).state.vpChopCarcassDone == true then
+        return { ok = false, err = 'done' }
+    end
+
     local mOk, mDup = VPChopAdvancedState.markPart(sessionId, src, 'adv_carcass')
     if not mOk then return { ok = false, err = 'session' } end
     if mDup then return { ok = false, err = 'done' } end
@@ -259,16 +272,22 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_carcass', 4)
 
     -- [UX-E Terminal Chassis Destruction]
-    local veh = NetworkGetEntityFromNetworkId(netId)
+    local stillExists = false
     if veh and veh ~= 0 and DoesEntityExist(veh) then
+        Entity(veh).state:set('vpChopCarcassDone', true, true)
         if type(BridgeDeleteWorldVehicle) == 'function' then
             BridgeDeleteWorldVehicle(veh)
         else
             DeleteEntity(veh)
         end
+        stillExists = (veh ~= 0 and DoesEntityExist(veh) == true)
     end
-    if type(ChopSession) == 'table' and type(ChopSession.Complete) == 'function' then
-        ChopSession.Complete(sessionId)
+
+    -- [v1.16 SEC-1.1] Grava no CarcassLedger persistente para bloquear repetição mesmo pós restart
+    if VPChopCarcassLedger and VPChopCarcassLedger.mark and model ~= 0 then
+        local s = type(ChopSession) == 'table' and ChopSession.Get and ChopSession.Get(sessionId)
+        local vsid = s and s.vehicle and s.vehicle.identity or nil
+        VPChopCarcassLedger.mark(netId, model, vsid, 'carcass', ServerChopPlayerKey(src), stillExists)
     end
 
     local jackItem = (Config.Jackstand and Config.Jackstand.Item) or 'chopshop_jackstand'

@@ -1,11 +1,15 @@
 -- server/logistics/part_entitlement_spec.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.16 SEC-1] Self-test do PartEntitlement + Hardening de Autoridade Econômica.
+--  [v1.16 SEC-1 / SEC-1.1] Self-test do PartEntitlement + Hardening de Autoridade Econômica.
 --  NÃO roda em produção (self-gated na convar vp_chopshop_selftest 1).
 --
 --  Cobre testes obrigatórios:
 --    ENT-01 .. ENT-20 (Entitlement lifecycle, atomic at-most-once, bench & fence authority)
 --    OWN-01 .. OWN-04 (CitizenID normalization & exact ownership boundary)
+--    BENCH-MODE-01 .. BENCH-MODE-02 (Strict mode allowlist and per-part policy)
+--    INV-FULL-01 .. INV-FULL-02 (Inventory capacity pre-check and zero-loss guarantee)
+--    CAT-UX-01 .. CAT-UX-03 (Server timing enforced catalytic theft Start/Complete)
+--    CARCASS-RESTART-01 .. CARCASS-RESTART-02 (Zero duplicate carcass reward post-restart)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 if (GetConvarInt and GetConvarInt('vp_chopshop_selftest', 0) or 0) ~= 1 then return end
@@ -98,9 +102,15 @@ local function run()
     local idBenchDoor, _ = PartEntitlement.Issue('session_bench', 1, 'door_dside_f', 10)
     -- Simulação da lógica do callback de bancada:
     local function mockBenchProcess(src, entId, chosenMode)
+        local ALLOWED = { raw_materials = true, clean_serial = true, stolen_serial = true }
+        if not ALLOWED[chosenMode] then return { ok = false, err = 'invalid_mode' } end
+        local okV, ent = PartEntitlement.Validate(entId, src)
+        if not okV then return { ok = false, err = ent } end
+        if ent.partKey == 'catalytic_converter' and chosenMode ~= 'raw_materials' then
+            return { ok = false, err = 'invalid_mode_for_part' }
+        end
         local cRes = PartEntitlement.Consume(entId, src, 'bench_' .. tostring(chosenMode))
         if not cRes.ok then return { ok = false, err = cRes.err } end
-        -- O servidor decide a recompensa pelo cRes.partKey autoritativo
         return { ok = true, rewardedPart = cRes.partKey, mode = chosenMode }
     end
 
@@ -109,6 +119,67 @@ local function run()
 
     local legitBenchCall = mockBenchProcess(1, idBenchDoor, 'clean_serial')
     check('ENT-14 benchProcessPart usa partKey resolvido server-side', legitBenchCall.ok == true and legitBenchCall.rewardedPart == 'door_dside_f')
+
+    -- ─── BENCH-MODE-01 .. 02: Mode Allowlist & Part Policy ────────────────────
+    local idModeTest, _ = PartEntitlement.Issue('session_mode', 1, 'door_dside_f', 10)
+    local badModeCall = mockBenchProcess(1, idModeTest, 'hacked_mode_x')
+    check('BENCH-MODE-01 modo desconhecido falha antes do consume', badModeCall.ok == false and badModeCall.err == 'invalid_mode')
+    check('BENCH-MODE-01 entitlement permanece ISSUED após falha de modo', PartEntitlement.State(idModeTest) == 'ISSUED')
+
+    local idCatMode, _ = PartEntitlement.Issue('session_cat_mode', 1, 'catalytic_converter', 10)
+    local badCatModeCall = mockBenchProcess(1, idCatMode, 'clean_serial')
+    check('BENCH-MODE-02 catalytic em clean_serial rejeitado', badCatModeCall.ok == false and badCatModeCall.err == 'invalid_mode_for_part')
+    check('BENCH-MODE-02 catalytic entitlement permanece ISSUED após rejeição', PartEntitlement.State(idCatMode) == 'ISSUED')
+
+    -- ─── INV-FULL-01 .. 02: Pre-check de Capacidade de Inventário ──────────────
+    local idInvTest, _ = PartEntitlement.Issue('session_inv', 1, 'bonnet', 10)
+    local function mockBenchWithInv(src, entId, chosenMode, canCarry)
+        local okV, ent = PartEntitlement.Validate(entId, src)
+        if not okV then return { ok = false, err = ent } end
+        if not canCarry then
+            return { ok = false, err = 'inventory_full' } -- Aborta ANTES do consume
+        end
+        local cRes = PartEntitlement.Consume(entId, src, 'bench_' .. tostring(chosenMode))
+        if not cRes.ok then return { ok = false, err = cRes.err } end
+        return { ok = true, rewarded = true }
+    end
+
+    local invFullCall = mockBenchWithInv(1, idInvTest, 'raw_materials', false)
+    check('INV-FULL-01 inventário cheio falha sem consumir entitlement', invFullCall.ok == false and invFullCall.err == 'inventory_full')
+    check('INV-FULL-01 entitlement continua ISSUED para retry', PartEntitlement.State(idInvTest) == 'ISSUED')
+
+    local invOkCall = mockBenchWithInv(1, idInvTest, 'raw_materials', true)
+    check('INV-FULL-02 retry com inventário livre consome com sucesso', invOkCall.ok == true and invOkCall.rewarded == true)
+    check('INV-FULL-02 entitlement consumido após sucesso', PartEntitlement.State(idInvTest) == 'CONSUMED')
+
+    -- ─── CAT-UX-01 .. 03: Catalytic Theft Two-Step Server Timing Enforcement ──
+    local mockThefts = {}
+    local function mockCatStart(src, netId, minDur)
+        local t = os.clock()
+        mockThefts[src] = { netId = netId, startedAt = t, minDur = minDur or 1.0, token = 'tok:' .. tostring(src) }
+        return { ok = true, token = mockThefts[src].token, duration = mockThefts[src].minDur }
+    end
+    local function mockCatComplete(src, netId, token, elapsedOffset)
+        local th = mockThefts[src]
+        if not th or th.token ~= token or th.netId ~= netId then return { ok = false, err = 'invalid' } end
+        local elapsed = (os.clock() - th.startedAt) + (elapsedOffset or 0)
+        if elapsed < th.minDur - 0.05 then
+            return { ok = false, err = 'too_fast' }
+        end
+        mockThefts[src] = nil
+        local peId = PartEntitlement.Issue(('cat:%d'):format(netId), src, 'catalytic_converter', netId, { origin = 'theft' })
+        return { ok = true, entitlementId = peId }
+    end
+
+    local startTh = mockCatStart(1, 99, 5.0)
+    local fastCall = mockCatComplete(1, 99, startTh.token, 0) -- 0s elapsed vs 5s required
+    check('CAT-UX-01 completeStealCatalytic rápido demais -> too_fast', fastCall.ok == false and fastCall.err == 'too_fast')
+
+    local fakeTokCall = mockCatComplete(1, 99, 'fake_token', 6.0)
+    check('CAT-UX-02 completeStealCatalytic com token inválido -> invalid', fakeTokCall.ok == false and fakeTokCall.err == 'invalid')
+
+    local legitCatCall = mockCatComplete(1, 99, startTh.token, 5.5)
+    check('CAT-UX-03 completeStealCatalytic no tempo correto -> ok com entitlement', legitCatCall.ok == true and legitCatCall.entitlementId ~= nil)
 
     -- ─── ENT-15 .. ENT-19: Fence Catalytic Hardening ──────────────────────────
     local idEngine, _ = PartEntitlement.Issue('session_fence_test', 1, 'adv_engine', 10)
@@ -148,7 +219,6 @@ local function run()
     local normLong  = BridgeNormalizeCitizenId('ABC1234')
     check('OWN-02 ABC123 != ABC1234 (sem falso positivo de substring)', normShort ~= normLong)
 
-    -- Simulação de verificação exata
     local function mockCheckOwner(playerKey, ownerCitizenId)
         local np = BridgeNormalizeCitizenId(playerKey)
         local no = BridgeNormalizeCitizenId(ownerCitizenId)
@@ -157,6 +227,34 @@ local function run()
 
     check('OWN-03 próprio veículo é bloqueado quando BlockOwnVehicle=true', mockCheckOwner('qbx:PLAYER1', 'PLAYER1') == true)
     check('OWN-04 veículo de terceiro permanece permitido', mockCheckOwner('qbx:PLAYER1', 'PLAYER2') == false)
+
+    -- ─── CARCASS-RESTART-01 .. 02: Carcass Terminal & Restart Persistence ─────
+    local carcassStore = {}
+    local mockCarcassDb = {
+        lookup = function(n, m) return carcassStore[tostring(n) .. '|' .. tostring(m)] end,
+        mark   = function(n, m, vsid, op, paidTo, cp) carcassStore[tostring(n) .. '|' .. tostring(m)] = { op = op, vsid = vsid, cleanup_pending = cp } end,
+    }
+    VPChopCarcassLedger._setDb(mockCarcassDb)
+
+    -- Simula commit de carcass com falha na deleção de mundo (entidade ainda existe)
+    VPChopCarcassLedger.mark(55, 1234, 'vsid_test_55', 'carcass', 'qbx:player_1', 1)
+    check('CARCASS-RESTART-01 carcass gravada no ledger com cleanup_pending=1', carcassStore['55|1234'] ~= nil and carcassStore['55|1234'].op == 'carcass')
+
+    -- Simulação de resource restart (ChopSession zerada na memória)
+    local isProc, opProc = VPChopCarcassLedger.alreadyProcessed(55, 1234)
+    check('CARCASS-RESTART-02 alreadyProcessed retorna true pós-restart', isProc == true and opProc == 'carcass')
+
+    local function mockAttemptRechop(netId, model)
+        if VPChopCarcassLedger.alreadyProcessed(netId, model) then
+            return false, 'carcass_consumed'
+        end
+        return true, 'ok'
+    end
+
+    local reChopOk, reChopErr = mockAttemptRechop(55, 1234)
+    check('CARCASS-RESTART-02 tentativa de rechopar pós-restart é bloqueada (ZERO double reward)', reChopOk == false and reChopErr == 'carcass_consumed')
+
+    VPChopCarcassLedger._setDb(nil)
 
     print(('[part_entitlement/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end

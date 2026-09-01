@@ -1914,6 +1914,15 @@ local function doStealCatalytic(veh)
     if not netId or netId <= 0 then return end
 
     JackstandBusy = true
+
+    -- [v1.16 SEC-1.1 CAT-ACTION] Início server-authoritative com token temporal
+    local sOk, startRes = pcall(lib.callback.await, 'vp_chopshop:catalytic:start', false, netId)
+    if not sOk or not startRes or not startRes.ok then
+        JackstandBusy = false
+        VPChopNotify(VPChopLocaleErr(startRes and startRes.err) or L('notify_generic_error'), 'error')
+        return
+    end
+
     spawnToolProp(Config.AdvancedChop and Config.AdvancedChop.SawAnim and Config.AdvancedChop.SawAnim.prop)
 
     -- Chance de disparar alarme da polícia pelo barulho da serra
@@ -1928,7 +1937,7 @@ local function doStealCatalytic(veh)
     }
 
     local ok = lib.progressBar({
-        duration = math.floor(((Config.CatalyticTheft and Config.CatalyticTheft.ProgressMs) or 7000) * ((tCfg and tCfg.speedMult) or 1.0)),
+        duration = startRes.durationMs or 7000,
         label = L('catalytic_progress'),
         useWhileDead = false,
         canCancel = true,
@@ -1940,7 +1949,7 @@ local function doStealCatalytic(veh)
 
     if not ok then return end
 
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:stealCatalytic', false, netId)
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:catalytic:complete', false, netId, startRes.token)
     if not cbOk or not res or not res.ok then
         VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
         return

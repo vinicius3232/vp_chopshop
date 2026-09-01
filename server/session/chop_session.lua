@@ -259,6 +259,14 @@ function ChopSession.Create(netId, src)
     local ent = EntityAPI.get(netId)
     if not EntityAPI.exists(ent) then return nil, 'vehicle' end
 
+    -- [v1.16 SEC-1.1] Barreira persistente anti-rechop pós restart
+    if VPChopCarcassLedger and VPChopCarcassLedger.alreadyProcessed then
+        local model = EntityAPI.model(ent)
+        if model and VPChopCarcassLedger.alreadyProcessed(netId, model) then
+            return nil, 'carcass_consumed'
+        end
+    end
+
     _sidSeq = _sidSeq + 1
     local vsid, fp = mintVehicleIdentity(netId)
     fp.markerSet = EntityAPI.tag(ent, vsid) == true   -- [v1.15 #7] crava o marcador

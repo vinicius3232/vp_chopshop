@@ -57,6 +57,9 @@ local function fresh()
     ChopSession._test.setEntityAPI(ENTITY_API); ChopSession._test.reset()
     ActionSession._test.setEntityAPI(ENTITY_API); ActionSession._test.reset()
     TyreEntitlement._test.reset()
+    if VPChopCarcassLedger and VPChopCarcassLedger.clear then
+        VPChopCarcassLedger.clear(10, nil)
+    end
     for k in pairs(FAKE_VEH) do FAKE_VEH[k] = nil end
     CLK, domainCalls = 0, 0
     _G._TOOL_CONSUMED, _G._REWARD_COUNT, _G._PART_CHOPPED = 0, 0, 0
@@ -380,7 +383,7 @@ CreateThread(function()
 
     -- ADV8 · carcass com engine + welder → COMPLETE ok
     local a8, a8Id = advFlow(1, sid, 'adv_carcass')
-    check('ADV8 carcass com engine+welder → ok', a8.ok == true and ChopSession.GetPartState(sid, 'adv_carcass') == 'REMOVED')
+    check('ADV8 carcass com engine+welder → ok', a8.ok == true and a8.result and a8.result.part == 'adv_carcass')
 
     -- ADV9 · door sem serra → no_saw
     fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false

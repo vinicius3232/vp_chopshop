@@ -24,3 +24,18 @@ function InvAdd(src, item, count)
     -- ox_inventory v2+ retorna o slot number em sucesso, false/nil em falha
     return result ~= nil and result ~= false
 end
+
+--- [v1.16 SEC-1.1] Pré-validação de capacidade de inventário antes de consumir o entitlement.
+---@param src number
+---@param item string
+---@param count integer
+---@return boolean
+function InvCanCarry(src, item, count)
+    if not src or src <= 0 then return false end
+    if count < 1 then return true end
+    if exports.ox_inventory and exports.ox_inventory.CanCarryItem then
+        local ok, can = pcall(exports.ox_inventory.CanCarryItem, exports.ox_inventory, src, item, count)
+        if ok and can ~= nil then return can == true end
+    end
+    return true
+end
