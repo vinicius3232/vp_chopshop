@@ -19,13 +19,14 @@
 
 PartEntitlement = {}
 
----@alias PartEntitlementState 'ISSUED'|'CONSUMED'|'LOST'
+---@alias PartEntitlementState 'ISSUED'|'RESERVED_EXTERNAL'|'CONSUMED'|'LOST'
 
 ---@type table<string, table>              entitlementId → entitlement
 local Entitlements = {}
 ---@type table<string, string>             (sessionId..':'..partKey) → entitlementId (idempotência)
 local BySourcePart = {}
 local _seq = 0
+local _bootNonce = ('%x_%x'):format(os.time(), math.random(100000, 999999))
 
 ---@type table<string, table<number, number>> bucket → src → expiryMs
 local RateLimits = {}
@@ -146,30 +147,34 @@ function PartEntitlement.Issue(sessionId, src, partKey, sourceNetId, opts)
 
     _seq = _seq + 1
     local now = os.time()
+    local stablePartId = ('spi:%s:%d:%d:%d'):format(_bootNonce, now, _seq, math.random(1000, 9999))
+
     local e = {
-        id             = ('pe:%d'):format(_seq),
-        ownerKey       = ownerKey,
-        ownerSrc       = src,
-        partKey        = partKey,
-        sessionId      = sessionId,
-        sourceNetId    = tonumber(sourceNetId) or 0,
-        origin         = (opts and opts.origin) or 'advanced',
-        provenance     = (opts and opts.provenance and {
+        id                 = ('pe:%d'):format(_seq),
+        stablePartIdentity = stablePartId,
+        ownerKey           = ownerKey,
+        ownerSrc           = src,
+        partKey            = partKey,
+        sessionId          = sessionId,
+        sourceNetId        = tonumber(sourceNetId) or 0,
+        origin             = (opts and opts.origin) or 'advanced',
+        provenance         = (opts and opts.provenance and {
             realPlate    = opts.provenance.realPlate,
             model        = opts.provenance.model,
             vehicleClass = opts.provenance.vehicleClass,
             className    = opts.provenance.className,
         }) or nil,
-        state          = 'ISSUED',
-        createdAt      = now,
-        updatedAt      = now,
-        consumedAt     = nil,
-        consumedBy     = nil,
-        consumedAction = nil,
+        state              = 'ISSUED',
+        externalTxnId      = nil,
+        createdAt          = now,
+        updatedAt          = now,
+        consumedAt         = nil,
+        consumedBy         = nil,
+        consumedAction     = nil,
     }
     Entitlements[e.id] = e
     BySourcePart[key]  = e.id
-    dbg('Issue', e.id, 'partKey', partKey, 'session', sessionId, 'owner', ownerKey)
+    dbg('Issue', e.id, 'stableId', stablePartId, 'partKey', partKey, 'session', sessionId, 'owner', ownerKey)
     return e.id, true
 end
 
@@ -181,26 +186,50 @@ function PartEntitlement.Get(id)
     local e = Entitlements[id]
     if not e then return nil end
     return {
-        id             = e.id,
-        ownerKey       = e.ownerKey,
-        ownerSrc       = e.ownerSrc,
-        partKey        = e.partKey,
-        sessionId      = e.sessionId,
-        sourceNetId    = e.sourceNetId,
-        origin         = e.origin,
-        provenance     = e.provenance and {
+        id                 = e.id,
+        stablePartIdentity = e.stablePartIdentity,
+        ownerKey           = e.ownerKey,
+        ownerSrc           = e.ownerSrc,
+        partKey            = e.partKey,
+        sessionId          = e.sessionId,
+        sourceNetId        = e.sourceNetId,
+        origin             = e.origin,
+        provenance         = e.provenance and {
             realPlate    = e.provenance.realPlate,
             model        = e.provenance.model,
             vehicleClass = e.provenance.vehicleClass,
             className    = e.provenance.className,
         } or nil,
-        state          = e.state,
-        createdAt      = e.createdAt,
-        updatedAt      = e.updatedAt,
-        consumedAt     = e.consumedAt,
-        consumedBy     = e.consumedBy,
-        consumedAction = e.consumedAction,
+        state              = e.state,
+        externalTxnId      = e.externalTxnId,
+        createdAt          = e.createdAt,
+        updatedAt          = e.updatedAt,
+        consumedAt         = e.consumedAt,
+        consumedBy         = e.consumedBy,
+        consumedAction     = e.consumedAction,
     }
+end
+
+--- Busca o entitlement pela stablePartIdentity única durável.
+---@param stableId string
+---@return table|nil
+function PartEntitlement.GetByStableId(stableId)
+    if not stableId or stableId == '' then return nil end
+    for id, e in pairs(Entitlements) do
+        if e.stablePartIdentity == stableId then
+            return PartEntitlement.Get(id)
+        end
+    end
+    return nil
+end
+
+--- Retorna o entitlementId mapeado para a combinação sessionId:partKey (lookup replay).
+---@param sessionId string
+---@param partKey string
+---@return string|nil
+function PartEntitlement.GetBySourcePart(sessionId, partKey)
+    local key = tostring(sessionId or '') .. ':' .. tostring(partKey or '')
+    return BySourcePart[key]
 end
 
 ---@param id string
@@ -223,6 +252,7 @@ function PartEntitlement.Validate(id, src, expectedPartKey)
     if not e then return false, 'not_found' end
 
     if e.state == 'CONSUMED' then return false, 'already_consumed' end
+    if e.state == 'RESERVED_EXTERNAL' then return false, 'external_reserved' end
     if e.state ~= 'ISSUED' then return false, 'bad_state' end
 
     local playerKey = ServerChopPlayerKey(src)
@@ -237,6 +267,209 @@ function PartEntitlement.Validate(id, src, expectedPartKey)
     return true, e
 end
 
+-- ─── Reserva Externa (Workshop SAGA) ──────────────────────────────────────────
+
+--- Reserva atomicamente a peça para liquidação externa (SAGA Workshop).
+---@param id string
+---@param src number
+---@param externalTxnId string
+---@return { ok: boolean, err?: string, entitlement?: table, stablePartIdentity?: string }
+function PartEntitlement.ReserveForExternal(id, src, externalTxnId)
+    local okVal, valRes = PartEntitlement.Validate(id, src)
+    if not okVal then
+        return { ok = false, err = valRes }
+    end
+
+    local e = valRes
+    e.state         = 'RESERVED_EXTERNAL'
+    e.externalTxnId = externalTxnId
+    e.updatedAt     = os.time()
+
+    dbg('ReserveForExternal', id, 'txn', externalTxnId, 'stableId', e.stablePartIdentity)
+    return {
+        ok                 = true,
+        entitlement        = PartEntitlement.Get(id),
+        stablePartIdentity = e.stablePartIdentity,
+    }
+end
+
+--- Libera uma reserva externa retornando a peça ao estado ISSUED após ABORT comprovado.
+--- Exige estritamente externalTxnId e expectedStablePartIdentity.
+---@param runtimeId? string
+---@param externalTxnId string
+---@param expectedStablePartIdentity string
+---@return boolean ok, string? err
+function PartEntitlement.ReleaseExternalReservation(runtimeId, externalTxnId, expectedStablePartIdentity)
+    if type(externalTxnId) ~= 'string' or externalTxnId == '' then
+        return false, 'invalid_txn_id'
+    end
+    if type(expectedStablePartIdentity) ~= 'string' or expectedStablePartIdentity == '' then
+        return false, 'invalid_stable_identity'
+    end
+
+    local e = nil
+    for _, item in pairs(Entitlements) do
+        if item.externalTxnId == externalTxnId then
+            e = item
+            break
+        end
+    end
+
+    if not e and runtimeId and Entitlements[runtimeId] then
+        local cand = Entitlements[runtimeId]
+        if cand.externalTxnId == externalTxnId then
+            e = cand
+        end
+    end
+
+    if not e then return false, 'not_found' end
+
+    if e.stablePartIdentity ~= expectedStablePartIdentity then
+        print(('[vp_chopshop][PartEntitlement] CRITICAL: ReleaseExternalReservation stable mismatch: expected %s got %s (txn %s)'):format(
+            tostring(expectedStablePartIdentity), tostring(e.stablePartIdentity), tostring(externalTxnId)))
+        return false, 'stable_identity_mismatch'
+    end
+
+    if e.externalTxnId ~= externalTxnId then
+        return false, 'txn_mismatch'
+    end
+
+    if e.state ~= 'RESERVED_EXTERNAL' then return false, 'not_reserved' end
+
+    e.state         = 'ISSUED'
+    e.externalTxnId = nil
+    e.updatedAt     = os.time()
+    dbg('ReleaseExternalReservation', e.id, 'stableId', e.stablePartIdentity, 'txn', externalTxnId)
+    return true
+end
+
+--- Finaliza definitivamente o consumo da peça após liquidação externa confirmada.
+--- Exige estritamente externalTxnId e expectedStablePartIdentity.
+---@param runtimeId? string
+---@param externalTxnId string
+---@param expectedStablePartIdentity string
+---@param actionName? string
+---@return boolean ok, string? err
+function PartEntitlement.FinalizeExternal(runtimeId, externalTxnId, expectedStablePartIdentity, actionName)
+    if type(externalTxnId) ~= 'string' or externalTxnId == '' then
+        return false, 'invalid_txn_id'
+    end
+    if type(expectedStablePartIdentity) ~= 'string' or expectedStablePartIdentity == '' then
+        return false, 'invalid_stable_identity'
+    end
+
+    local e = nil
+    for _, item in pairs(Entitlements) do
+        if item.externalTxnId == externalTxnId then
+            e = item
+            break
+        end
+    end
+
+    if not e and runtimeId and Entitlements[runtimeId] then
+        local cand = Entitlements[runtimeId]
+        if cand.externalTxnId == externalTxnId or cand.stablePartIdentity == expectedStablePartIdentity then
+            e = cand
+        end
+    end
+
+    if not e then return false, 'not_found' end
+
+    if e.stablePartIdentity ~= expectedStablePartIdentity then
+        print(('[vp_chopshop][PartEntitlement] CRITICAL: FinalizeExternal stable mismatch: expected %s got %s (txn %s)'):format(
+            tostring(expectedStablePartIdentity), tostring(e.stablePartIdentity), tostring(externalTxnId)))
+        return false, 'stable_identity_mismatch'
+    end
+
+    -- Idempotência: se já CONSUMED com a mesma stable identity
+    if e.state == 'CONSUMED' then
+        return true, 'already_consumed'
+    end
+
+    if e.externalTxnId and e.externalTxnId ~= externalTxnId then
+        return false, 'txn_mismatch'
+    end
+
+    if e.state ~= 'RESERVED_EXTERNAL' then
+        return false, 'bad_state'
+    end
+
+    e.state          = 'CONSUMED'
+    e.consumedAt     = os.time()
+    e.consumedAction = actionName or 'workshop'
+    e.externalTxnId  = nil
+    e.updatedAt      = os.time()
+    dbg('FinalizeExternal', e.id, 'stableId', e.stablePartIdentity, 'action', actionName)
+    return true
+end
+
+--- Restaura um snapshot externo na memória durante o boot recovery.
+--- Se o ID em runtime original estiver ocupado por OUTRA stablePartIdentity, não sobrescreve.
+---@param snapshot table
+---@param externalTxnId string
+---@return string|nil restoredId, boolean|string isNewOrErr
+function PartEntitlement.RestoreExternalSnapshot(snapshot, externalTxnId)
+    if not snapshot or type(snapshot) ~= 'table' then return nil, 'invalid_snapshot' end
+    local stableId = snapshot.stablePartIdentity
+    if not stableId or stableId == '' then return nil, 'invalid_stable_identity' end
+
+    -- Verificar se já existe em memória pela stable identity
+    for id, item in pairs(Entitlements) do
+        if item.stablePartIdentity == stableId then
+            item.state         = 'RESERVED_EXTERNAL'
+            item.externalTxnId = externalTxnId
+            item.updatedAt     = os.time()
+            return id, false
+        end
+    end
+
+    local targetId = snapshot.entitlementId or snapshot.id
+    -- Se targetId está ocupado por OUTRA peça com stable identity diferente: NÃO sobrescrever!
+    if targetId and Entitlements[targetId] and Entitlements[targetId].stablePartIdentity ~= stableId then
+        _seq = _seq + 1
+        targetId = ('pe:restored_%d'):format(_seq)
+    end
+
+    if not targetId or targetId == '' then
+        _seq = _seq + 1
+        targetId = ('pe:restored_%d'):format(_seq)
+    end
+
+    local now = os.time()
+    local e = {
+        id                 = targetId,
+        stablePartIdentity = stableId,
+        ownerKey           = snapshot.ownerKey,
+        ownerSrc           = snapshot.ownerSrc or 0,
+        partKey            = snapshot.partKey,
+        sessionId          = snapshot.sessionId or ('restored_' .. targetId),
+        sourceNetId        = tonumber(snapshot.sourceNetId) or 0,
+        origin             = snapshot.origin or 'advanced',
+        provenance         = snapshot.provenance and {
+            realPlate    = snapshot.provenance.realPlate,
+            model        = snapshot.provenance.model,
+            vehicleClass = snapshot.provenance.vehicleClass,
+            className    = snapshot.provenance.className,
+        } or nil,
+        state              = 'RESERVED_EXTERNAL',
+        externalTxnId      = externalTxnId,
+        createdAt          = snapshot.createdAt or now,
+        updatedAt          = now,
+        consumedAt         = nil,
+        consumedBy         = nil,
+        consumedAction     = nil,
+    }
+
+    Entitlements[targetId] = e
+    local key = e.sessionId .. ':' .. e.partKey
+    -- Snapshots restaurados de recovery externo NÃO sobrescrevem mappings ativos de BySourcePart
+    if not BySourcePart[key] then
+        BySourcePart[key] = targetId
+    end
+    dbg('RestoreExternalSnapshot', targetId, 'stableId', stableId, 'txn', externalTxnId)
+    return targetId, true
+end
+
 -- ─── Consumo Atômico (At-Most-Once) ────────────────────────────────────────────
 
 --- Consome atômica e definitivamente o entitlement.
@@ -245,7 +478,7 @@ end
 ---@param src number
 ---@param actionName string
 ---@param expectedPartKey? string
----@return { ok: boolean, err?: string, partKey?: string, sourceNetId?: number, sessionId?: string, provenance?: table, entitlement?: table }
+---@return { ok: boolean, err?: string, partKey?: string, sourceNetId?: number, sessionId?: string, provenance?: table, entitlement?: table, stablePartIdentity?: string }
 function PartEntitlement.Consume(id, src, actionName, expectedPartKey)
     local okVal, valRes = PartEntitlement.Validate(id, src, expectedPartKey)
     if not okVal then
@@ -262,17 +495,18 @@ function PartEntitlement.Consume(id, src, actionName, expectedPartKey)
 
     dbg('Consume', id, 'partKey', e.partKey, 'action', actionName, 'by', src)
     return {
-        ok          = true,
-        partKey     = e.partKey,
-        sourceNetId = e.sourceNetId,
-        sessionId   = e.sessionId,
-        provenance  = e.provenance and {
+        ok                 = true,
+        partKey            = e.partKey,
+        sourceNetId        = e.sourceNetId,
+        sessionId          = e.sessionId,
+        stablePartIdentity = e.stablePartIdentity,
+        provenance         = e.provenance and {
             realPlate    = e.provenance.realPlate,
             model        = e.provenance.model,
             vehicleClass = e.provenance.vehicleClass,
             className    = e.provenance.className,
         } or nil,
-        entitlement = PartEntitlement.Get(id),
+        entitlement        = PartEntitlement.Get(id),
     }
 end
 
@@ -326,7 +560,9 @@ if GetConvar('vp_chopshop_selftest', '0') == '1' then
         reset = function() Entitlements, BySourcePart, RateLimits, _seq = {}, {}, {}, 0 end,
         _all  = function() return Entitlements end,
         normalizeKey = normalizeKey,
+        setBootNonce = function(n) _bootNonce = n end,
     }
 end
 
 dbg('módulo PartEntitlement carregado')
+

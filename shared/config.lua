@@ -1378,4 +1378,14 @@ Config.Broker = {
             },
         },
     },
+    Workshop = {
+        Enable = true,
+        Provider = 'none',
+        ProviderResource = nil,
+        MaxPrice = 50000,
+        PrepareMaxTtlSec = 60,
+        ReconcileIntervalSec = 15,
+        MaxReconcileAttempts = 4,
+        Debug = false,
+    },
 }

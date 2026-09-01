@@ -166,6 +166,31 @@ CREATE TABLE IF NOT EXISTS `vp_chop_broker_contracts` (
   INDEX `idx_contracts_global` (`for_identifier`, `state`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── [v1.17 BROKER-4] Workshop Bridge & Persistent SAGA Journal ──────────────
+-- txn_id: Identificador único da transação distribuída (ex: ws:custom:...)
+-- state: PREPARED | RESERVED | COMMITTING | COMMITTED | RECONCILING | FINALIZED | ABORTED | QUARANTINE
+-- asset_kind: 'part_entitlement' | 'stolen_plate'
+
+CREATE TABLE IF NOT EXISTS `vp_chop_workshop_journal` (
+  `txn_id`          VARCHAR(80)       NOT NULL,
+  `provider`        VARCHAR(40)       NOT NULL,
+  `player_key`      VARCHAR(60)       NOT NULL,
+  `asset_kind`      VARCHAR(24)       NOT NULL,
+  `entitlement_id`  VARCHAR(96)       NULL DEFAULT NULL,
+  `stable_part_id`  VARCHAR(128)      NOT NULL,
+  `part_key`        VARCHAR(50)       NOT NULL,
+  `price`           INT UNSIGNED      NOT NULL,
+  `state`           VARCHAR(20)       NOT NULL,
+  `reconcile_count` TINYINT UNSIGNED  NOT NULL DEFAULT 0,
+  `metadata`        TEXT              NULL DEFAULT NULL,
+  `created_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`txn_id`),
+  INDEX `idx_workshop_state` (`state`),
+  INDEX `idx_workshop_stable` (`stable_part_id`),
+  INDEX `idx_workshop_player` (`player_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- [F2 persist] MIGRAÇÃO de bases vindas da v1.9.0 (que usavam INDEX idx_fake_real não-único).
 -- Rode APENAS se você já tinha a tabela antes desta versão. O db.lua faz isto automaticamente
 -- no boot (idempotente); este bloco é o equivalente manual:

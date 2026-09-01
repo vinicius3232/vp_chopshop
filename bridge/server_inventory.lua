@@ -41,3 +41,32 @@ function InvCanCarry(src, item, count, metadata)
     -- Fail-closed: se o export de ox_inventory não responder ou lançar erro, retorna false
     return false
 end
+
+--- [v1.17 BROKER-4] Obtenção segura de slot server-authoritative.
+---@param src number
+---@param slot number
+---@return table|nil
+function BridgeGetSlot(src, slot)
+    if not src or src <= 0 or not slot then return nil end
+    if exports and exports.ox_inventory and exports.ox_inventory.GetSlot then
+        local ok, item = pcall(exports.ox_inventory.GetSlot, exports.ox_inventory, src, slot)
+        if ok and item and type(item) == 'table' then return item end
+    end
+    return nil
+end
+
+--- [v1.17 BROKER-4] Remoção específica de item por slot e metadados.
+---@param src number
+---@param item string
+---@param count integer
+---@param metadata? table
+---@param slot? number
+---@return boolean
+function BridgeRemoveItem(src, item, count, metadata, slot)
+    if not src or src <= 0 or (count or 0) < 1 then return false end
+    if exports and exports.ox_inventory and exports.ox_inventory.RemoveItem then
+        local ok, res = pcall(exports.ox_inventory.RemoveItem, exports.ox_inventory, src, item, count, metadata, slot)
+        if ok and res ~= nil then return res == true or res == 1 end
+    end
+    return false
+end

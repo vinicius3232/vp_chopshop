@@ -81,6 +81,137 @@ if not _G.json then
         end,
         decode = function(s)
             if type(s) == 'table' then return s end
+            if type(s) ~= 'string' or s == '' then return {} end
+            local pos = 1
+            local len = #s
+
+            local function skipWhitespace()
+                while pos <= len do
+                    local c = s:sub(pos, pos)
+                    if c == ' ' or c == '\t' or c == '\n' or c == '\r' then
+                        pos = pos + 1
+                    else
+                        break
+                    end
+                end
+            end
+
+            local parseValue
+
+            local function parseString()
+                pos = pos + 1
+                local start = pos
+                while pos <= len do
+                    local c = s:sub(pos, pos)
+                    if c == '\\' then
+                        pos = pos + 2
+                    elseif c == '"' then
+                        local str = s:sub(start, pos - 1)
+                        pos = pos + 1
+                        return str
+                    else
+                        pos = pos + 1
+                    end
+                end
+                return s:sub(start)
+            end
+
+            local function parseNumber()
+                local start = pos
+                while pos <= len do
+                    local c = s:sub(pos, pos)
+                    if c:find('[%d%.%-%+eE]') then
+                        pos = pos + 1
+                    else
+                        break
+                    end
+                end
+                return tonumber(s:sub(start, pos - 1)) or 0
+            end
+
+            local function parseObject()
+                pos = pos + 1
+                local obj = {}
+                skipWhitespace()
+                if pos <= len and s:sub(pos, pos) == '}' then
+                    pos = pos + 1
+                    return obj
+                end
+                while pos <= len do
+                    skipWhitespace()
+                    if s:sub(pos, pos) ~= '"' then break end
+                    local key = parseString()
+                    skipWhitespace()
+                    if s:sub(pos, pos) == ':' then pos = pos + 1 end
+                    skipWhitespace()
+                    local val = parseValue()
+                    obj[key] = val
+                    skipWhitespace()
+                    local c = s:sub(pos, pos)
+                    if c == ',' then
+                        pos = pos + 1
+                    elseif c == '}' then
+                        pos = pos + 1
+                        break
+                    else
+                        break
+                    end
+                end
+                return obj
+            end
+
+            local function parseArray()
+                pos = pos + 1
+                local arr = {}
+                skipWhitespace()
+                if pos <= len and s:sub(pos, pos) == ']' then
+                    pos = pos + 1
+                    return arr
+                end
+                while pos <= len do
+                    skipWhitespace()
+                    local val = parseValue()
+                    table.insert(arr, val)
+                    skipWhitespace()
+                    local c = s:sub(pos, pos)
+                    if c == ',' then
+                        pos = pos + 1
+                    elseif c == ']' then
+                        pos = pos + 1
+                        break
+                    else
+                        break
+                    end
+                end
+                return arr
+            end
+
+            parseValue = function()
+                skipWhitespace()
+                if pos > len then return nil end
+                local c = s:sub(pos, pos)
+                if c == '"' then
+                    return parseString()
+                elseif c == '{' then
+                    return parseObject()
+                elseif c == '[' then
+                    return parseArray()
+                elseif c == 't' and s:sub(pos, pos + 3) == 'true' then
+                    pos = pos + 4
+                    return true
+                elseif c == 'f' and s:sub(pos, pos + 4) == 'false' then
+                    pos = pos + 5
+                    return false
+                elseif c == 'n' and s:sub(pos, pos + 3) == 'null' then
+                    pos = pos + 4
+                    return nil
+                else
+                    return parseNumber()
+                end
+            end
+
+            local ok, res = pcall(parseValue)
+            if ok and type(res) == 'table' then return res end
             return {}
         end,
     }
@@ -494,6 +625,16 @@ _G.Config = {
                 },
             },
         },
+        Workshop = {
+            Enable = true,
+            Provider = 'none',
+            ProviderResource = nil,
+            MaxPrice = 50000,
+            PrepareMaxTtlSec = 60,
+            ReconcileIntervalSec = 15,
+            MaxReconcileAttempts = 4,
+            Debug = false,
+        },
     },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
@@ -586,6 +727,7 @@ dofile(base .. '/server/action/advanced_chop.lua')    -- [PR-G] registra kinds/e
 dofile(base .. '/bridge/vp_gangs.lua')                -- [INT-01A] provê VPChopGangs* (ponte vp_chopshop→vp_gangs)
 dofile(base .. '/server/broker/market.lua')              -- [v1.17 BROKER-1] provê BrokerMarket
 dofile(base .. '/server/broker/contracts.lua')           -- [v1.17 BROKER-3] provê BrokerContracts
+dofile(base .. '/bridge/workshop.lua')                   -- [v1.17 BROKER-4] provê WorkshopBridge
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
@@ -610,6 +752,7 @@ dofile(base .. '/server/session/fence_payment_spec.lua')     -- [v1.16-FENCE-PAY
 dofile(base .. '/server/broker/market_sim_spec.lua')         -- [v1.17 BROKER-1]
 dofile(base .. '/server/broker/fence_integration_spec.lua')     -- [v1.17 BROKER-2]
 dofile(base .. '/server/broker/contracts_spec.lua')         -- [v1.17 BROKER-3]
+dofile(base .. '/server/broker/workshop_spec.lua')          -- [v1.17 BROKER-4]
 
 local anyFail = false
 for i = specStart, #threads do
