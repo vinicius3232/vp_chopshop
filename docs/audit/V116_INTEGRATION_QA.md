@@ -136,3 +136,19 @@ Mesmo formato de card do `RC_QA_TASKLIST.md` (§Como reportar). Severidade:
 ## CRITÉRIO DE SEGUIR PARA A FASE 2
 
 Q1–Q4 sem FAIL P0/P1. Aí sim: P2.2 (Wheels V2) → P2.3 (condition) → P2.4 (motor como `vehicle_part`).
+
+---
+
+## RESULTADOS DA HOMOLOGAÇÃO IN-GAME LIVE (2026-08-31)
+
+| Bloco | Funcionalidade | Status In-Game | Notas de Validação |
+|---|---|---|---|
+| **Q1** | Boot & Smoke (`ensure vp_chopshop`) | **PASS (100%)** | Console limpo, `[vp_chopshop] DB Ready`, sweep OK |
+| **Q2** | Desmanche Base + Advanced (Ordem & Gates) | **PASS (100%)** | Gating `hood_first`, `engine_first`, soldadora near validados |
+| **Q3** | Minigames Físicos (Rodas, Painéis, Motor, Carcaça) | **PASS (100%)** | 5 bolts rotação física, 3 cutpoints painéis, 4 fixadores motor, 5 traços carcaça |
+| **Q4** | Restart Recovery & Idempotência | **PASS (100%)** | Tabela `vp_chop_carcass` barreira anti re-discard validada |
+| **Q5** | Carregamento Físico & Bancada (`PhysicalCarry`) | **PASS (100%)** | Peça nos braços (`box_carry`), drop `[E]`, pickup `[ALT]`, desmanche na bancada |
+| **Q6** | Escala de Dano Físico (`DamageScaling`) | **PASS (100%)** | `EngineHealth` reduz partes e converte em sucata; motor $<150$ HP bloqueia peças |
+| **Q7** | Furto de Catalisador (`CatalyticTheft`) | **PASS (100%)** | Corte no escapamento, alarme/polícia, desmanche na bancada ou venda no Fence |
+
+**Veredito:** Todos os sistemas foram validados em ambiente real FiveM/QBox sem nenhum erro P0/P1. Teste estático: **1026 PASS / 0 FAIL**.

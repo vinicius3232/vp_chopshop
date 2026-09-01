@@ -2,6 +2,33 @@
 
 ---
 
+## [1.16.0] — 2026-08-31 — Physical Interaction Minigames, Workshop Carrying, Damage Scaling & Catalytic Converter Theft
+
+Validação completa em runtime FiveM / QBox. Harness de teste estático: **1026 asserts / 0 fail** (`lua tools/run_spec.lua .`).
+
+### Added / Gameplay Features
+- **Physical Minigames Stack (UX-A → UX-F):**
+  - **Wheel 5-Bolt:** Rotação física de 5 parafusos por roda com primitive `rotate` e física de mouse/torque.
+  - **Body Panels:** Desmanche de portas, capô e porta-malas com serra circular (`prop_tool_consaw`) e primitive `cut`.
+  - **Engine Removal:** Desacoplamento dos calços do motor com chave inglesa/boca (`prop_tool_wrench`) e primitive `drill`.
+  - **Carcass Structural Trace:** Corte estrutural de carcaça com maçarico de solda (`prop_weld_torch`), primitive `trace`, auto-avanço fluido de câmera 3D entre seções e isolamento de linhas de corte ativas.
+  - **Collision Damage Bypass:** Veículos que chegam sem capô ou portas por batidas têm os pré-requisitos liberados automaticamente.
+- **Physical Part Carrying & Workshop Processing:**
+  - Peças retiradas (`door`, `bonnet`, `boot`, `adv_engine`, `catalytic_converter`) surgem fisicamente nos braços do jogador com animação pesada (`anim@heists@box_carry@`).
+  - `[E]` ou `[X]` coloca a peça no chão com alinhamento Z e target `ox_target` para pegar de volta (`part_pickup`).
+  - Desmanche na bancada: `ox_target` na `chopshop_bench` permite processar a peça carregada, gerando materiais brutos e `car_parts`.
+- **Dynamic Vehicle Damage Scaling (`GetVehicleEngineHealth`):**
+  - Integridade do motor influencia diretamente a quantidade de `car_parts` entregues. Peças perdidas são convertidas em sucata de metal (`metalscrap`).
+  - Motores fundidos / destruídos ($< 150$ HP) bloqueiam o reaproveitamento como peças mecânicas funcionais.
+  - Pneus furados / estourados durante perseguições não podem ser furtados como pneus intactos.
+- **Catalytic Converter Theft & Dual Flow (Street & Workshop):**
+  - Alvo `ox_target` no escapamento/chassi (`exhaust`, `exhaust_2`, `chassis`) de qualquer veículo parado.
+  - 40% de chance de disparo de alarme e alerta policial devido ao ruído da serra.
+  - Carregamento físico do escapamento/catalisador (`prop_car_exhaust_01`).
+  - Escolha do jogador: desmanchar na bancada para extrair metais raros (`copper`, `metalscrap`, `car_parts`) ou vender diretamente ao NPC Fence por dinheiro limpo.
+
+---
+
 ## [1.15.0-rc1] — 2026-08-27 — Server-authority + ChopSession + ActionSession (RELEASE CANDIDATE)
 
 Refatoração arquitetural em stack de 10 PRs (#2→#11, **nenhuma mergeada** até a validação

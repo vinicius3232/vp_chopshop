@@ -112,14 +112,44 @@ Os **rótulos dos itens** no `ox_inventory` (`installation/ox_items_snippet.txt`
 | Fase | Peças | Ferramenta / Requisito | Mecânica & Recompensa |
 |------|-------|-----------------------|-----------------------|
 | **1 — Rodas** | `wheel_lf`, `wheel_rf`, `wheel_lr`, `wheel_rr` | Nenhuma ferramenta de inventário | Minigame de 5 parafusos (rotação física) → `chopshop_tyre` + logística |
-| **2 — Painéis** | Portas / capô / porta-malas | Serra (`saw_cheap` / `saw_pro`) | 3 pontos de corte interativos → `car_parts` seriada |
-| **3 — Motor** | Motor (`adv_engine`) | Parafusadeira (`mechanic_drill`) | 4 calços de fixação com furadeira elétrica → 5× `car_parts` seriadas |
-| **4 — Carcaça** | Carcaça (`adv_carcass`) | `chopshop_welder` no chão a $\le 8\text{m}$ (sem serra) | 5 linhas de corte estrutural com maçarico de solda → materiais recicláveis |
+| **2 — Painéis** | Portas / capô / porta-malas | Serra (`saw_cheap` / `saw_pro`) | 3 pontos de corte interativos → Carregamento físico nos braços → Bancada |
+| **3 — Motor** | Motor (`adv_engine`) | Chave de boca / inglesa (`mechanic_drill` / wrench) | 4 calços de fixação → Escala por `EngineHealth` → Bloco nos braços → Bancada |
+| **4 — Carcaça** | Carcaça (`adv_carcass`) | `chopshop_welder` no chão a $\le 8\text{m}$ | 5 linhas de corte estrutural com maçarico de solda → auto-pan de câmera → sucata |
 
-> **Fase 3** requer o capô removido na Fase 2 (`hood_first`).
-> **Fase 4** requer o motor removido na Fase 3 (`engine_first`) e uma soldadora colocada no raio `Config.AdvancedChop.WelderRadius`.
+> **Fase 3** requer o capô removido na Fase 2 (ou arrancado em batidas de trânsito).
+> **Fase 4** requer o motor removido na Fase 3 e uma soldadora colocada no raio `Config.AdvancedChop.WelderRadius`.
 
-### 3. Alarme veicular
+---
+
+### 3. Carregamento Físico de Peças & Bancada de Desmanche (`Config.PhysicalCarry`)
+
+- **Carregamento nos Braços:** Ao retirar uma porta, capô, porta-malas, motor ou catalisador, o jogador segura o prop físico nos braços com animação de carga pesada.
+- **Largar / Pegar do Chão:** Pressionar `[E]` ou `[X]` coloca a peça no chão. Mirar com `[ALT]` no prop caído permite pegá-lo de volta com a opção *"Pegar peça do chão"*.
+- **Desmanche na Bancada:** Ao se aproximar de qualquer bancada de desmanche (`chopshop_bench`) carregando a peça, use `[ALT]` → **"Desmanchar Peça Carregada"** para processá-la e receber materiais brutos (`steel`, `aluminum`, `metalscrap`, `car_parts`).
+
+---
+
+### 4. Dano Físico e Escala de Recompensas (`Config.DamageScaling`)
+
+- **Integridade do Motor (`GetVehicleEngineHealth`):**
+  - Motor novo/íntegro ($\ge 950$ HP) entrega 100% das peças.
+  - Motor amassado/fumegando tem as peças reduzidas proporcionalmente, convertendo as perdas em **sucata de metal (`metalscrap`)**.
+  - Motor fundido ($< 150$ HP) bloqueia a retirada de peças mecânicas funcionais, gerando apenas sucata.
+- **Pneus Estourados:** Pneus furados em perseguições não podem ser furtados como pneus comerciais intactos.
+
+---
+
+### 5. Furto de Catalisador Automotivo (`Config.CatalyticTheft`)
+
+- **Como Funciona:** Mire com `[ALT]` no escapamento/chassi (`exhaust`, `exhaust_2`, `chassis`) de qualquer carro com uma serra no inventário.
+- **Risco Policial:** 40% de chance de acionar o alarme do veículo e chamar a polícia pelo ruído da serra.
+- **Fluxo Duplo à Escolha:**
+  1. **Bancada (`chopshop_bench`):** Desmanchar o catalisador nos braços para extrair metais raros (`copper`, `metalscrap`, `steel`, `car_parts`).
+  2. **NPC Receptador (Fence):** Vender o catalisador diretamente para o Fence e receber dinheiro vivo instantâneo (\$1.200 a \$2.200).
+
+---
+
+### 6. Alarme veicular
 
 Ao desmontar a **primeira peça** de um veículo, o servidor rola uma chance de disparar o alarme proporcional à classe do carro (Super 80%, Military 75%, Compacts 15%…).
 
