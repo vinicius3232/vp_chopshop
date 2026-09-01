@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (HEAD: `7a3de41`, base de PR #40)
+**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (HEAD: `175e40c`, base de PR #40)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1087 PASS / 0 FAIL / 1087 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1104 PASS / 0 FAIL / 1104 asserts**
 
 ---
 
@@ -37,6 +37,8 @@ SEC-1  — Part Entitlement Core Authority✅ HOMOLOGADO & MERGED   (#41)
          (Bench Server Authority, Fence Tokenized Sale, Strict Mode Allowlist,
           Fail-Closed InvCanCarry, Catalytic 2-step Server Timing & Replay TTL,
           Carcass Statebag Fail-safe, Canonical BridgeAddCash Payment)
+PAY-1  — Final Payment Consistency      ✅ HOMOLOGADO (v1.16)    (175e40c)
+         (P1-01 sellItems & P1-02 fulfillOrder fail-closed BridgeAddCash checks)
 ─────────────────────────────────────────────────────────────────────────
 Fase 3 — Processamento de Peça Avançado  ✅ EM ANDAMENTO / INTEGRADO
 Fase 4 — Camada de Crime & Perícia       ⏸
