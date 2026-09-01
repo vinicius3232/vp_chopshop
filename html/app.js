@@ -150,7 +150,7 @@
         el.style.width = '100vw';
         el.style.height = '100vh';
         el.style.transform = 'none';
-        el.style.pointerEvents = 'auto';
+        el.style.pointerEvents = 'none';
 
         el.innerHTML = `
           <svg class="trace-svg" style="position:absolute;width:100%;height:100%;top:0;left:0;pointer-events:none;overflow:visible;">
@@ -197,30 +197,23 @@
         const h = window.innerHeight;
         const initialP0 = { x: (pt.path[0].x || 0.5) * w, y: (pt.path[0].y || 0.5) * h };
 
-        el.addEventListener('mousedown', (e) => {
+        startNode.addEventListener('mousedown', (e) => {
           if (e.button !== 0) return;
           const currentPt = pointsMap[ptId];
           if (!currentPt || currentPt.completed) return;
-
-          // Proximity validation: must click near starting point or near last accepted cut position
-          const targetPos = currentPt.lastCutScreenPos || initialP0;
-          const distToCut = Math.hypot(e.clientX - targetPos.x, e.clientY - targetPos.y);
-
-          // Proximity allowance: dynamic tolerance from profile (default 55px)
-          if (distToCut > traceTolerancePx) {
-            return; // Reject resumption from unauthorized arbitrary points on the line
-          }
 
           activeHotspotId = ptId;
           currentPt.isTracing = true;
           currentPt.lastPointerTimestamp = Date.now();
           el.classList.add('active', 'tracing');
           if (torchTip) {
+            const targetPos = currentPt.lastCutScreenPos || initialP0;
             torchTip.style.left = `${targetPos.x}px`;
             torchTip.style.top = `${targetPos.y}px`;
             torchTip.classList.remove('hidden');
           }
           e.preventDefault();
+          e.stopPropagation();
         });
 
         hotspotContainer.appendChild(el);
@@ -353,6 +346,33 @@
   }
 
   // ─── Mouse Motion & Gesture Tracking (Rotate & Trace Primitives) ────────────
+  window.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !activeMinigame || activeHotspotId) return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    for (const k in pointsMap) {
+      const pt = pointsMap[k];
+      if (pt && pt.primitive === 'trace' && !pt.completed) {
+        const initialP0 = { x: (pt.path[0].x || 0.5) * w, y: (pt.path[0].y || 0.5) * h };
+        const targetPos = pt.lastCutScreenPos || initialP0;
+        const dist = Math.hypot(e.clientX - targetPos.x, e.clientY - targetPos.y);
+        if (dist <= traceTolerancePx) {
+          activeHotspotId = k;
+          pt.isTracing = true;
+          pt.lastPointerTimestamp = Date.now();
+          pt.element.classList.add('active', 'tracing');
+          if (pt.torchTip) {
+            pt.torchTip.style.left = `${targetPos.x}px`;
+            pt.torchTip.style.top = `${targetPos.y}px`;
+            pt.torchTip.classList.remove('hidden');
+          }
+          e.preventDefault();
+          break;
+        }
+      }
+    }
+  });
+
   window.addEventListener('mousemove', (e) => {
     if (!activeMinigame || !activeHotspotId) return;
     const pt = pointsMap[activeHotspotId];
@@ -415,8 +435,8 @@
           const tolerancePx = traceTolerancePx;
           if (distToSeg <= tolerancePx) {
             // Speed limit anti-cheese: cap max advance per frame based on time and trace speed
-            const maxSpeedPxS = 320 * (uxSpeedMult || 1.0);
-            const maxAdvancePx = maxSpeedPxS * dt + 25; // 25px frame tolerance
+            const maxSpeedPxS = 400 * (uxSpeedMult || 1.0);
+            const maxAdvancePx = maxSpeedPxS * dt + 30; // frame tolerance
             const maxAdvanceT = maxAdvancePx / Math.max(1, segLenPx);
 
             // 1. Anti-Jump / Teleport rejection
@@ -445,7 +465,7 @@
 
             // Segment transition: must reach >= 0.98 and be physically near next vertex
             const distToEnd = Math.hypot(e.clientX - p1.x, e.clientY - p1.y);
-            if (tClamped >= 0.98 && distToEnd <= 40) {
+            if (tClamped >= 0.98 && distToEnd <= 45) {
               if (segIdx + 1 < totalSegs) {
                 pt.currentSegmentIndex = segIdx + 1;
                 pt.currentSegmentT = 0.0;
