@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de trabalho:** `feat/v1.17-broker-3-contracts-demand-lists` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `a369e32`)
+**Branch de trabalho:** `feat/v1.17-broker-3-contracts-demand-lists` (PR #44 aberta, base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `a369e32`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1285 PASS / 0 FAIL / 1285 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1337 PASS / 0 FAIL / 1337 asserts**
 
 ---
 
