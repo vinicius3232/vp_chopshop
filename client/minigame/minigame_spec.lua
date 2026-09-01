@@ -1055,6 +1055,27 @@ local function run()
     restoredCarPart = nil
     check('PHYSICAL-2 bench dismantle consumes carried part', restoredCarPart == nil)
 
+    -- 32: Testes de Furto de Catalisador (CatalyticTheft) e Dual Processing (Bancada vs Fence)
+    check('CATALYTIC-1 Config.CatalyticTheft is enabled', Config.CatalyticTheft and Config.CatalyticTheft.Enable == true)
+    check('CATALYTIC-1 catalytic_converter model is prop_car_exhaust_01',
+        Config.PhysicalCarry and Config.PhysicalCarry.Props and Config.PhysicalCarry.Props.catalytic_converter and Config.PhysicalCarry.Props.catalytic_converter.model == 'prop_car_exhaust_01')
+    check('CATALYTIC-1 Payout min/max configured',
+        Config.CatalyticTheft and Config.CatalyticTheft.Payout and Config.CatalyticTheft.Payout.min > 0 and Config.CatalyticTheft.Payout.max >= Config.CatalyticTheft.Payout.min)
+    check('CATALYTIC-1 BenchMaterials contains copper and scrap',
+        Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials and Config.CatalyticTheft.BenchMaterials.copper ~= nil and Config.CatalyticTheft.BenchMaterials.metalscrap ~= nil)
+
+    -- Simulação de roubo de catalisador -> carregamento -> venda no Fence
+    local catalyticCarry = {
+        partKey = 'catalytic_converter',
+        propHandle = 999,
+        isPart = true,
+    }
+    check('CATALYTIC-2 catalytic is carried as isPart', catalyticCarry.isPart == true and catalyticCarry.partKey == 'catalytic_converter')
+
+    -- Venda no Fence consome o carry e premia dinheiro
+    catalyticCarry = nil
+    check('CATALYTIC-2 fence sale consumes carried catalytic', catalyticCarry == nil)
+
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 

@@ -518,6 +518,20 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
         VPChopAddStolenCarParts(source, 0, baseParts)
         InvAdd(source, 'metalscrap', 4)
         InvAdd(source, 'steel', 3)
+    elseif partKey == 'catalytic_converter' then
+        local mats = (Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials) or {
+            copper     = { amount = 4, chance = 1.0 },
+            metalscrap = { amount = 6, chance = 1.0 },
+            steel      = { amount = 2, chance = 1.0 },
+            car_parts  = { amount = 1, chance = 1.0 },
+        }
+        for itemName, cfg in pairs(mats) do
+            local chance = tonumber(cfg.chance) or 1.0
+            if math.random() <= chance then
+                local amt = math.random(1, cfg.amount or 1)
+                InvAdd(source, itemName, amt)
+            end
+        end
     elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
         for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
             local chance = tonumber(cfg.chance) or 1.0
@@ -535,6 +549,45 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
     end
 
     return { ok = true }
+end)
+
+--- [CATALYTIC THEFT] Furto de catalisador de veículo
+lib.callback.register('vp_chopshop:stealCatalytic', function(source, netId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return { ok = false, err = 'vehicle' } end
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
+
+    if not ValidatePlayerNearVehicle(source, veh, 4.0) then return { ok = false, err = 'distance' } end
+    if not VPChopHasTool(source, false) then return { ok = false, err = 'no_saw' } end
+
+    if Entity(veh).state.catalyticStolen == true then
+        return { ok = false, err = 'catalytic_already_stolen' }
+    end
+
+    Entity(veh).state:set('catalyticStolen', true, true)
+    VPChopConsumeTool(source, false)
+    TriggerEvent(VPChopEvt.PART_CHOPPED, source, netId, 'catalytic_converter', 1)
+
+    return { ok = true }
+end)
+
+--- [CATALYTIC THEFT] Venda de catalisador carregado diretamente no Fence NPC
+lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
+    if loc and loc.coords and not ValidatePlayerNearCoords(source, loc.coords, 6.0) then
+        return { ok = false, err = 'distance' }
+    end
+
+    local cfg = (Config.CatalyticTheft and Config.CatalyticTheft.Payout) or { min = 1200, max = 2200 }
+    local minPay = tonumber(cfg.min) or 1200
+    local maxPay = tonumber(cfg.max) or 2200
+    local payout = math.random(minPay, maxPay)
+
+    BridgeAddMoney(source, 'cash', payout)
+    return { ok = true, payout = payout }
 end)
 
 --- [v1.15 PR-D hardening] Retries locais de deleção de mundo. Cada tentativa REVALIDA:

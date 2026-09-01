@@ -1884,6 +1884,85 @@ local function doAdvChopCarcass(veh, netId)
     })
 end
 
+--- [CATALYTIC THEFT] Executa o furto físico do catalisador no escapamento
+local function doStealCatalytic(veh)
+    if not veh or not DoesEntityExist(veh) then return end
+    if JackstandBusy then return end
+
+    if Entity(veh).state.catalyticStolen == true then
+        VPChopNotify(L('err_catalytic_already_stolen'), 'error')
+        return
+    end
+
+    local tName, tCfg = getPlayerTool()
+    if not tName then
+        VPChopNotify(L('notify_no_saw'), 'error')
+        return
+    end
+
+    local netId = NetworkGetNetworkIdFromEntity(veh)
+    if not netId or netId <= 0 then return end
+
+    JackstandBusy = true
+    spawnToolProp(Config.AdvancedChop and Config.AdvancedChop.SawAnim and Config.AdvancedChop.SawAnim.prop)
+
+    -- Chance de disparar alarme da polícia pelo barulho da serra
+    if math.random(1, 100) <= ((Config.CatalyticTheft and Config.CatalyticTheft.PoliceAlertChance) or 40) then
+        VPChopCheckAlarmAndDispatch(veh, tCfg)
+    end
+
+    local ok = lib.progressBar({
+        duration = math.floor(((Config.CatalyticTheft and Config.CatalyticTheft.ProgressMs) or 7000) * ((tCfg and tCfg.speedMult) or 1.0)),
+        label = L('catalytic_progress'),
+        useWhileDead = false,
+        canCancel = true,
+        disable = { move = true, car = true, combat = true },
+        anim = {
+            dict = 'amb@world_human_mechanic_idle@male@base',
+            clip = 'base',
+            flag = 1,
+        },
+    })
+    destroyToolProp()
+    JackstandBusy = false
+
+    if not ok then return end
+
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:stealCatalytic', false, netId)
+    if not cbOk or not res or not res.ok then
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
+        return
+    end
+
+    -- Spawna o catalisador físico nas mãos
+    spawnCarriedPartInHands('catalytic_converter', veh)
+    VPChopNotify(L('catalytic_stolen_success'), 'success')
+end
+
+-- Registro do target global de furto de catalisador em veículos
+CreateThread(function()
+    if not (Config.CatalyticTheft and Config.CatalyticTheft.Enable) then return end
+    exports.ox_target:addGlobalVehicle({
+        {
+            name = 'vp_chop_steal_catalytic',
+            label = L('catalytic_target_steal'),
+            icon = 'fa-solid fa-fire-flame-curved',
+            bones = (Config.CatalyticTheft and Config.CatalyticTheft.Bones) or { 'exhaust', 'exhaust_2', 'chassis' },
+            distance = 2.0,
+            canInteract = function(entity)
+                if not entity or entity == 0 or not DoesEntityExist(entity) then return false end
+                if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return false end
+                if GetEntitySpeed(entity) > 0.5 then return false end
+                if Entity(entity).state.catalyticStolen == true then return false end
+                return not VPChopCarryingPart
+            end,
+            onSelect = function(data)
+                doStealCatalytic(data.entity)
+            end,
+        },
+    })
+end)
+
 -- ─────────────────────────────────────────────────────────────────────────────
 
 local function addRaisedCarTargets(veh)

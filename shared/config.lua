@@ -862,7 +862,8 @@ Config.PhysicalCarry = {
         door_pside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
         bonnet       = { model = 'prop_car_bonnet_01', offset = { 0.12, 0.18, 0.10 }, rotation = { 0.0, 10.0, 0.0 } },
         boot         = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
-        adv_engine   = { model = 'prop_car_engine_01', offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+        adv_engine          = { model = 'prop_car_engine_01',  offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+        catalytic_converter = { model = 'prop_car_exhaust_01', offset = { 0.10, 0.20, 0.12 }, rotation = { 0.0, 0.0, 90.0 } },
     },
 
     --- Animação enquanto carrega a peça pesada
@@ -870,6 +871,31 @@ Config.PhysicalCarry = {
         dict = 'anim@heists@box_carry@',
         clip = 'idle',
         flag = 49,
+    },
+}
+
+--- Sistema de Furto de Catalisador Automotivo (Street & Workshop Theft)
+Config.CatalyticTheft = {
+    Enable = true,
+
+    --- Bones no veículo onde a opção de cortar catalisador é exibida
+    Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+
+    --- Chance percentual (0 a 100) de disparar o alarme e chamar a polícia pelo ruído da serra
+    PoliceAlertChance = 40,
+
+    --- Tempo de corte do escapamento em milissegundos
+    ProgressMs = 7000,
+
+    --- Recompensa em dinheiro ao vender o catalisador diretamente no Fence (Receptador)
+    Payout = { min = 1200, max = 2200 },
+
+    --- Materiais recebidos caso o jogador decida desmanchar o catalisador na bancada
+    BenchMaterials = {
+        copper     = { amount = 4, chance = 1.0 },
+        metalscrap = { amount = 6, chance = 1.0 },
+        steel      = { amount = 2, chance = 1.0 },
+        car_parts  = { amount = 1, chance = 1.0 },
     },
 }
 

@@ -160,10 +160,23 @@ _G.Config = {
             door_dside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
             door_pside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
             bonnet       = { model = 'prop_car_bonnet_01', offset = { 0.12, 0.18, 0.10 }, rotation = { 0.0, 10.0, 0.0 } },
-            boot         = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
-            adv_engine   = { model = 'prop_car_engine_01', offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+            adv_engine          = { model = 'prop_car_engine_01',  offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+            catalytic_converter = { model = 'prop_car_exhaust_01', offset = { 0.10, 0.20, 0.12 }, rotation = { 0.0, 0.0, 90.0 } },
         },
         CarryAnim = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 49 },
+    },
+    CatalyticTheft = {
+        Enable = true,
+        Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+        PoliceAlertChance = 40,
+        ProgressMs = 7000,
+        Payout = { min = 1200, max = 2200 },
+        BenchMaterials = {
+            copper     = { amount = 4, chance = 1.0 },
+            metalscrap = { amount = 6, chance = 1.0 },
+            steel      = { amount = 2, chance = 1.0 },
+            car_parts  = { amount = 1, chance = 1.0 },
+        },
     },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
