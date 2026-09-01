@@ -1,6 +1,6 @@
 -- server/broker/workshop_spec.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.17 BROKER-4] WORKSHOP BRIDGE & PERSISTENT SAGA JOURNAL SPEC SUITE
+--  [v1.17 BROKER-4.1] WORKSHOP BRIDGE & PERSISTENT SAGA JOURNAL SPEC SUITE
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 if GetConvar('vp_chopshop_selftest', '0') ~= '1' then return end
@@ -33,10 +33,16 @@ local function run()
                 if sql:find('ALTER TABLE') then return {} end
                 if sql:find('SELECT') and sql:find('vp_chop_workshop_journal') then
                     local rows = {}
-                    if sql:find("WHERE state IN") then
+                    if sql:find("WHERE state IN %('PREPARED'") then
                         for _, row in pairs(mockJournal) do
                             if row.state == 'PREPARED' or row.state == 'RESERVED' or row.state == 'COMMITTING' or
                                row.state == 'COMMITTED' or row.state == 'RECONCILING' or row.state == 'QUARANTINE' then
+                                table.insert(rows, row)
+                            end
+                        end
+                    elseif sql:find("WHERE state IN %('RECONCILING'") or sql:find("state IN %('RECONCILING', 'QUARANTINE'%)") then
+                        for _, row in pairs(mockJournal) do
+                            if row.state == 'RECONCILING' or row.state == 'QUARANTINE' then
                                 table.insert(rows, row)
                             end
                         end
@@ -79,6 +85,9 @@ local function run()
                         if newState then row.state = newState end
                         if sql:find('reconcile_count = %?') then
                             row.reconcile_count = params[1]
+                        end
+                        if sql:find('entitlement_id = %?') then
+                            row.entitlement_id = params[1]
                         end
                         return { affectedRows = 1 }
                     end
@@ -136,9 +145,13 @@ local function run()
             statusReturn = opts.statusReturn or 'COMMITTED',
             abortReturn = opts.abortReturn ~= false,
             paidTxns = {},
+            commitTxnIds = {},
         }
 
-        function p.IsAvailable() return p.isAvailable end
+        function p.IsAvailable()
+            if type(p.isAvailable) == 'function' then return p.isAvailable() end
+            return p.isAvailable
+        end
         function p.PreparePurchase(txnId, context)
             p.prepareCalls = p.prepareCalls + 1
             if not p.prepareOk then return { ok = false, err = p.prepareErr or 'prepare_rejected' } end
@@ -150,6 +163,7 @@ local function run()
         end
         function p.CommitPurchase(txnId)
             p.commitCalls = p.commitCalls + 1
+            table.insert(p.commitTxnIds, txnId)
             if not p.commitOk then return { ok = false, err = p.commitErr or 'commit_failed' } end
             if not p.paidTxns[txnId] then
                 p.paidTxns[txnId] = true
@@ -166,7 +180,11 @@ local function run()
             return p.abortReturn
         end
         function p.GetMarketSignal(query)
-            return { activeDemand = { adv_engine = 1.35 }, source = 'mock_workshop' }
+            return {
+                activeDemand = { adv_engine = 1.35, catalytic_converter = 1.20 },
+                urgency = 'high',
+                source = 'mock_workshop'
+            }
         end
         return p
     end
@@ -207,7 +225,7 @@ local function run()
     do
         resetEnv()
         local res = WB.GetMarketSignal({ commodity = 'adv_engine' })
-        check('WORKSHOP-02 GetMarketSignal retorna sinal canônico validado', res.ok == true and res.signal ~= nil and res.signal.activeDemand.adv_engine == 1.35)
+        check('WORKSHOP-02 GetMarketSignal retorna sinal canônico validado e sanitizado', res.ok == true and res.signal ~= nil and res.signal.activeDemand.adv_engine == 1.35 and res.signal.urgency == 'high')
     end
 
     -- ─── WORKSHOP-03: PreparePurchase rejeita -> Entitlement ISSUED ─────────
@@ -235,17 +253,40 @@ local function run()
         check('WORKSHOP-04 Journal finalizado em FINALIZED', mockJournal[res.txnId] ~= nil and mockJournal[res.txnId].state == 'FINALIZED')
     end
 
-    -- ─── WORKSHOP-05: Retry de CommitPurchase (Idempotência) ─────────────────
+    -- ─── WORKSHOP-05 & BROKER-SEC-11: Retry de CommitPurchase (Idempotência Real)
     do
         resetEnv()
         local entId, _ = PE.Issue('session_w5', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'W05', model = 1234 } })
-        mockProvider.commitOk = false -- 1a chamada falha
+        local entData = PE.Get(entId)
+
+        -- 1a chamada de CommitPurchase executa payout mas falha na resposta
+        mockProvider.commitCalls = 0
+        mockProvider.actualPayouts = 0
+        mockProvider.commitTxnIds = {}
+
+        local originalCommit = mockProvider.CommitPurchase
+        local firstCall = true
+        mockProvider.CommitPurchase = function(txnId)
+            mockProvider.commitCalls = mockProvider.commitCalls + 1
+            table.insert(mockProvider.commitTxnIds, txnId)
+            if not mockProvider.paidTxns[txnId] then
+                mockProvider.paidTxns[txnId] = true
+                mockProvider.actualPayouts = mockProvider.actualPayouts + 1
+            end
+            if firstCall then
+                firstCall = false
+                return { ok = false, err = 'network_timeout_simulated' }
+            end
+            return { ok = true, paid = true }
+        end
         mockProvider.statusReturn = 'PREPARED' -- Sinaliza que o commit pode ser retentado
-        -- Simular retry interno:
+
         local res = WB.HandoffPart(1, entId)
-        -- Durante o handoff, ao receber PREPARED no status, o bridge retenta com o MESMO txnId
-        -- Vamos verificar que o mockProvider recebeu o mesmo txnId
-        check('WORKSHOP-05 Commit Purchase retry não duplicou payout (actualPayouts <= 1)', mockProvider.actualPayouts <= 1)
+
+        check('BROKER-SEC-11 CommitPurchase foi retentado (commitCalls >= 2)', mockProvider.commitCalls >= 2)
+        check('BROKER-SEC-11 Todas as chamadas de CommitPurchase usaram o MESMO txnId', #mockProvider.commitTxnIds >= 2 and mockProvider.commitTxnIds[1] == mockProvider.commitTxnIds[2])
+        check('BROKER-SEC-11 Payout real foi executado exatamente 1x (actualPayouts == 1)', mockProvider.actualPayouts == 1)
+        check('BROKER-SEC-11 Entitlement finalizado como CONSUMED após retry com sucesso', PE.State(entId) == 'CONSUMED')
     end
 
     -- ─── WORKSHOP-06: Restart em COMMITTING -> Boot Recovery ────────────────
@@ -323,6 +364,97 @@ local function run()
         check('WORKSHOP-STABLE-01 Transação antiga de A foi FINALIZED sem corromper B', mockJournal[txnA].state == 'FINALIZED')
     end
 
+    -- ─── WORKSHOP-STABLE-02: Metadata inválida/corrompida -> QUARANTINE ─────
+    do
+        resetEnv()
+        local entA, _ = PE.Issue('session_s2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'S2', model = 1234 } })
+        PE._test.reset()
+        WB._test.reset()
+
+        -- Novo runtime emite pe:1
+        local entB, _ = PE.Issue('session_s2_new', 2, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'S2_NEW', model = 1234 } })
+        local txnCorrupt = 'ws:mock_workshop:corrupt:1'
+        mockJournal[txnCorrupt] = {
+            txn_id          = txnCorrupt,
+            provider        = 'mock_workshop',
+            player_key      = 'qbx:player_1',
+            asset_kind      = 'part_entitlement',
+            entitlement_id  = 'pe:1',
+            stable_part_id  = 'spi:corrupt_old:1',
+            part_key        = 'adv_engine',
+            price           = 3000,
+            state           = 'COMMITTED',
+            reconcile_count = 0,
+            metadata        = 'corrupted_not_json',
+        }
+
+        WB.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
+        check('WORKSHOP-STABLE-02 Row com metadata inválida vai para QUARANTINE', mockJournal[txnCorrupt].state == 'QUARANTINE')
+        check('WORKSHOP-STABLE-02 Nova peça (pe:1) permanece ISSUED intacta', PE.State(entB) == 'ISSUED')
+    end
+
+    -- ─── WORKSHOP-STABLE-03: Metadata stable != Row stable -> QUARANTINE ────
+    do
+        resetEnv()
+        local entA, _ = PE.Issue('session_s3', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'S3', model = 1234 } })
+        local dataA = PE.Get(entA)
+        local txnMismatch = 'ws:mock_workshop:mismatch:1'
+        mockJournal[txnMismatch] = {
+            txn_id          = txnMismatch,
+            provider        = 'mock_workshop',
+            player_key      = 'qbx:player_1',
+            asset_kind      = 'part_entitlement',
+            entitlement_id  = entA,
+            stable_part_id  = 'spi:different_stable_id:999',
+            part_key        = 'adv_engine',
+            price           = 3000,
+            state           = 'COMMITTED',
+            reconcile_count = 0,
+            metadata        = json.encode(dataA),
+        }
+
+        WB.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
+        check('WORKSHOP-STABLE-03 Row com stablePartId divergente da metadata vai para QUARANTINE', mockJournal[txnMismatch].state == 'QUARANTINE')
+        check('WORKSHOP-STABLE-03 Peça local não foi alterada indevidamente', PE.State(entA) == 'ISSUED')
+    end
+
+    -- ─── WORKSHOP-STABLE-04: SessionId + PartKey collision não sobrescreve mapping
+    do
+        resetEnv()
+        -- Peça antiga
+        local entOld, _ = PE.Issue('cs:1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'OLD', model = 1234 } })
+        local dataOld = PE.Get(entOld)
+        local stableOld = dataOld.stablePartIdentity
+
+        PE._test.reset()
+        WB._test.reset()
+
+        -- Peça nova no mesmo sessionId + partKey
+        local entNew, _ = PE.Issue('cs:1', 2, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'NEW', model = 1234 } })
+        local dataNew = PE.Get(entNew)
+        local stableNew = dataNew.stablePartIdentity
+
+        local txnOld = 'ws:mock_workshop:replay:1'
+        mockJournal[txnOld] = {
+            txn_id          = txnOld,
+            provider        = 'mock_workshop',
+            player_key      = 'qbx:player_1',
+            asset_kind      = 'part_entitlement',
+            entitlement_id  = entOld,
+            stable_part_id  = stableOld,
+            part_key        = 'adv_engine',
+            price           = 3000,
+            state           = 'COMMITTING',
+            reconcile_count = 0,
+            metadata        = json.encode(dataOld),
+        }
+
+        WB.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
+        local mappedId = PE.GetBySourcePart('cs:1', 'adv_engine')
+        check('WORKSHOP-STABLE-04 BySourcePart mapping preserva a autoridade da nova peça (entNew)', mappedId == entNew)
+        check('WORKSHOP-STABLE-04 Nova peça permanece ISSUED e com seu stablePartIdentity original', PE.Get(mappedId).stablePartIdentity == stableNew)
+    end
+
     -- ─── WORKSHOP-RESERVE-01..03: Bloqueio de outros destinos ───────────────
     do
         resetEnv()
@@ -334,8 +466,6 @@ local function run()
         check('WORKSHOP-RESERVE-01 RESERVED_EXTERNAL bloqueia validação padrão com external_reserved', okV1 == false and errV1 == 'external_reserved')
 
         -- 2. Broker Contracts bloqueado
-        local cId = 101
-        local contract = { id = cId, contractType = 'part_type', targetKey = 'adv_engine', minTrust = 1, rewardMult = 1.20, bonusCash = 0 }
         local okC, errC = PartEntitlement.Validate(entId, 1, 'adv_engine')
         check('WORKSHOP-RESERVE-02 RESERVED_EXTERNAL bloqueia consumo de contratos', okC == false and errC == 'external_reserved')
 
@@ -344,14 +474,15 @@ local function run()
         check('WORKSHOP-RESERVE-03 RESERVED_EXTERNAL bloqueia consumo da bancada', resCons.ok == false and resCons.err == 'external_reserved')
     end
 
-    -- ─── WORKSHOP-ABORT-01..03: Abort e Proteção de Liberação ───────────────
+    -- ─── WORKSHOP-ABORT-01..05: Abort Autorizado e Proteção de Liberação ────
     do
         resetEnv()
         local entId, _ = PE.Issue('session_ab1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'AB01', model = 1234 } })
+        local entData = PE.Get(entId)
         PE.ReserveForExternal(entId, 1, 'ws:mock:txn:ab1')
 
         -- WORKSHOP-ABORT-01: Abort comprovado libera entitlement
-        local released = PE.ReleaseExternalReservation(entId, 'ws:mock:txn:ab1')
+        local released = PE.ReleaseExternalReservation(entId, 'ws:mock:txn:ab1', entData.stablePartIdentity)
         check('WORKSHOP-ABORT-01 Abort comprovado retorna peça para ISSUED', released == true and PE.State(entId) == 'ISSUED')
 
         -- WORKSHOP-ABORT-02: Transação COMMITTING com status UNKNOWN NUNCA libera
@@ -359,21 +490,59 @@ local function run()
         local txn2 = 'ws:mock:txn:ab2'
         mockJournal[txn2] = {
             txn_id = txn2, provider = 'mock_workshop', player_key = 'qbx:player_1',
-            asset_kind = 'part_entitlement', entitlement_id = entId, stable_part_id = PE.Get(entId).stablePartIdentity,
-            part_key = 'adv_engine', price = 3000, state = 'COMMITTING', reconcile_count = 0
+            asset_kind = 'part_entitlement', entitlement_id = entId, stable_part_id = entData.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'COMMITTING', reconcile_count = 0,
+            metadata = json.encode(entData)
         }
         mockProvider.statusReturn = 'UNKNOWN'
         WB.BootstrapRecovery()
         check('WORKSHOP-ABORT-02 Status UNKNOWN em COMMITTING transiciona para RECONCILING sem liberar peça', mockJournal[txn2].state == 'RECONCILING')
         check('WORKSHOP-ABORT-02 Peça permanece RESERVED_EXTERNAL sob UNKNOWN', PE.State(entId) == 'RESERVED_EXTERNAL')
+
+        -- WORKSHOP-ABORT-03: Provider retorna ABORTED autoritativamente -> libera peça
+        mockProvider.statusReturn = 'ABORTED'
+        mockProvider.abortReturn = true
+        WB.BootstrapRecovery()
+        check('WORKSHOP-ABORT-03 Status ABORTED com prova true libera peça para ISSUED', PE.State(entId) == 'ISSUED')
+        check('WORKSHOP-ABORT-03 Journal transiciona para ABORTED', mockJournal[txn2].state == 'ABORTED')
+
+        -- WORKSHOP-ABORT-04: AbortPurchase = false -> não libera peça (vai para QUARANTINE)
+        PE.ReserveForExternal(entId, 1, 'ws:mock:txn:ab4')
+        local txn4 = 'ws:mock:txn:ab4'
+        mockJournal[txn4] = {
+            txn_id = txn4, provider = 'mock_workshop', player_key = 'qbx:player_1',
+            asset_kind = 'part_entitlement', entitlement_id = entId, stable_part_id = entData.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'COMMITTING', reconcile_count = 0,
+            metadata = json.encode(entData)
+        }
+        mockProvider.statusReturn = 'ABORTED'
+        mockProvider.abortReturn = false -- Não comprovado!
+        WB.BootstrapRecovery()
+        check('WORKSHOP-ABORT-04 AbortPurchase false mantém peça RESERVED_EXTERNAL', PE.State(entId) == 'RESERVED_EXTERNAL')
+        check('WORKSHOP-ABORT-04 Journal vai para QUARANTINE após abort não comprovado', mockJournal[txn4].state == 'QUARANTINE')
+
+        -- WORKSHOP-ABORT-05: AbortPurchase lança exception -> fail-closed
+        PE.ReserveForExternal(entId, 1, 'ws:mock:txn:ab5')
+        local txn5 = 'ws:mock:txn:ab5'
+        mockJournal[txn5] = {
+            txn_id = txn5, provider = 'mock_workshop', player_key = 'qbx:player_1',
+            asset_kind = 'part_entitlement', entitlement_id = entId, stable_part_id = entData.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'COMMITTING', reconcile_count = 0,
+            metadata = json.encode(entData)
+        }
+        mockProvider.abortReturn = nil
+        mockProvider.AbortPurchase = function() error('abort_crash_simulation') end
+        WB.BootstrapRecovery()
+        check('WORKSHOP-ABORT-05 AbortPurchase exception mantém peça RESERVED_EXTERNAL fail-closed', PE.State(entId) == 'RESERVED_EXTERNAL')
+        check('WORKSHOP-ABORT-05 Journal vai para QUARANTINE', mockJournal[txn5].state == 'QUARANTINE')
     end
 
-    -- ─── WORKSHOP-DB-01..03: DB Failures e Circuit Breaker ──────────────────
+    -- ─── WORKSHOP-DB-01..04: DB Failures e Circuit Breaker ──────────────────
     do
         resetEnv()
         -- WORKSHOP-DB-01: Prepare OK + journal INSERT falha
         local oldInsert = mockDb.insert.await
-        mockDb.insert.await = function() return nil end -- Falha no DB
+        mockDb.insert.await = function() return nil end
         local entDb1, _ = PE.Issue('session_db1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'DB01', model = 1234 } })
         local resDb1 = WB.HandoffPart(1, entDb1)
         check('WORKSHOP-DB-01 Falha no INSERT do journal aborta prepare e retorna journal_write_failed', resDb1.ok == false and resDb1.err == 'journal_write_failed')
@@ -381,10 +550,49 @@ local function run()
         check('WORKSHOP-DB-01 Provider Abort foi acionado', mockProvider.abortCalls >= 1)
         mockDb.insert.await = oldInsert
 
+        -- WORKSHOP-DB-02A: PartEntitlement falha RESERVED -> COMMITTING -> commitCalls == 0
+        resetEnv()
+        local entDb2A, _ = PE.Issue('session_db2a', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'DB2A', model = 1234 } })
+        local oldQuery = mockDb.query.await
+        mockDb.query.await = function(sql, params)
+            if sql:find("SET state = 'COMMITTING'") then return { affectedRows = 0 } end
+            return oldQuery(sql, params)
+        end
+        mockProvider.commitCalls = 0
+        local resDb2A = WB.HandoffPart(1, entDb2A)
+        check('WORKSHOP-DB-02A Falha RESERVED -> COMMITTING resulta em ZERO commitCalls', mockProvider.commitCalls == 0)
+        check('WORKSHOP-DB-02A Operação rejeitada com journal_update_failed', resDb2A.ok == false and resDb2A.err == 'journal_update_failed')
+        mockDb.query.await = oldQuery
+
+        -- WORKSHOP-DB-02B: stolen_plate falha PREPARED -> RESERVED -> commitCalls == 0
+        resetEnv()
+        _G.BridgeGetSlot = function() return { name = 'stolen_plate', count = 1, metadata = { plate = 'PL2B' } } end
+        _G.BridgeRemoveItem = function() return true end
+        mockDb.query.await = function(sql, params)
+            if sql:find("SET state = 'RESERVED'") then return { affectedRows = 0 } end
+            return oldQuery(sql, params)
+        end
+        mockProvider.commitCalls = 0
+        local resDb2B = WB.HandoffStolenPlate(1, 1)
+        check('WORKSHOP-DB-02B stolen_plate falha PREPARED -> RESERVED resulta em ZERO commitCalls', mockProvider.commitCalls == 0)
+        check('WORKSHOP-DB-02B Operação rejeitada com journal_update_failed', resDb2B.ok == false and resDb2B.err == 'journal_update_failed')
+        mockDb.query.await = oldQuery
+
+        -- WORKSHOP-DB-02C: stolen_plate RESERVED ok, COMMITTING DB fail -> commitCalls == 0
+        resetEnv()
+        mockDb.query.await = function(sql, params)
+            if sql:find("SET state = 'COMMITTING'") then return { affectedRows = 0 } end
+            return oldQuery(sql, params)
+        end
+        mockProvider.commitCalls = 0
+        local resDb2C = WB.HandoffStolenPlate(1, 1)
+        check('WORKSHOP-DB-02C stolen_plate falha RESERVED -> COMMITTING resulta em ZERO commitCalls', mockProvider.commitCalls == 0)
+        check('WORKSHOP-DB-02C Operação rejeitada com journal_update_failed', resDb2C.ok == false and resDb2C.err == 'journal_update_failed')
+        mockDb.query.await = oldQuery
+
         -- WORKSHOP-DB-03: Provider pagou mas UPDATE COMMITTED falha -> circuit breaker
         resetEnv()
         local entDb3, _ = PE.Issue('session_db3', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'DB03', model = 1234 } })
-        local oldQuery = mockDb.query.await
         mockDb.query.await = function(sql, params)
             if sql:find("SET state = 'COMMITTED'") then return { affectedRows = 0 } end
             return oldQuery(sql, params)
@@ -393,35 +601,151 @@ local function run()
         check('WORKSHOP-DB-03 Falha pós-pagamento ativa circuit breaker e retorna workshopDegraded=true', resDb3.ok == true and resDb3.workshopDegraded == true)
         check('WORKSHOP-DB-03 WorkshopBridge entra em Integrity Locked', WB.IsIntegrityLocked() == true)
         mockDb.query.await = oldQuery
+
+        -- WORKSHOP-DB-04: Provider pagou mas UPDATE FINALIZED falha -> circuit breaker
+        resetEnv()
+        local entDb4, _ = PE.Issue('session_db4', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'DB04', model = 1234 } })
+        mockDb.query.await = function(sql, params)
+            if sql:find("SET state = 'FINALIZED'") then return { affectedRows = 0 } end
+            return oldQuery(sql, params)
+        end
+        local resDb4 = WB.HandoffPart(1, entDb4)
+        check('WORKSHOP-DB-04 Falha no UPDATE FINALIZED ativa circuit breaker', WB.IsIntegrityLocked() == true)
+        mockDb.query.await = oldQuery
     end
 
-    -- ─── WORKSHOP-QUARANTINE-01: Reconcile Max Attempts -> QUARANTINE ───────
+    -- ─── WORKSHOP-QUARANTINE-01..05: Quarentena e Reconciliação ─────────────
     do
         resetEnv()
-        local txnQ = 'ws:mock_workshop:quarantine:1'
-        mockJournal[txnQ] = {
-            txn_id = txnQ, provider = 'mock_workshop', player_key = 'qbx:player_1',
+        -- 01: Max attempts -> QUARANTINE
+        local txnQ1 = 'ws:mock_workshop:quarantine:1'
+        mockJournal[txnQ1] = {
+            txn_id = txnQ1, provider = 'mock_workshop', player_key = 'qbx:player_1',
             asset_kind = 'part_entitlement', entitlement_id = 'pe:999', stable_part_id = 'spi:q:1',
             part_key = 'adv_engine', price = 3000, state = 'RECONCILING', reconcile_count = 4
         }
         mockProvider.statusReturn = 'UNKNOWN'
         WB.ReconcilePending()
-        check('WORKSHOP-QUARANTINE-01 Transação excedendo MaxReconcileAttempts vai para QUARANTINE', mockJournal[txnQ].state == 'QUARANTINE')
+        check('WORKSHOP-QUARANTINE-01 Transação excedendo MaxReconcileAttempts vai para QUARANTINE', mockJournal[txnQ1].state == 'QUARANTINE')
+
+        -- 02: 1 tentativa com provider indisponível -> permanece RECONCILING
+        resetEnv()
+        local entQ2, _ = PE.Issue('session_q2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'Q2', model = 1234 } })
+        local dataQ2 = PE.Get(entQ2)
+        PE.ReserveForExternal(entQ2, 1, 'ws:mock_workshop:quarantine:2')
+        local txnQ2 = 'ws:mock_workshop:quarantine:2'
+        mockJournal[txnQ2] = {
+            txn_id = txnQ2, provider = 'mock_workshop', player_key = 'qbx:player_1',
+            asset_kind = 'part_entitlement', entitlement_id = entQ2, stable_part_id = dataQ2.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'RECONCILING', reconcile_count = 1,
+            metadata = json.encode(dataQ2),
+        }
+        mockProvider.isAvailable = false
+        WB.ReconcilePending()
+        check('WORKSHOP-QUARANTINE-02 Provider indisponível por 1 tentativa mantém transação em RECONCILING', mockJournal[txnQ2].state == 'RECONCILING')
+
+        -- 03: Provider volta antes do limite -> resolve para FINALIZED
+        mockProvider.isAvailable = true
+        mockProvider.statusReturn = 'COMMITTED'
+        WB.ReconcilePending()
+        check('WORKSHOP-QUARANTINE-03 Provider online antes do limite resolve transação para FINALIZED', mockJournal[txnQ2].state == 'FINALIZED')
+
+        -- 04: Transação em QUARANTINE com status COMMITTED -> resolve para FINALIZED
+        resetEnv()
+        local entQ4, _ = PE.Issue('session_q4', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'Q4', model = 1234 } })
+        local dataQ4 = PE.Get(entQ4)
+        PE.ReserveForExternal(entQ4, 1, 'ws:mock_workshop:quarantine:4')
+        local txnQ4 = 'ws:mock_workshop:quarantine:4'
+        mockJournal[txnQ4] = {
+            txn_id = txnQ4, provider = 'mock_workshop', player_key = 'qbx:player_1',
+            asset_kind = 'part_entitlement', entitlement_id = entQ4, stable_part_id = dataQ4.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'QUARANTINE', reconcile_count = 5,
+            metadata = json.encode(dataQ4),
+        }
+        mockProvider.statusReturn = 'COMMITTED'
+        WB.ReconcilePending()
+        check('WORKSHOP-QUARANTINE-04 Transação em QUARANTINE com status COMMITTED transiciona para FINALIZED', mockJournal[txnQ4].state == 'FINALIZED')
+
+        -- 05: Transação em QUARANTINE com status UNKNOWN -> continua QUARANTINE
+        resetEnv()
+        local entQ5, _ = PE.Issue('session_q5', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'Q5', model = 1234 } })
+        local dataQ5 = PE.Get(entQ5)
+        PE.ReserveForExternal(entQ5, 1, 'ws:mock_workshop:quarantine:5')
+        local txnQ5 = 'ws:mock_workshop:quarantine:5'
+        mockJournal[txnQ5] = {
+            txn_id = txnQ5, provider = 'mock_workshop', player_key = 'qbx:player_1',
+            asset_kind = 'part_entitlement', entitlement_id = entQ5, stable_part_id = dataQ5.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'QUARANTINE', reconcile_count = 5,
+            metadata = json.encode(dataQ5),
+        }
+        mockProvider.statusReturn = 'UNKNOWN'
+        WB.ReconcilePending()
+        check('WORKSHOP-QUARANTINE-05 Transação em QUARANTINE com status UNKNOWN permanece em QUARANTINE', mockJournal[txnQ5].state == 'QUARANTINE')
     end
 
-    -- ─── WORKSHOP-HISTORICAL-PROVIDER-01: Respeitar provider gravado na row ──
+    -- ─── WORKSHOP-HISTORICAL-PROVIDER-01 ────────────────────────────────────
     do
         resetEnv()
+        local entHist, _ = PE.Issue('session_h1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'H1', model = 1234 } })
+        local dataHist = PE.Get(entHist)
+        PE.ReserveForExternal(entHist, 1, 'ws:old_provider:hist:1')
         local txnHist = 'ws:old_provider:hist:1'
         mockJournal[txnHist] = {
             txn_id = txnHist, provider = 'old_provider', player_key = 'qbx:player_1',
-            asset_kind = 'part_entitlement', entitlement_id = 'pe:888', stable_part_id = 'spi:h:1',
-            part_key = 'adv_engine', price = 3000, state = 'RECONCILING', reconcile_count = 0
+            asset_kind = 'part_entitlement', entitlement_id = entHist, stable_part_id = dataHist.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'RECONCILING', reconcile_count = 0,
+            metadata = json.encode(dataHist),
         }
         Config.Broker.Workshop.Provider = 'mock_workshop'
         WB.BootstrapRecovery()
-        check('WORKSHOP-HISTORICAL-PROVIDER-01 Provider histórico não registrado mantém transação em RECONCILING/QUARANTINE', mockJournal[txnHist].state == 'RECONCILING')
+        check('WORKSHOP-HISTORICAL-PROVIDER-01 Provider histórico não registrado mantém transação em RECONCILING', mockJournal[txnHist].state == 'RECONCILING')
         check('WORKSHOP-HISTORICAL-PROVIDER-01 Provider atual (mock_workshop) NUNCA foi consultado sobre a txn de old_provider', mockProvider.statusCalls == 0)
+    end
+
+    -- ─── WORKSHOP-PROVIDER-REG-01..03: Registro Externo de Provedor ─────────
+    do
+        resetEnv()
+        local regExport = exports.WorkshopRegisterProvider or exports['WorkshopRegisterProvider']
+
+        -- 01: Resource correto registra com sucesso
+        _G.GetInvokingResource = function() return 'valid_workshop_res' end
+        local validAdapter = {
+            ResourceName = 'valid_workshop_res',
+            IsAvailable = function() return true end,
+            PreparePurchase = function() return { ok = true, price = 1000, expiresAt = virtualTime + 30 } end,
+            CommitPurchase = function() return { ok = true, paid = true } end,
+            GetTransactionStatus = function() return 'COMMITTED' end,
+            AbortPurchase = function() return true end,
+        }
+        local okReg1 = exports['WorkshopRegisterProvider']('external_shop', validAdapter)
+        check('WORKSHOP-PROVIDER-REG-01 Resource correto registra com sucesso via export', okReg1 == true)
+
+        -- 02: Resource A tenta registrar como ResourceName B -> rejeitado
+        _G.GetInvokingResource = function() return 'impostor_res' end
+        local impostorAdapter = {
+            ResourceName = 'target_res_b',
+            IsAvailable = function() return true end,
+            PreparePurchase = function() return { ok = true } end,
+            CommitPurchase = function() return { ok = true } end,
+            GetTransactionStatus = function() return 'COMMITTED' end,
+            AbortPurchase = function() return true end,
+        }
+        local okReg2, errReg2 = exports['WorkshopRegisterProvider']('shop_b', impostorAdapter)
+        check('WORKSHOP-PROVIDER-REG-02 Resource mismatch é rejeitado', okReg2 == false)
+
+        -- 03: Resource malicioso tenta sobrescrever provider existente de outro resource -> rejeitado
+        _G.GetInvokingResource = function() return 'attacker_res' end
+        local hijackAdapter = {
+            ResourceName = 'attacker_res',
+            IsAvailable = function() return true end,
+            PreparePurchase = function() return { ok = true } end,
+            CommitPurchase = function() return { ok = true } end,
+            GetTransactionStatus = function() return 'COMMITTED' end,
+            AbortPurchase = function() return true end,
+        }
+        local okReg3 = exports['WorkshopRegisterProvider']('external_shop', hijackAdapter)
+        check('WORKSHOP-PROVIDER-REG-03 Hijack de provider existente por outro resource é rejeitado', okReg3 == false)
+        _G.GetInvokingResource = function() return nil end
     end
 
     -- ─── WORKSHOP-CALLER-01: Resource mismatch rejeitado ────────────────────
@@ -437,15 +761,53 @@ local function run()
     -- ─── WORKSHOP-PRICE-01: Validação numérica de termos econômicos ─────────
     do
         resetEnv()
-        mockProvider.preparePrice = 999999 -- Acima do MaxPrice (50000)
+        mockProvider.preparePrice = 999999
         local entP1, _ = PE.Issue('session_pr1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PR01', model = 1234 } })
         local resP1 = WB.HandoffPart(1, entP1)
         check('WORKSHOP-PRICE-01 Preço acima do MaxPrice rejeitado com invalid_price', resP1.ok == false and resP1.err == 'invalid_price')
 
-        mockProvider.preparePrice = 0/0 -- NaN
+        mockProvider.preparePrice = 0/0
         local entP2, _ = PE.Issue('session_pr2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PR02', model = 1234 } })
         local resP2 = WB.HandoffPart(1, entP2)
         check('WORKSHOP-PRICE-01 Preço NaN rejeitado com invalid_price', resP2.ok == false and resP2.err == 'invalid_price')
+    end
+
+    -- ─── WORKSHOP-RECONCILE-ERROR-01: Exception em provider não quebra reconciler
+    do
+        resetEnv()
+        local entRecErr, _ = PE.Issue('session_re', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'RE1', model = 1234 } })
+        local dataRecErr = PE.Get(entRecErr)
+        PE.ReserveForExternal(entRecErr, 1, 'ws:mock_workshop:rec_err:1')
+        local txnRecErr = 'ws:mock_workshop:rec_err:1'
+        mockJournal[txnRecErr] = {
+            txn_id = txnRecErr, provider = 'mock_workshop', player_key = 'qbx:player_1',
+            asset_kind = 'part_entitlement', entitlement_id = entRecErr, stable_part_id = dataRecErr.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'RECONCILING', reconcile_count = 0,
+            metadata = json.encode(dataRecErr),
+        }
+        mockProvider.isAvailable = function() error('unexpected_provider_crash') end
+
+        WB.ReconcilePending()
+        check('WORKSHOP-RECONCILE-ERROR-01 Reconciler captura exception sem crash', true)
+
+        -- 2a varredura subsequente roda normalmente
+        mockProvider.isAvailable = true
+        mockProvider.statusReturn = 'COMMITTED'
+        WB.ReconcilePending()
+        check('WORKSHOP-RECONCILE-ERROR-01 Reconciler recupera e executa 2a varredura limpa', mockJournal[txnRecErr].state == 'FINALIZED')
+    end
+
+    -- ─── WORKSHOP-READY-01..02: Verificação de Readiness ────────────────────
+    do
+        resetEnv()
+        local mockDbNoInsert = {
+            query = { await = function() return {} end }
+        }
+        WB.Init(mockDbNoInsert)
+        check('WORKSHOP-READY-01 DB com query mas sem insert resulta em IsReady() == false', WB.IsReady() == false)
+
+        WB.Init(mockDb)
+        check('WORKSHOP-READY-02 DB com query e insert válidos resulta em IsReady() == true', WB.IsReady() == true)
     end
 
     -- ─── WORKSHOP-07 & PLATE-01..03: stolen_plate SAGA ──────────────────────
@@ -480,14 +842,23 @@ local function run()
         check('WORKSHOP-PLATE-03 Metadata completa do slot preservada sem perda', savedMeta.plate == 'STOLEN1' and savedMeta.customField == 'audit_trace_xyz')
     end
 
-    -- ─── WORKSHOP-RACE-01: Concorrência na mesma stablePartIdentity ─────────
+    -- ─── WORKSHOP-RACE-REAL-01: Interleaved Race Test Controlado ────────────
     do
         resetEnv()
-        local entRace, _ = PE.Issue('session_race', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'RACE01', model = 1234 } })
-        local res1 = WB.HandoffPart(1, entRace)
-        check('WORKSHOP-RACE-01 Primeira chamada conclui SAGA com sucesso', res1.ok == true)
-        local res2 = WB.HandoffPart(1, entRace)
-        check('WORKSHOP-RACE-01 Segunda chamada rejeitada com already_consumed ou external_reserved', res2.ok == false)
+        local entRace, _ = PE.Issue('session_race_real', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'RACE_REAL', model = 1234 } })
+        local secondCallResult = nil
+
+        WB._test.setRacePauseHook(function(stableId)
+            -- Enquanto a primeira chamada está com o lock adquirido, dispara a segunda chamada concorrente
+            secondCallResult = WB.HandoffPart(1, entRace)
+        end)
+
+        local firstCallResult = WB.HandoffPart(1, entRace)
+        WB._test.setRacePauseHook(nil)
+
+        check('WORKSHOP-RACE-REAL-01 Primeira chamada conclui SAGA com sucesso', firstCallResult.ok == true and firstCallResult.paid == true)
+        check('WORKSHOP-RACE-REAL-01 Segunda chamada concorrente intercalada é rejeitada com external_reserved', secondCallResult ~= nil and secondCallResult.ok == false and secondCallResult.err == 'external_reserved')
+        check('WORKSHOP-RACE-REAL-01 Exatamente 1 pagamento efetuado (actualPayouts == 1)', mockProvider.actualPayouts == 1)
     end
 
     print(('[workshop/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))

@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-01
 **Branch de trabalho:** `feat/v1.17-broker-4-workshop-saga` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `62f2f13`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1423 PASS / 0 FAIL / 1423 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1457 PASS / 0 FAIL / 1457 asserts**
 
 ---
 
@@ -25,7 +25,7 @@ BROKER-0   — Architecture Frozen & Canonical Design ✅ CONCLUÍDO (Docs)
 BROKER-1.2 — Final Parity & Fail-Closed Boot Engine ✅ HOMOLOGADO & MERGED (PR #42)
 BROKER-2.1 — Fence Integration & Dynamic Payouts   ✅ HOMOLOGADO & MERGED (PR #43)
 BROKER-3.2 — Contracts & High-Demand Lists         ✅ HOMOLOGADO & MERGED (PR #44, merge SHA 62f2f13)
-BROKER-4   — WorkshopBridge & SAGA Journal          🚧 IN PROGRESS (feat/v1.17-broker-4-workshop-saga)
+BROKER-4.1 — WorkshopBridge SAGA & Identity Safe   🚧 PR #45 (feat/v1.17-broker-4-workshop-saga)
 BROKER-5   — NPC Ambient Speech & Context UI        ⏸
 BROKER-6   — Live QA & Final Release Gate           ⏸
 ─────────────────────────────────────────────────────────────────────────

@@ -223,6 +223,15 @@ function PartEntitlement.GetByStableId(stableId)
     return nil
 end
 
+--- Retorna o entitlementId mapeado para a combinação sessionId:partKey (lookup replay).
+---@param sessionId string
+---@param partKey string
+---@return string|nil
+function PartEntitlement.GetBySourcePart(sessionId, partKey)
+    local key = tostring(sessionId or '') .. ':' .. tostring(partKey or '')
+    return BySourcePart[key]
+end
+
 ---@param id string
 ---@return PartEntitlementState|nil
 function PartEntitlement.State(id)
@@ -285,27 +294,46 @@ function PartEntitlement.ReserveForExternal(id, src, externalTxnId)
 end
 
 --- Libera uma reserva externa retornando a peça ao estado ISSUED após ABORT comprovado.
----@param id? string
----@param externalTxnId? string
+--- Exige estritamente externalTxnId e expectedStablePartIdentity.
+---@param runtimeId? string
+---@param externalTxnId string
+---@param expectedStablePartIdentity string
 ---@return boolean ok, string? err
-function PartEntitlement.ReleaseExternalReservation(id, externalTxnId)
+function PartEntitlement.ReleaseExternalReservation(runtimeId, externalTxnId, expectedStablePartIdentity)
+    if type(externalTxnId) ~= 'string' or externalTxnId == '' then
+        return false, 'invalid_txn_id'
+    end
+    if type(expectedStablePartIdentity) ~= 'string' or expectedStablePartIdentity == '' then
+        return false, 'invalid_stable_identity'
+    end
+
     local e = nil
-    if externalTxnId and externalTxnId ~= '' then
-        for _, item in pairs(Entitlements) do
-            if item.externalTxnId == externalTxnId then
-                e = item
-                break
-            end
+    for _, item in pairs(Entitlements) do
+        if item.externalTxnId == externalTxnId then
+            e = item
+            break
         end
     end
-    if not e and id and Entitlements[id] then
-        local cand = Entitlements[id]
-        if not cand.externalTxnId or cand.externalTxnId == externalTxnId then
+
+    if not e and runtimeId and Entitlements[runtimeId] then
+        local cand = Entitlements[runtimeId]
+        if cand.externalTxnId == externalTxnId then
             e = cand
         end
     end
 
     if not e then return false, 'not_found' end
+
+    if e.stablePartIdentity ~= expectedStablePartIdentity then
+        print(('[vp_chopshop][PartEntitlement] CRITICAL: ReleaseExternalReservation stable mismatch: expected %s got %s (txn %s)'):format(
+            tostring(expectedStablePartIdentity), tostring(e.stablePartIdentity), tostring(externalTxnId)))
+        return false, 'stable_identity_mismatch'
+    end
+
+    if e.externalTxnId ~= externalTxnId then
+        return false, 'txn_mismatch'
+    end
+
     if e.state ~= 'RESERVED_EXTERNAL' then return false, 'not_reserved' end
 
     e.state         = 'ISSUED'
@@ -316,29 +344,55 @@ function PartEntitlement.ReleaseExternalReservation(id, externalTxnId)
 end
 
 --- Finaliza definitivamente o consumo da peça após liquidação externa confirmada.
----@param id? string
----@param externalTxnId? string
+--- Exige estritamente externalTxnId e expectedStablePartIdentity.
+---@param runtimeId? string
+---@param externalTxnId string
+---@param expectedStablePartIdentity string
 ---@param actionName? string
 ---@return boolean ok, string? err
-function PartEntitlement.FinalizeExternal(id, externalTxnId, actionName)
+function PartEntitlement.FinalizeExternal(runtimeId, externalTxnId, expectedStablePartIdentity, actionName)
+    if type(externalTxnId) ~= 'string' or externalTxnId == '' then
+        return false, 'invalid_txn_id'
+    end
+    if type(expectedStablePartIdentity) ~= 'string' or expectedStablePartIdentity == '' then
+        return false, 'invalid_stable_identity'
+    end
+
     local e = nil
-    if externalTxnId and externalTxnId ~= '' then
-        for _, item in pairs(Entitlements) do
-            if item.externalTxnId == externalTxnId then
-                e = item
-                break
-            end
+    for _, item in pairs(Entitlements) do
+        if item.externalTxnId == externalTxnId then
+            e = item
+            break
         end
     end
-    if not e and id and Entitlements[id] then
-        local cand = Entitlements[id]
-        if not cand.externalTxnId or cand.externalTxnId == externalTxnId then
+
+    if not e and runtimeId and Entitlements[runtimeId] then
+        local cand = Entitlements[runtimeId]
+        if cand.externalTxnId == externalTxnId or cand.stablePartIdentity == expectedStablePartIdentity then
             e = cand
         end
     end
 
     if not e then return false, 'not_found' end
-    if e.state == 'CONSUMED' then return false, 'already_consumed' end
+
+    if e.stablePartIdentity ~= expectedStablePartIdentity then
+        print(('[vp_chopshop][PartEntitlement] CRITICAL: FinalizeExternal stable mismatch: expected %s got %s (txn %s)'):format(
+            tostring(expectedStablePartIdentity), tostring(e.stablePartIdentity), tostring(externalTxnId)))
+        return false, 'stable_identity_mismatch'
+    end
+
+    -- Idempotência: se já CONSUMED com a mesma stable identity
+    if e.state == 'CONSUMED' then
+        return true, 'already_consumed'
+    end
+
+    if e.externalTxnId and e.externalTxnId ~= externalTxnId then
+        return false, 'txn_mismatch'
+    end
+
+    if e.state ~= 'RESERVED_EXTERNAL' then
+        return false, 'bad_state'
+    end
 
     e.state          = 'CONSUMED'
     e.consumedAt     = os.time()
@@ -408,7 +462,10 @@ function PartEntitlement.RestoreExternalSnapshot(snapshot, externalTxnId)
 
     Entitlements[targetId] = e
     local key = e.sessionId .. ':' .. e.partKey
-    BySourcePart[key] = targetId
+    -- Snapshots restaurados de recovery externo NÃO sobrescrevem mappings ativos de BySourcePart
+    if not BySourcePart[key] then
+        BySourcePart[key] = targetId
+    end
     dbg('RestoreExternalSnapshot', targetId, 'stableId', stableId, 'txn', externalTxnId)
     return targetId, true
 end

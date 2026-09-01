@@ -1,8 +1,8 @@
 # BROKER SECURITY MODEL & FAILURE MATRIX — vp_chopshop v1.17
 
-**Data:** 2026-09-01 (Revisão BROKER-4)  
+**Data:** 2026-09-01 (Revisão BROKER-4.1)  
 **Autor:** Principal Security Engineer  
-**Status:** ESPECIFICAÇÃO DE SEGURANÇA & MATRIZ DE FALHAS (VALIDADO COM PERSISTENT JOURNAL E HARNESS DE TESTES COMPLETO: 1423 PASS / 0 FAIL)
+**Status:** ESPECIFICAÇÃO DE SEGURANÇA & MATRIZ DE FALHAS (VALIDADO COM PERSISTENT JOURNAL, STRICT STABLE IDENTITY E HARNESS DE TESTES COMPLETO: 1457 PASS / 0 FAIL)
 
 ---
 
@@ -14,7 +14,7 @@
 4. **Persistent Transaction Journaling:** Nenhuma transação externa com potencial impacto financeiro depende exclusivamente de memória RAM. O estado `COMMITTING` é persistido no banco antes do envio de qualquer requisição de pagamento a terceiros.
 5. **Classificação de Certeza:**  
    > **DECLARAÇÃO DE CONFORMIDADE:**  
-   > Os protocolos de segurança descritos neste documento foram **IMPLEMENTADOS E COMPROVADOS EM TESTES AUTOMATIZADOS** com 1423 asserts aprovados e zero regressões.
+   > Os protocolos de segurança descritos neste documento foram **IMPLEMENTADOS E COMPROVADOS EM TESTES AUTOMATIZADOS** com 1457 asserts aprovados e zero regressões.
 
 ---
 
