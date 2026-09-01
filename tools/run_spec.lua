@@ -60,6 +60,7 @@ function VPChopHasTool(_, wantDrill)
 end
 function VPChopConsumeTool(_, _) _G._TOOL_CONSUMED = (_G._TOOL_CONSUMED or 0) + 1; return true end
 function ServerPlayerIsReady(src) return src ~= nil and GetPlayerName(src) ~= nil end
+function ServerChopPlayerKey(src) return 'qbx:player_' .. tostring(src or 1) end
 _G.lib = { callback = { register = function() end } }         -- action_session.lua registra callbacks
 -- [PR-G] stubs p/ server/advanced_chop.lua (commit helpers + kind specs advanced)
 _G.ServerWelders = {}
@@ -254,9 +255,11 @@ dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequire
 dofile(base .. '/server/session/base_state.lua')      -- provê VPChopBaseState
 dofile(base .. '/server/session/advanced_state.lua')  -- provê VPChopAdvancedState
 dofile(base .. '/server/session/discard_state.lua')   -- [PR-D] provê VPChopDiscardState
+dofile(base .. '/bridge/server_framework.lua')        -- provê BridgeAddCash / IsValidSource etc.
 dofile(base .. '/bridge/server_vehicle.lua')          -- [PR-D] provê BridgeResolveVehiclePersistence / BridgeDeleteWorldVehicle
 dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreEntitlement
 dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
+dofile(base .. '/server/logistics/part_entitlement.lua')  -- [v1.16 SEC-1] provê PartEntitlement
 dofile(base .. '/server/session/action_session.lua')     -- [PR-F] provê ActionSession
 dofile(base .. '/server/session/deliver_car_util.lua')   -- [PR-H] provê VPChopDeliverCar (marker + retry)
 dofile(base .. '/server/session/carcass_ledger.lua')     -- [P0.4] provê VPChopCarcassLedger (DB seam nil no harness)
@@ -276,6 +279,7 @@ dofile(base .. '/server/session/base_state_spec.lua')
 dofile(base .. '/server/session/advanced_state_spec.lua')
 dofile(base .. '/server/session/discard_state_spec.lua')  -- [PR-D]
 dofile(base .. '/server/logistics/tyre_entitlement_spec.lua')  -- [PR-E]
+dofile(base .. '/server/logistics/part_entitlement_spec.lua')  -- [v1.16 SEC-1]
 dofile(base .. '/server/session/deliver_car_spec.lua')         -- [PR-H]
 dofile(base .. '/server/session/carcass_ledger_spec.lua')      -- [P0.4]
 dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F/G]

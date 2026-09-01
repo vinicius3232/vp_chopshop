@@ -550,18 +550,18 @@ local function attachCarPartToPed(prop, partKey)
     return true
 end
 
-local function registerGroundPartTarget(groundProp, partKey)
+local function registerGroundPartTarget(groundProp, partKey, netId, entitlementId)
     if not groundProp or not DoesEntityExist(groundProp) then return end
 
-    local targetName = 'vp_ground_part_' .. tostring(groundProp)
     exports.ox_target:addLocalEntity(groundProp, {
         {
-            name        = targetName .. '_pick',
+            name        = ('vp_chop_pickup_ground_part_%s'):format(groundProp),
             label       = L('part_pickup'),
             icon        = 'fa-solid fa-hand',
             distance    = 2.0,
             canInteract = function()
-                return not VPChopCarryingPart
+                if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
+                return VPChopCarryingPart == nil
             end,
             onSelect    = function()
                 if VPChopCarryingPart then return end
@@ -581,10 +581,11 @@ local function registerGroundPartTarget(groundProp, partKey)
 
                 attachCarPartToPed(groundProp, partKey)
                 VPChopCarryingPart = {
-                    partKey    = partKey,
-                    propHandle = groundProp,
-                    isPart     = true,
-                    netId      = netId,
+                    partKey       = partKey,
+                    entitlementId = entitlementId,
+                    propHandle    = groundProp,
+                    isPart        = true,
+                    netId         = netId,
                 }
                 lib.showTextUI(L('carry_part_textui'), {
                     position = 'left-center',
@@ -598,9 +599,10 @@ end
 local function placeCarPartOnGround()
     if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
 
-    local handProp = VPChopCarryingPart.propHandle
-    local partKey  = VPChopCarryingPart.partKey
-    local netId    = VPChopCarryingPart.netId
+    local handProp      = VPChopCarryingPart.propHandle
+    local partKey       = VPChopCarryingPart.partKey
+    local netId         = VPChopCarryingPart.netId
+    local entitlementId = VPChopCarryingPart.entitlementId
 
     VPChopCarryingPart.propHandle = nil
     VPChopDropCarryPart()
@@ -624,11 +626,11 @@ local function placeCarPartOnGround()
     end
     FreezeEntityPosition(handProp, true)
 
-    registerGroundPartTarget(handProp, partKey, netId)
+    registerGroundPartTarget(handProp, partKey, netId, entitlementId)
     VPChopNotify(L('part_dropped'), 'inform')
 end
 
-local function spawnCarriedPartInHands(partKey, veh)
+local function spawnCarriedPartInHands(partKey, veh, entitlementId)
     if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then return nil end
     local pCfg = Config.PhysicalCarry.Props and Config.PhysicalCarry.Props[partKey]
     if not pCfg or not pCfg.model then return nil end
@@ -651,11 +653,12 @@ local function spawnCarriedPartInHands(partKey, veh)
     local netId = (veh and DoesEntityExist(veh) and NetworkGetNetworkIdFromEntity(veh)) or 0
     attachCarPartToPed(prop, partKey)
     VPChopCarryingPart = {
-        partKey    = partKey,
-        propHandle = prop,
-        isPart     = true,
-        veh        = veh,
-        netId      = netId,
+        partKey       = partKey,
+        entitlementId = entitlementId,
+        propHandle    = prop,
+        isPart        = true,
+        veh           = veh,
+        netId         = netId,
     }
     lib.showTextUI(L('carry_part_textui'), {
         position = 'left-center',
@@ -1767,6 +1770,7 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 VPChopNotify(L('notify_chop_failed_fmt', VPChopActionErr(res and res.err)), 'error')
                 return
             end
+            completedResult = res.result
         else
             local uxOk
             if opts.usePanelUx then
@@ -1785,6 +1789,7 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 VPChopNotify(VPChopLocaleErr(result and result.err) or L('notify_generic_error'), 'error')
                 return
             end
+            completedResult = result
         end
 
         advMarkChopped(netId, opts.action)
@@ -1800,8 +1805,9 @@ local function doAdvAction(veh, netId, tCfg, opts)
             end
             exports.ox_target:removeLocalEntity(veh)
         else
-            -- [PHYSICAL CARRY] Spawna a peça física na mão do jogador
-            spawnCarriedPartInHands(opts.action, veh)
+            -- [PHYSICAL CARRY] Spawna a peça física na mão do jogador com entitlementId server-authoritative
+            local entId = completedResult and (completedResult.partEntitlementId or completedResult.entitlementId) or nil
+            spawnCarriedPartInHands(opts.action, veh, entId)
         end
         VPChopNotify(L(opts.notifyOk), 'success')
     end)
@@ -1908,6 +1914,15 @@ local function doStealCatalytic(veh)
     if not netId or netId <= 0 then return end
 
     JackstandBusy = true
+
+    -- [v1.16 SEC-1.1 CAT-ACTION] Início server-authoritative com token temporal
+    local sOk, startRes = pcall(lib.callback.await, 'vp_chopshop:catalytic:start', false, netId)
+    if not sOk or not startRes or not startRes.ok then
+        JackstandBusy = false
+        VPChopNotify(VPChopLocaleErr(startRes and startRes.err) or L('notify_generic_error'), 'error')
+        return
+    end
+
     spawnToolProp(Config.AdvancedChop and Config.AdvancedChop.SawAnim and Config.AdvancedChop.SawAnim.prop)
 
     -- Chance de disparar alarme da polícia pelo barulho da serra
@@ -1922,7 +1937,7 @@ local function doStealCatalytic(veh)
     }
 
     local ok = lib.progressBar({
-        duration = math.floor(((Config.CatalyticTheft and Config.CatalyticTheft.ProgressMs) or 7000) * ((tCfg and tCfg.speedMult) or 1.0)),
+        duration = startRes.durationMs or 7000,
         label = L('catalytic_progress'),
         useWhileDead = false,
         canCancel = true,
@@ -1934,14 +1949,14 @@ local function doStealCatalytic(veh)
 
     if not ok then return end
 
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:stealCatalytic', false, netId)
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:catalytic:complete', false, netId, startRes.token)
     if not cbOk or not res or not res.ok then
         VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
         return
     end
 
-    -- Spawna o catalisador físico nas mãos
-    spawnCarriedPartInHands('catalytic_converter', veh)
+    -- Spawna o catalisador físico nas mãos com entitlementId server-side
+    spawnCarriedPartInHands('catalytic_converter', veh, res.entitlementId)
     VPChopNotify(L('catalytic_stolen_success'), 'success')
 end
 

@@ -165,6 +165,17 @@ function BridgeResolveVehiclePersistence(vehicle, context)
     return out
 end
 
+--- [v1.16 SEC-1] Normaliza identificador de cidadão / player key para comparação exata.
+--- Remove prefixos ('qbx:', 'qb:', 'esx:', 'src:') e espaços para evitar falsos positivos de substring.
+---@param val string|number|nil
+---@return string
+function BridgeNormalizeCitizenId(val)
+    if not val then return '' end
+    local s = tostring(val)
+    s = s:gsub('^%a+:', '')
+    return string.upper(s:gsub('%s+', ''))
+end
+
 --- Retorna true se o veículo pertence ao jogador `src` (mesmo citizenid).
 --- Usado para bloquear auto-farm/exploit de desmanchar o próprio carro pessoal.
 ---@param src number
@@ -175,8 +186,12 @@ function BridgeIsPlayerVehicleOwner(src, vehicle)
     local pInfo = BridgeResolveVehiclePersistence(vehicle, 'owner_check')
     if pInfo and pInfo.status == 'owned' and pInfo.ownedBy then
         local myKey = ServerChopPlayerKey(src)
-        if myKey and (myKey == pInfo.ownedBy or tostring(myKey):find(tostring(pInfo.ownedBy), 1, true) ~= nil) then
-            return true
+        if myKey and myKey ~= '' then
+            local normPlayer = BridgeNormalizeCitizenId(myKey)
+            local normOwner  = BridgeNormalizeCitizenId(pInfo.ownedBy)
+            if normPlayer ~= '' and normPlayer == normOwner then
+                return true
+            end
         end
     end
     return false

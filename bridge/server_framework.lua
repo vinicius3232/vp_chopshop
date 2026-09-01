@@ -18,7 +18,8 @@ local _QB = nil
 -- ─── ESX ─────────────────────────────────────────────────────────────────────
 local _ESX = nil
 
-CreateThread(function()
+local function initFramework()
+    if _framework then return end
     -- Detecção por ordem de prioridade (QBox primeiro: é o framework LIVE deste servidor).
     if GetResourceState('qbx_core') == 'started' then
         -- qbx_core expõe exports diretos; não usa SharedObject.
@@ -33,7 +34,10 @@ CreateThread(function()
         _framework = 'esx'
         _ESX = exports['es_extended']:getSharedObject()
     end
-end)
+end
+
+initFramework()
+CreateThread(initFramework)
 
 -- ─── IsValidSource: guard de segurança para todos os RegisterNetEvent ─────────
 ---@param src number

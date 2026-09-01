@@ -120,6 +120,11 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
     if mDup then return { ok = false, err = 'done' } end
     advMarkCooldown(src)
 
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(sessionId, src, partKey, netId, { origin = 'advanced' })
+    end
+
     -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, a peça vai para os braços
     -- e o jogador escolhe como processá-la na bancada (matérias-primas / serial limpo / serial roubado).
     if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
@@ -146,7 +151,7 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
             if send then TriggerClientEvent('vp_chopshop:adv:breakDoor', pidN, netId, partKey, doorIndex) end
         end
     end
-    return { ok = true }
+    return { ok = true, partEntitlementId = peId }
 end
 
 ---@return { ok:boolean, err:string|nil }
@@ -203,6 +208,11 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
         end
     end
 
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(sessionId, src, 'adv_engine', netId, { origin = 'advanced' })
+    end
+
     -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, o bloco do motor vai para os braços
     -- e o jogador escolhe como processá-lo na bancada (matérias-primas / serial limpo / serial roubado).
     if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
@@ -217,7 +227,7 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_engine', 3)
-    return { ok = true }
+    return { ok = true, partEntitlementId = peId }
 end
 
 ---@return { ok:boolean, err:string|nil }
@@ -225,6 +235,19 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     if not VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'engine_first' } end
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_carcass') then return { ok = false, err = 'done' } end
     if not VPChopWelderNearVehicle(netId) then return { ok = false, err = 'no_welder_adv' } end
+
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    local model = (veh and veh ~= 0 and DoesEntityExist(veh)) and GetEntityModel(veh) or 0
+
+    -- [v1.16 SEC-1.1] Barreira persistente anti-rechop / double-carcass
+    if VPChopCarcassLedger and VPChopCarcassLedger.alreadyProcessed and model ~= 0 then
+        if VPChopCarcassLedger.alreadyProcessed(netId, model) then
+            return { ok = false, err = 'done' }
+        end
+    end
+    if veh and veh ~= 0 and DoesEntityExist(veh) and Entity(veh).state.vpChopCarcassDone == true then
+        return { ok = false, err = 'done' }
+    end
 
     local mOk, mDup = VPChopAdvancedState.markPart(sessionId, src, 'adv_carcass')
     if not mOk then return { ok = false, err = 'session' } end
@@ -249,16 +272,22 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_carcass', 4)
 
     -- [UX-E Terminal Chassis Destruction]
-    local veh = NetworkGetEntityFromNetworkId(netId)
+    local stillExists = false
     if veh and veh ~= 0 and DoesEntityExist(veh) then
+        Entity(veh).state:set('vpChopCarcassDone', true, true)
         if type(BridgeDeleteWorldVehicle) == 'function' then
             BridgeDeleteWorldVehicle(veh)
         else
             DeleteEntity(veh)
         end
+        stillExists = (veh ~= 0 and DoesEntityExist(veh) == true)
     end
-    if type(ChopSession) == 'table' and type(ChopSession.Complete) == 'function' then
-        ChopSession.Complete(sessionId)
+
+    -- [v1.16 SEC-1.1] Grava no CarcassLedger persistente para bloquear repetição mesmo pós restart
+    if VPChopCarcassLedger and VPChopCarcassLedger.mark and model ~= 0 then
+        local s = type(ChopSession) == 'table' and ChopSession.Get and ChopSession.Get(sessionId)
+        local vsid = s and s.vehicle and s.vehicle.identity or nil
+        VPChopCarcassLedger.mark(netId, model, vsid, 'carcass', ServerChopPlayerKey(src), stillExists)
     end
 
     local jackItem = (Config.Jackstand and Config.Jackstand.Item) or 'chopshop_jackstand'

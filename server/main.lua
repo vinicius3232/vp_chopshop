@@ -504,18 +504,64 @@ lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipe
     return { ok = true }
 end)
 
+local ALLOWED_BENCH_MODES = {
+    raw_materials = true,
+    clean_serial  = true,
+    stolen_serial = true,
+}
+
 --- [PHYSICAL CARRY] Processamento de peça física carregada na bancada de trabalho
-lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, partKey, mode, netId)
+lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, entitlementId, mode)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'benchProcess', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
     benchId = tonumber(benchId)
     local bench = benchId and benchById(benchId)
     if not bench then return { ok = false, err = 'bench' } end
     if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
-    if not partKey or type(partKey) ~= 'string' then return { ok = false, err = 'part' } end
+    if type(entitlementId) ~= 'string' or entitlementId == '' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'invalid_entitlement_param', tostring(entitlementId))
+        end
+        return { ok = false, err = 'invalid' }
+    end
 
-    mode = mode or 'raw_materials'
-    netId = tonumber(netId) or 0
+    -- [v1.16 SEC-1.1] Allowlist estrita de modo
+    if type(mode) ~= 'string' or not ALLOWED_BENCH_MODES[mode] then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'invalid_bench_mode', tostring(mode))
+        end
+        return { ok = false, err = 'invalid_mode' }
+    end
 
+    -- [v1.16 SEC-1.1] Validação preliminar do entitlement ANTES de consumir (para policy de partKey e capacidade de inventário)
+    if not (PartEntitlement and PartEntitlement.Validate and PartEntitlement.Consume) then
+        return { ok = false, err = 'internal' }
+    end
+
+    local okVal, ent = PartEntitlement.Validate(entitlementId, source)
+    if not okVal then
+        if PartEntitlement.LogSuspicious and (ent == 'owner_mismatch' or ent == 'already_consumed') then
+            PartEntitlement.LogSuspicious(source, ent, ('entitlement: %s | bench: %s'):format(tostring(entitlementId), tostring(benchId)))
+        end
+        return { ok = false, err = ent }
+    end
+
+    local partKey = ent.partKey
+    local netId   = ent.sourceNetId or 0
+
+    -- [v1.16 SEC-1.1] Política estrita por partKey: catalisador só aceita raw_materials!
+    if partKey == 'catalytic_converter' and mode ~= 'raw_materials' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'disallowed_mode_for_catalytic', tostring(mode))
+        end
+        return { ok = false, err = 'invalid_mode_for_part' }
+    end
+
+    -- [v1.16 SEC-1.1] Pré-cálculo e validação de capacidade de inventário ANTES do consume irreversível
+    local itemsToGrant = {}
     if partKey == 'catalytic_converter' then
         local mats = (Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials) or {
             copper     = { amount = 4, chance = 1.0 },
@@ -527,53 +573,114 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
             local chance = tonumber(cfg.chance) or 1.0
             if math.random() <= chance then
                 local amt = math.random(1, cfg.amount or 1)
-                InvAdd(source, itemName, amt)
+                itemsToGrant[#itemsToGrant + 1] = { item = itemName, amount = amt }
             end
         end
-        return { ok = true }
+    else
+        local count = (partKey == 'adv_engine' and 5) or 1
+        if mode == 'raw_materials' then
+            if partKey == 'adv_engine' then
+                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 8 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 6 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'aluminum', amount = 4 }
+            elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
+                for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
+                    local chance = tonumber(cfg.chance) or 1.0
+                    if math.random() <= chance then
+                        local amt = math.random(1, (cfg.amount or 1) * 2)
+                        itemsToGrant[#itemsToGrant + 1] = { item = itemName, amount = amt }
+                    end
+                end
+                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 4 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 2 }
+            else
+                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 6 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 3 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'aluminum', amount = 2 }
+            end
+        elseif mode == 'clean_serial' then
+            local meta = { state = 'scratched', sourceModel = 'CLEAN_PART' }
+            itemsToGrant[#itemsToGrant + 1] = { item = 'car_parts', amount = count, mode = mode, metadata = meta }
+        elseif mode == 'stolen_serial' then
+            itemsToGrant[#itemsToGrant + 1] = { item = 'car_parts', amount = count, mode = mode }
+        end
     end
 
-    local count = (partKey == 'adv_engine' and 5) or 1
+    -- [v1.16 SEC-1.2] Checa se o inventário suporta receber todos os itens antes de alterar o estado do entitlement
+    for _, reward in ipairs(itemsToGrant) do
+        local can = false
+        if type(InvCanCarry) == 'function' then
+            can = InvCanCarry(source, reward.item, reward.amount, reward.metadata)
+        end
+        if not can then
+            return { ok = false, err = 'inventory_full' }
+        end
+    end
 
-    if mode == 'raw_materials' then
-        -- 1) Desmanchar em matérias-primas brutas (sucatas, metais, plástico)
-        if partKey == 'adv_engine' then
-            InvAdd(source, 'metalscrap', 8)
-            InvAdd(source, 'steel', 6)
-            InvAdd(source, 'aluminum', 4)
-        elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
-            for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
-                local chance = tonumber(cfg.chance) or 1.0
-                if math.random() <= chance then
-                    local amt = math.random(1, (cfg.amount or 1) * 2)
-                    InvAdd(source, itemName, amt)
-                end
+    -- [v1.16 SEC-1] Agora que a capacidade e o modo foram validados, consome atomicamente o entitlement
+    local res = PartEntitlement.Consume(entitlementId, source, 'bench_' .. tostring(mode))
+    if not res.ok then
+        return { ok = false, err = res.err }
+    end
+
+    -- [v1.16 SEC-1.2] Entrega e verificação rigorosa do resultado real de todas as operações de inventário
+    local anyFailed = false
+    for _, reward in ipairs(itemsToGrant) do
+        local okAdd = false
+        if reward.mode == 'clean_serial' then
+            if Config.PartSerial and Config.PartSerial.Enable then
+                local meta = reward.metadata or { state = 'scratched', sourceModel = 'CLEAN_PART' }
+                local resAdd = exports.ox_inventory:AddItem(source, 'car_parts', reward.amount, meta)
+                okAdd = (resAdd ~= nil and resAdd ~= false)
+            else
+                okAdd = InvAdd(source, 'car_parts', reward.amount)
             end
-            InvAdd(source, 'metalscrap', 4)
-            InvAdd(source, 'steel', 2)
+        elseif reward.mode == 'stolen_serial' then
+            okAdd = VPChopAddStolenCarParts(source, netId, reward.amount)
         else
-            InvAdd(source, 'metalscrap', 6)
-            InvAdd(source, 'steel', 3)
-            InvAdd(source, 'aluminum', 2)
+            okAdd = InvAdd(source, reward.item, reward.amount)
         end
-    elseif mode == 'clean_serial' then
-        -- 2) Limpar / raspar serial: entrega apenas as peças automotivas limpas (sem bônus de sucata)
-        if Config.PartSerial and Config.PartSerial.Enable then
-            local meta = { state = 'scratched', sourceModel = 'CLEAN_PART' }
-            exports.ox_inventory:AddItem(source, 'car_parts', count, meta)
-        else
-            InvAdd(source, 'car_parts', count)
+
+        if not okAdd then
+            anyFailed = true
+            print(('[vp_chopshop][bench] CRITICAL: AddItem failed post-consume for src %d (item: %s, amount: %d, entitlement: %s)'):format(source, reward.item, reward.amount, tostring(entitlementId)))
         end
-    elseif mode == 'stolen_serial' then
-        -- 3) Guardar com serial roubado rastreável (sem bônus de sucata)
-        VPChopAddStolenCarParts(source, netId, count)
+    end
+
+    if anyFailed then
+        -- Fail-closed post-consume: o entitlement já foi consumido para impedir dupes.
+        -- O jogador é notificado de falha parcial para suporte administrativo.
+        TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = L('reward_inv_full_partial') })
+        return { ok = true, partial_failure = true }
     end
 
     return { ok = true }
 end)
 
---- [CATALYTIC THEFT] Furto de catalisador de veículo
-lib.callback.register('vp_chopshop:stealCatalytic', function(source, netId)
+local _catalyticThefts    = {} -- [src] = { token, netId, startedAt, minDurationMs, expiresAt }
+local _catalyticCompleted = {} -- [token] = { entitlementId, completedAt }
+
+local CATALYTIC_REPLAY_TTL_MS = 120000 -- 120s TTL para resultado de replay
+
+CreateThread(function()
+    while true do
+        Wait(60000)
+        local now = GetGameTimer()
+        for tok, entry in pairs(_catalyticCompleted) do
+            if (now - entry.completedAt) > CATALYTIC_REPLAY_TTL_MS then
+                _catalyticCompleted[tok] = nil
+            end
+        end
+    end
+end)
+
+AddEventHandler('playerDropped', function()
+    local src = source
+    _catalyticThefts[src] = nil
+end)
+
+--- [v1.16 SEC-1.1 CAT-ACTION] Início do furto de catalisador (Server Timing Enforced)
+lib.callback.register('vp_chopshop:catalytic:start', function(source, netId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'vehicle' } end
@@ -594,19 +701,125 @@ lib.callback.register('vp_chopshop:stealCatalytic', function(source, netId)
         return { ok = false, err = 'catalytic_already_stolen' }
     end
 
+    local tName, tCfg = nil, nil
+    if type(VPChopGetPlayerTool) == 'function' then
+        tName, tCfg = VPChopGetPlayerTool(source)
+    end
+    local speedMult = (tCfg and tonumber(tCfg.speedMult)) or 1.0
+    local baseMs = (Config.CatalyticTheft and Config.CatalyticTheft.ProgressMs) or 7000
+    local minDurationMs = math.floor(baseMs * speedMult)
+    local now = GetGameTimer()
+
+    local token = ('cat_th:%d:%d'):format(source, now)
+    _catalyticThefts[source] = {
+        token         = token,
+        netId         = netId,
+        startedAt     = now,
+        minDurationMs = minDurationMs,
+        expiresAt     = now + minDurationMs + 8000,
+    }
+
+    return { ok = true, token = token, durationMs = minDurationMs }
+end)
+
+--- [v1.16 SEC-1.1 / SEC-1.2 / SEC-1.3 CAT-ACTION] Conclusão do furto de catalisador (Replay Idempotente + TTL + Token Identity)
+lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, token)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if type(token) ~= 'string' or token == '' then return { ok = false, err = 'invalid' } end
+
+    local now = GetGameTimer()
+
+    -- [v1.16 SEC-1.2 / SEC-1.3] Replay idempotente com retenção de resultado e TTL (120s)
+    local prev = _catalyticCompleted[token]
+    if prev then
+        if (now - prev.completedAt) <= CATALYTIC_REPLAY_TTL_MS then
+            return { ok = true, replay = true, entitlementId = prev.entitlementId, partKey = 'catalytic_converter' }
+        else
+            _catalyticCompleted[token] = nil
+        end
+    end
+
+    local theft = _catalyticThefts[source]
+    if not theft or theft.token ~= token or theft.netId ~= tonumber(netId) then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'catalytic_invalid_session_or_token', tostring(token))
+        end
+        return { ok = false, err = 'invalid' }
+    end
+
+    if now < (theft.startedAt + theft.minDurationMs - 250) then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'catalytic_theft_too_fast', ('elapsed=%d min=%d'):format(now - theft.startedAt, theft.minDurationMs))
+        end
+        return { ok = false, err = 'too_fast' }
+    end
+
+    if now > theft.expiresAt then
+        _catalyticThefts[source] = nil
+        return { ok = false, err = 'expired' }
+    end
+
+    _catalyticThefts[source] = nil
+
+    netId = tonumber(netId)
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
+    if not ValidatePlayerNearVehicle(source, veh, 4.0) then return { ok = false, err = 'distance' } end
+    if not VPChopHasTool(source, false) then return { ok = false, err = 'no_saw' } end
+
+    if Entity(veh).state.catalyticStolen == true then
+        return { ok = false, err = 'catalytic_already_stolen' }
+    end
+
     Entity(veh).state:set('catalyticStolen', true, true)
     VPChopConsumeTool(source, false)
+
+    -- [v1.16 SEC-1.2] Emissão autoritativa baseada no theft token (imune a reciclagem de netId)
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(('cat:%s'):format(theft.token), source, 'catalytic_converter', netId, { origin = 'theft' })
+    end
     TriggerEvent(VPChopEvt.PART_CHOPPED, source, netId, 'catalytic_converter', 1)
 
-    return { ok = true }
+    -- Retém resultado terminal para replay idempotente
+    _catalyticCompleted[token] = {
+        entitlementId = peId,
+        completedAt   = now,
+    }
+
+    return { ok = true, entitlementId = peId, partKey = 'catalytic_converter' }
 end)
 
 --- [CATALYTIC THEFT] Venda de catalisador carregado diretamente no Fence NPC
-lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source)
+lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source, entitlementId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'fenceSell', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
     local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
     if loc and loc.coords and not ValidatePlayerNearCoords(source, loc.coords, 6.0) then
         return { ok = false, err = 'distance' }
+    end
+
+    if type(entitlementId) ~= 'string' or entitlementId == '' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'fence_invalid_entitlement_param', tostring(entitlementId))
+        end
+        return { ok = false, err = 'invalid' }
+    end
+
+    -- [v1.16 SEC-1] Consome atomicamente o entitlement de catalisador ANTES de adicionar dinheiro
+    if PartEntitlement and PartEntitlement.Consume then
+        local res = PartEntitlement.Consume(entitlementId, source, 'fence_sell_catalytic', 'catalytic_converter')
+        if not res.ok then
+            if PartEntitlement.LogSuspicious and (res.err == 'owner_mismatch' or res.err == 'already_consumed' or res.err == 'invalid_type') then
+                PartEntitlement.LogSuspicious(source, res.err, ('fence_sell | entitlement: %s'):format(tostring(entitlementId)))
+            end
+            return { ok = false, err = res.err }
+        end
+    else
+        return { ok = false, err = 'internal' }
     end
 
     local cfg = (Config.CatalyticTheft and Config.CatalyticTheft.Payout) or { min = 1200, max = 2200 }
@@ -614,7 +827,18 @@ lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source)
     local maxPay = tonumber(cfg.max) or 2200
     local payout = math.random(minPay, maxPay)
 
-    BridgeAddMoney(source, 'cash', payout)
+    -- [v1.16 SEC-1.3] Paga via API canônica BridgeAddCash e valida retorno booleano
+    local paid = BridgeAddCash(source, payout, 'chopshop_fence_catalytic')
+    if not paid then
+        local playerKey = (type(ServerChopPlayerKey) == 'function' and ServerChopPlayerKey(source)) or tostring(source)
+        print(('[vp_chopshop][fence] CRITICAL: BridgeAddCash failed post-consume for src %d (playerKey: %s, entitlement: %s, payout: %d)'):format(
+            source, playerKey, tostring(entitlementId), payout
+        ))
+        -- Fail-closed post-consume: o entitlement já foi consumido para impedir dupes.
+        -- Não tenta pagar novamente e não restaura o entitlement.
+        return { ok = false, err = 'payment_failed' }
+    end
+
     return { ok = true, payout = payout }
 end)
 
