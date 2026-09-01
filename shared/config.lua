@@ -897,8 +897,8 @@ Config.CatalyticTheft = {
     --- Recompensa em dinheiro ao vender o catalisador diretamente no Fence (Receptador)
     Payout = { min = 1200, max = 2200 },
 
-    --- Bloqueia o jogador de roubar o catalisador do seu próprio carro pessoal (false = liberado para testes em qualquer carro)
-    BlockOwnVehicle = false,
+    --- Bloqueia o jogador de roubar o catalisador do seu próprio carro pessoal (true = anti-auto-farm em produção; false = desativa para QA local)
+    BlockOwnVehicle = true,
 
     --- Materiais recebidos caso o jogador decida desmanchar o catalisador na bancada
     BenchMaterials = {
@@ -928,8 +928,8 @@ Config.DamageScaling = {
 Config.Jackstand = {
     Enable = true,
 
-    --- Bloqueia o jogador de levantar e desmanchar seu próprio carro pessoal (false = liberado para testes em qualquer carro)
-    BlockOwnVehicle = false,
+    --- Bloqueia o jogador de levantar e desmanchar seu próprio carro pessoal (true = anti-auto-farm em produção; false = desativa para QA local)
+    BlockOwnVehicle = true,
 
     --- Item do inventário que acciona o macaco.
     Item = 'chopshop_jackstand',

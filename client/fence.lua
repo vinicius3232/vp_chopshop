@@ -156,10 +156,15 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
 
 local function sellCarriedCatalytic()
     if not VPChopCarryingPart or VPChopCarryingPart.partKey ~= 'catalytic_converter' then return end
-
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellCatalytic', false)
-    if not cbOk or not res or not res.ok then
+    local entId = VPChopCarryingPart.entitlementId
+    if not entId then
         VPChopNotify(L('notify_generic_error'), 'error')
+        return
+    end
+
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellCatalytic', false, entId)
+    if not cbOk or not res or not res.ok then
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
         return
     end
 

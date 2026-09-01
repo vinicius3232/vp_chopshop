@@ -505,16 +505,41 @@ lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipe
 end)
 
 --- [PHYSICAL CARRY] Processamento de peça física carregada na bancada de trabalho
-lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, partKey, mode, netId)
+lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, entitlementId, mode)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'benchProcess', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
     benchId = tonumber(benchId)
     local bench = benchId and benchById(benchId)
     if not bench then return { ok = false, err = 'bench' } end
     if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
-    if not partKey or type(partKey) ~= 'string' then return { ok = false, err = 'part' } end
+    if type(entitlementId) ~= 'string' or entitlementId == '' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'invalid_entitlement_param', tostring(entitlementId))
+        end
+        return { ok = false, err = 'invalid' }
+    end
 
     mode = mode or 'raw_materials'
-    netId = tonumber(netId) or 0
+
+    -- [v1.16 SEC-1] Consumo atômico do entitlement - autoridade server-side
+    local partKey = nil
+    local netId   = 0
+    if PartEntitlement and PartEntitlement.Consume then
+        local res = PartEntitlement.Consume(entitlementId, source, 'bench_' .. tostring(mode))
+        if not res.ok then
+            if PartEntitlement.LogSuspicious and (res.err == 'owner_mismatch' or res.err == 'already_consumed') then
+                PartEntitlement.LogSuspicious(source, res.err, ('entitlement: %s | bench: %s'):format(tostring(entitlementId), tostring(benchId)))
+            end
+            return { ok = false, err = res.err }
+        end
+        partKey = res.partKey
+        netId   = res.sourceNetId or 0
+    else
+        return { ok = false, err = 'internal' }
+    end
 
     if partKey == 'catalytic_converter' then
         local mats = (Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials) or {
@@ -575,6 +600,10 @@ end)
 --- [CATALYTIC THEFT] Furto de catalisador de veículo
 lib.callback.register('vp_chopshop:stealCatalytic', function(source, netId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'stealCatalytic', 500) then
+        return { ok = false, err = 'cooldown' }
+    end
+
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'vehicle' } end
     local veh = NetworkGetEntityFromNetworkId(netId)
@@ -596,17 +625,46 @@ lib.callback.register('vp_chopshop:stealCatalytic', function(source, netId)
 
     Entity(veh).state:set('catalyticStolen', true, true)
     VPChopConsumeTool(source, false)
+
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(('cat:%d'):format(netId), source, 'catalytic_converter', netId, { origin = 'theft' })
+    end
     TriggerEvent(VPChopEvt.PART_CHOPPED, source, netId, 'catalytic_converter', 1)
 
-    return { ok = true }
+    return { ok = true, entitlementId = peId, partKey = 'catalytic_converter' }
 end)
 
 --- [CATALYTIC THEFT] Venda de catalisador carregado diretamente no Fence NPC
-lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source)
+lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source, entitlementId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'fenceSell', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
     local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
     if loc and loc.coords and not ValidatePlayerNearCoords(source, loc.coords, 6.0) then
         return { ok = false, err = 'distance' }
+    end
+
+    if type(entitlementId) ~= 'string' or entitlementId == '' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'fence_invalid_entitlement_param', tostring(entitlementId))
+        end
+        return { ok = false, err = 'invalid' }
+    end
+
+    -- [v1.16 SEC-1] Consome atomicamente o entitlement de catalisador ANTES de adicionar dinheiro
+    if PartEntitlement and PartEntitlement.Consume then
+        local res = PartEntitlement.Consume(entitlementId, source, 'fence_sell_catalytic', 'catalytic_converter')
+        if not res.ok then
+            if PartEntitlement.LogSuspicious and (res.err == 'owner_mismatch' or res.err == 'already_consumed' or res.err == 'invalid_type') then
+                PartEntitlement.LogSuspicious(source, res.err, ('fence_sell | entitlement: %s'):format(tostring(entitlementId)))
+            end
+            return { ok = false, err = res.err }
+        end
+    else
+        return { ok = false, err = 'internal' }
     end
 
     local cfg = (Config.CatalyticTheft and Config.CatalyticTheft.Payout) or { min = 1200, max = 2200 }

@@ -120,6 +120,11 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
     if mDup then return { ok = false, err = 'done' } end
     advMarkCooldown(src)
 
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(sessionId, src, partKey, netId, { origin = 'advanced' })
+    end
+
     -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, a peça vai para os braços
     -- e o jogador escolhe como processá-la na bancada (matérias-primas / serial limpo / serial roubado).
     if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
@@ -146,7 +151,7 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
             if send then TriggerClientEvent('vp_chopshop:adv:breakDoor', pidN, netId, partKey, doorIndex) end
         end
     end
-    return { ok = true }
+    return { ok = true, partEntitlementId = peId }
 end
 
 ---@return { ok:boolean, err:string|nil }
@@ -203,6 +208,11 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
         end
     end
 
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(sessionId, src, 'adv_engine', netId, { origin = 'advanced' })
+    end
+
     -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, o bloco do motor vai para os braços
     -- e o jogador escolhe como processá-lo na bancada (matérias-primas / serial limpo / serial roubado).
     if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
@@ -217,7 +227,7 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_engine', 3)
-    return { ok = true }
+    return { ok = true, partEntitlementId = peId }
 end
 
 ---@return { ok:boolean, err:string|nil }

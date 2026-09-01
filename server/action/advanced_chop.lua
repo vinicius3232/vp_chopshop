@@ -101,7 +101,7 @@ ActionSession.RegisterExecutor('adv_door', function(act)
     if type(VPChopAdvDoorCommit) ~= 'function' then return { ok = false, err = 'internal' } end
     local r = VPChopAdvDoorCommit(act.src, act.netId, act.sessionId, act.action)
     if not r.ok then return { ok = false, err = r.err or 'domain' } end
-    return { ok = true, result = { phase = 2, part = act.action } }
+    return { ok = true, result = { phase = 2, part = act.action, partEntitlementId = r.partEntitlementId } }
 end)
 
 -- ─── adv_engine ──────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ ActionSession.RegisterExecutor('adv_engine', function(act)
     if type(VPChopAdvEngineCommit) ~= 'function' then return { ok = false, err = 'internal' } end
     local r = VPChopAdvEngineCommit(act.src, act.netId, act.sessionId)
     if not r.ok then return { ok = false, err = r.err or 'domain' } end
-    return { ok = true, result = { phase = 3, part = 'adv_engine' } }
+    return { ok = true, result = { phase = 3, part = 'adv_engine', partEntitlementId = r.partEntitlementId } }
 end)
 
 -- ─── adv_carcass ─────────────────────────────────────────────────────────────

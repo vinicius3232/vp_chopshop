@@ -75,7 +75,14 @@ local function craftOnBench(benchId, recipeIndex, recipe)
     end
 end
 
-local function executeBenchPartMode(benchId, partKey, mode, netId)
+local function executeBenchPartMode(benchId, mode)
+    if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
+    local entId = VPChopCarryingPart.entitlementId
+    if not entId then
+        VPChopNotify(L('notify_generic_error'), 'error')
+        return
+    end
+
     local labels = {
         raw_materials = L('bench_progress_raw') or 'Desmanchando peça em matérias-primas...',
         clean_serial  = L('bench_progress_clean') or 'Raspando e limpando número de série...',
@@ -91,9 +98,9 @@ local function executeBenchPartMode(benchId, partKey, mode, netId)
     })
     if not ok then return end
 
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchProcessPart', false, benchId, partKey, mode, netId)
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchProcessPart', false, benchId, entId, mode)
     if not cbOk or not res or not res.ok then
-        VPChopNotify(L('notify_generic_error'), 'error')
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
         return
     end
 
@@ -104,11 +111,10 @@ end
 local function doProcessCarriedPartOnBench(benchId)
     if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
     local partKey = VPChopCarryingPart.partKey
-    local netId   = VPChopCarryingPart.netId or 0
 
-    -- Catalisador tem fluxo direto de reciclagem
+    -- Catalisador tem fluxo direto de reciclagem em matérias-primas
     if partKey == 'catalytic_converter' then
-        executeBenchPartMode(benchId, partKey, 'raw_materials', netId)
+        executeBenchPartMode(benchId, 'raw_materials')
         return
     end
 
@@ -122,7 +128,7 @@ local function doProcessCarriedPartOnBench(benchId)
                 description = L('bench_desc_raw_materials'),
                 icon = 'fa-solid fa-recycle',
                 onSelect = function()
-                    executeBenchPartMode(benchId, partKey, 'raw_materials', netId)
+                    executeBenchPartMode(benchId, 'raw_materials')
                 end,
             },
             {
@@ -130,7 +136,7 @@ local function doProcessCarriedPartOnBench(benchId)
                 description = L('bench_desc_clean_serial'),
                 icon = 'fa-solid fa-spray-can-sparkles',
                 onSelect = function()
-                    executeBenchPartMode(benchId, partKey, 'clean_serial', netId)
+                    executeBenchPartMode(benchId, 'clean_serial')
                 end,
             },
             {
@@ -138,7 +144,7 @@ local function doProcessCarriedPartOnBench(benchId)
                 description = L('bench_desc_stolen_serial'),
                 icon = 'fa-solid fa-skull-crossbones',
                 onSelect = function()
-                    executeBenchPartMode(benchId, partKey, 'stolen_serial', netId)
+                    executeBenchPartMode(benchId, 'stolen_serial')
                 end,
             },
         }
