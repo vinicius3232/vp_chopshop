@@ -3,7 +3,7 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (HEAD: `baab1d9`, base de PR #40)
+**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (HEAD: `1756d38`, base de PR #40)
 **`main`:** `v1.14.3`
 **Harness:** `lua tools/run_spec.lua .` → **1113 PASS / 0 FAIL / 1113 asserts**
 
