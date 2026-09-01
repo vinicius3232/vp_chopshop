@@ -198,6 +198,7 @@ function IsDisabledControlPressed(_, _) return false end
 function DisableControlAction(_, _, _) end
 function RegisterKeyMapping(_, _, _, _) end
 function RegisterCommand(_, _, _) end
+function IsPlayerAceAllowed(_, _) return false end
 
 local base = arg[1] or '.'
 _G._HARNESS_BASE = base

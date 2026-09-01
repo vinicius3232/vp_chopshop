@@ -740,7 +740,9 @@ lib.callback.register('vp_chopshop:pickupBench', function(source, benchId)
     if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
 
     local key = ServerChopPlayerKey(source)
-    if bench.placed_by and bench.placed_by ~= key then
+    local isPlacer = not bench.placed_by or bench.placed_by == key
+    local isAdmin = IsPlayerAceAllowed(source, 'command.chopshop_admin')
+    if not isPlacer and not isAdmin then
         return { ok = false, err = 'unauthorized' }
     end
 
@@ -791,7 +793,9 @@ lib.callback.register('vp_chopshop:pickupWelder', function(source, welderId)
     if not ValidatePlayerNearCoords(source, w.coords) then return { ok = false, err = 'distance' } end
 
     local key = ServerChopPlayerKey(source)
-    if w.placed_by and w.placed_by ~= key then
+    local isPlacer = not w.placed_by or w.placed_by == key
+    local isAdmin = IsPlayerAceAllowed(source, 'command.chopshop_admin')
+    if not isPlacer and not isAdmin then
         return { ok = false, err = 'unauthorized' }
     end
 
@@ -804,16 +808,33 @@ lib.callback.register('vp_chopshop:pickupWelder', function(source, welderId)
     return { ok = true }
 end)
 
-RegisterCommand('chopbenches', function(src, _)  -- [M2 FIX] Renomeado de 'choplifts' (lifts removidos)
+RegisterCommand('chopbenches', function(src, _)
     if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then return end
-    local lines = { '[vp_chopshop] Benches (' .. #ServerBenches .. '):' }
+    local lines = {
+        ('[vp_chopshop] Bancadas (%d) | Soldadoras (%d):'):format(#ServerBenches, #ServerWelders),
+    }
     for _, bench in ipairs(ServerBenches) do
-        lines[#lines + 1] = ('  id=%-4d  pos=%.1f,%.1f,%.1f  by=%s'):format(
+        lines[#lines + 1] = ('  [BENCH]  id=%-4d pos=%.1f,%.1f,%.1f by=%s'):format(
             bench.id, bench.coords.x, bench.coords.y, bench.coords.z,
             tostring(bench.placed_by or '?'))
     end
-    print(table.concat(lines, '\n'))
-end, true)
+    for _, w in ipairs(ServerWelders) do
+        lines[#lines + 1] = ('  [WELDER] id=%-4d pos=%.1f,%.1f,%.1f by=%s'):format(
+            w.id, w.coords.x, w.coords.y, w.coords.z,
+            tostring(w.placed_by or '?'))
+    end
+    local msg = table.concat(lines, '\n')
+    if src == 0 then
+        print(msg)
+    else
+        print(msg)
+        TriggerClientEvent('ox_lib:notify', src, {
+            type = 'inform',
+            title = 'vp_chopshop props',
+            description = ('Bancadas: %d | Soldadoras: %d (detalhes no console F8)'):format(#ServerBenches, #ServerWelders),
+        })
+    end
+end, false)
 
 RegisterCommand('choptest', function(src, args)
     if src == 0 then print('[vp_chopshop] /choptest requer jogador in-game.') return end
@@ -875,20 +896,85 @@ RegisterCommand('choptest', function(src, args)
 end, false)
 
 RegisterCommand('chopremove', function(src, args)
-    if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then
+        if src ~= 0 then TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = 'Sem permissão.' }) end
+        return
+    end
     local kind = args[1]
     local id   = tonumber(args[2])
     if not kind or not id then
-        print('[vp_chopshop] Usage: /chopremove bench <id>')
+        local msg = 'Uso: /chopremove <bench|welder> <id>'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'inform', description = msg }) end
         return
     end
-    if kind == 'bench' then
-        if not benchById(id) then print('[vp_chopshop] Bench not found: ' .. id) return end
+    if kind == 'bench' or kind == 'bancada' then
+        if not benchById(id) then
+            local msg = 'Bancada ID ' .. id .. ' não encontrada.'
+            if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = msg }) end
+            return
+        end
         VPChopDbDeleteBench(id)
         removeBenchFromMemory(id)
         broadcastRemoveBench(id)
-        print('[vp_chopshop] Bench ' .. id .. ' removed.')
+        local msg = 'Bancada ID ' .. id .. ' removida do mundo e banco.'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'success', description = msg }) end
+    elseif kind == 'welder' or kind == 'solda' or kind == 'compressor' then
+        if not welderById(id) then
+            local msg = 'Soldadora ID ' .. id .. ' não encontrada.'
+            if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = msg }) end
+            return
+        end
+        VPChopDbDeleteWelder(id)
+        removeWelderFromMemory(id)
+        broadcastRemoveWelder(id)
+        local msg = 'Soldadora ID ' .. id .. ' removida do mundo e banco.'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'success', description = msg }) end
     else
-        print('[vp_chopshop] Usage: /chopremove bench <id>')
+        local msg = 'Uso: /chopremove <bench|welder> <id>'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'inform', description = msg }) end
     end
-end, true)
+end, false)
+
+RegisterCommand('chopclear', function(src, args)
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then
+        if src ~= 0 then TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = 'Sem permissão.' }) end
+        return
+    end
+
+    local filter = args[1] or 'all'
+    local benchesRemoved, weldersRemoved = 0, 0
+
+    if filter == 'all' or filter == 'bench' or filter == 'benches' or filter == 'bancada' then
+        local benchIds = {}
+        for _, b in ipairs(ServerBenches) do benchIds[#benchIds + 1] = b.id end
+        for _, id in ipairs(benchIds) do
+            VPChopDbDeleteBench(id)
+            removeBenchFromMemory(id)
+            broadcastRemoveBench(id)
+            benchesRemoved = benchesRemoved + 1
+        end
+    end
+
+    if filter == 'all' or filter == 'welder' or filter == 'welders' or filter == 'solda' or filter == 'compressor' then
+        local welderIds = {}
+        for _, w in ipairs(ServerWelders) do welderIds[#welderIds + 1] = w.id end
+        for _, id in ipairs(welderIds) do
+            VPChopDbDeleteWelder(id)
+            removeWelderFromMemory(id)
+            broadcastRemoveWelder(id)
+            weldersRemoved = weldersRemoved + 1
+        end
+    end
+
+    local msg = ('[vp_chopshop] Limpeza concluída: %d bancada(s) e %d soldadora(s) removidas.'):format(benchesRemoved, weldersRemoved)
+    if src == 0 then
+        print(msg)
+    else
+        TriggerClientEvent('ox_lib:notify', src, {
+            type = 'success',
+            title = 'vp_chopshop admin',
+            description = ('Removidos: %d bancada(s), %d soldadora(s)'):format(benchesRemoved, weldersRemoved),
+        })
+        print(('[vp_chopshop] Admin %s executou /chopclear (%s)'):format(GetPlayerName(src), filter))
+    end
+end, false)
