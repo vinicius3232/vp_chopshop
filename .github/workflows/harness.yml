@@ -8,12 +8,13 @@ name: harness
 on:
   pull_request:
     branches:
-      - main
-      - pr-h/v1.15-delivercar-terminal-hardening
+      - '**'
   push:
     branches:
       - main
-      - pr-h/v1.15-delivercar-terminal-hardening
+      - 'pr-h/**'
+      - 'feat/**'
+      - 'fix/**'
 
 concurrency:
   group: harness-${{ github.workflow }}-${{ github.ref }}
