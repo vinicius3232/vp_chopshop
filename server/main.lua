@@ -557,18 +557,16 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
             InvAdd(source, 'aluminum', 2)
         end
     elseif mode == 'clean_serial' then
-        -- 2) Limpar / raspar serial: gera car_parts com metadata limpa { state = 'scratched' }
+        -- 2) Limpar / raspar serial: entrega apenas as peças automotivas limpas (sem bônus de sucata)
         if Config.PartSerial and Config.PartSerial.Enable then
             local meta = { state = 'scratched', sourceModel = 'CLEAN_PART' }
             exports.ox_inventory:AddItem(source, 'car_parts', count, meta)
         else
             InvAdd(source, 'car_parts', count)
         end
-        InvAdd(source, 'metalscrap', 2)
     elseif mode == 'stolen_serial' then
-        -- 3) Guardar com serial roubado rastreável
+        -- 3) Guardar com serial roubado rastreável (sem bônus de sucata)
         VPChopAddStolenCarParts(source, netId, count)
-        InvAdd(source, 'metalscrap', 1)
     end
 
     return { ok = true }
