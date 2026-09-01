@@ -2,60 +2,58 @@
 
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
-**Atualizado:** 2026-08-28
-**Branch de integração:** `pr-h/v1.15-delivercar-terminal-hardening` @ `3dc9652`
-**`main`:** `v1.14.3` (intocado — nada de v1.16 foi pro main)
-**Harness:** `lua tools/run_spec.lua .` → **632 PASS / 0 FAIL**
+**Atualizado:** 2026-09-01
+**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (HEAD: `1756d38`, base de PR #40)
+**`main`:** `v1.14.3`
+**Harness:** `lua tools/run_spec.lua .` → **1113 PASS / 0 FAIL / 1113 asserts**
 
 ---
 
-## Onde estamos
+## Onde estamos — Estado Real Validado em Runtime
 
 ```
-Fase 0 — base + dores da QA            ✅ CÓDIGO COMPLETO   (#14 #15 #16)
-Fase 1 — Part Registry vira autoridade ✅ CÓDIGO COMPLETO   (#17 #18 #19 #20 #21 #22)
-P2.1   — client sai de ChopParts       ✅ CÓDIGO COMPLETO   (#23)
-Checkpoint de QA                       ✅ escrito           (#24 → docs/audit/V116_INTEGRATION_QA.md)
-Docs de contexto (AGENTS/STATUS/plano) ✅                   (#25)
+Fase 0 — Base + Dores da QA             ✅ HOMOLOGADO & MERGED   (#14 #15 #16)
+Fase 1 — Part Registry vira autoridade  ✅ HOMOLOGADO & MERGED   (#17 #18 #19 #20 #21 #22)
+P2.1   — Client sai de ChopParts        ✅ HOMOLOGADO & MERGED   (#23)
 ─────────────────────────────────────────────────────────────────────────
-Fase 2 — Wheels V2 / condition / motor ⏸  BLOQUEADO até a QA validar Fase 0+1
-Fase 3 — processamento de peça         ⏸
-Fase 4 — camada de crime               ⏸
-Fase 5 — polish + CI + release         ⏸
+Stack UX & Gameplay v1.16:
+UX-0   — DisplayName server-safe fix    ✅ HOMOLOGADO            (956f5fe)
+UX-A   — Interaction Core & NUI         ✅ HOMOLOGADO            (d390f29)
+UX-B   — Wheel 5-Bolt Rotate Minigame   ✅ TESTADO IN-GAME (OK)  (#37)
+UX-C   — Body Panels Cut Minigame       ✅ TESTADO IN-GAME (OK)  (#38)
+UX-D   — Engine Removal & Mounts        ✅ TESTADO IN-GAME (OK)  (#39)
+UX-E   — Carcass Structural Trace Cut   ✅ TESTADO IN-GAME (OK)  (#40)
+UX-F   — Auto-Pan & Smooth Sequencing   ✅ TESTADO IN-GAME (OK)  (e173ee5)
+─────────────────────────────────────────────────────────────────────────
+Novas Mecânicas Físicas & Oficinas:
+PHYS-1 — Physical Part Carry (Braços)   ✅ TESTADO IN-GAME (OK)  (ffe26e5)
+PHYS-2 — Workbench Part Dismantling     ✅ TESTADO IN-GAME (OK)  (ffe26e5)
+DMG-1  — Damage Health Scaling (Motor)  ✅ TESTADO IN-GAME (OK)  (bedfb9a)
+CAT-1  — Catalytic Converter Theft      ✅ TESTADO IN-GAME (OK)  (3feab7a)
+OWN-1  — Player-Vehicle Theft & Anti-Exp✅ TESTADO IN-GAME (OK)  (b39dd5e)
+─────────────────────────────────────────────────────────────────────────
+Hardening de Segurança & Autoridade Econômica:
+SEC-1  — Part Entitlement Core Authority✅ HOMOLOGADO & MERGED   (#41)
+         (Bench Server Authority, Fence Tokenized Sale, Strict Mode Allowlist,
+          Fail-Closed InvCanCarry, Catalytic 2-step Server Timing & Replay TTL,
+          Carcass Statebag Fail-safe, Canonical BridgeAddCash Payment)
+PAY-1.1— Payment & Zero-Sale Consistency✅ HOMOLOGADO (v1.16)    (14d7dcf)
+         (P1-01 sellItems zero-sale guard + fail-closed BridgeAddCash checks,
+          P1-02 fulfillOrder fail-closed checks, real callback regression tests)
+─────────────────────────────────────────────────────────────────────────
+Fase 3 — Processamento de Peça Avançado  ✅ EM ANDAMENTO / INTEGRADO
+Fase 4 — Camada de Crime & Perícia       ⏸
+Fase 5 — Polish Final + CI + Release     ⏸
 ```
 
-## Próximo movimento — NÃO é código
+## Resumo dos Testes In-Game Realizados (100% Aprovados)
 
-**A bola está com a QA.** Deploy da `pr-h` num servidor QBox real e rodar
-`docs/audit/V116_INTEGRATION_QA.md` (blocos Q1–Q5). O mais crítico é **Q4**
-(restart recovery): **Q4.1** — re-chopar e re-descartar a mesma carcaça depois de
-`ensure vp_chopshop` deve dar `already_discarded` com **0 payout**. Se pagar 2× = P0.
-
-Fase 2 (P2.2 Wheels V2 → P2.3 condition → P2.4 motor como `vehicle_part`) só
-começa depois de Q1–Q4 sem FAIL P0/P1. Bug encontrado pela QA = RC-FIX pequena e
-isolada, mesmo fluxo.
-
-## PRs desta rodada (todas base `pr-h`, squash-merge)
-
-| # | O quê | Muda runtime? |
-|---|---|---|
-| #14 | P0.2 — minigame de placa frente/traseira-aware; asset pago removido; `stream/` esvaziado | SIM (`Bolt3D.Enable=false` → skillCheck) |
-| #15 | P0.3 — 4 notificações server → `L()`; bloco morto removido de `client/fence.lua` | cosmético |
-| #16 | P0.4 — restart recovery: `vp_chop_carcass`, barreira anti re-discard, sweep de boot | SIM |
-| #17 | P1.1 — `shared/registry/*` inerte + drift check (ZERO drift) | não |
-| #18 | P1.2 / FASE B — `chop_parts.lua` vira projeção do registry | refator puro |
-| #19 | P1.3 / FASE C — `bonnet` valida via registry (vertical slice) | refator |
-| #20 | P1.4 / FASE D — validação avançada 100% via registry | refator |
-| #21 | P1.5 / FASE E — remove fallbacks hardcode + `Config.AdvancedChop.SawItem/ScrewdriverItem` mortos; **nova capability:** `enabled=false` por peça → inchopável | refator + capability |
-| #22 | P1.6 / FASE F — 11 sites server saem de `ChopParts` → `VPChopPartGtaClass` | refator puro |
-| #23 | P2.1 enxuto — 6 sites client saem de `ChopParts`; `chop_parts.lua` → `part_class.lua` | refator client |
-| #24 | checkpoint de QA (`docs/audit/V116_INTEGRATION_QA.md`) | doc |
-| #25 | `AGENTS.md` + `STATUS.md` + plano mestre no repo | doc |
-
-## Decisão de fase (2026-08-28)
-
-O dono suspendeu o RC freeze da v1.15. Motivo: a direção está decidida; testar
-uma v1.15 congelada que já vai ser reescrita desperdiça QA. Novo alvo: build
-consolidado `v1.16-dev` que a QA valida como um todo. **Não** significa reescrever
-o núcleo (ChopSession/ActionSession/discard/deliverCar — fundação de 632 asserts).
-Ver `docs/design/MASTER_IMPLEMENTATION_PLAN.md` §1.
+1. **Minigame de Rodas:** 5 parafusos com rotação física individual, câmera ortogonal calibrada, entrega de `TyreEntitlement`.
+2. **Minigame de Painéis:** Corte de portas, capô e porta-malas com serra circular (`prop_tool_consaw`) na mão.
+3. **Minigame de Motor:** 4 fixadores desacoplados com chave inglesa/boca (`prop_tool_wrench`), com bypass automático se o capô foi arrancado em batidas.
+4. **Minigame de Carcaça:** 5 traçados estruturais com maçarico de solda (`prop_weld_torch`), auto-avanço fluido de câmera entre seções e isolamento de linhas de corte na tela.
+5. **Carregamento Físico:** Peças retiradas (`door`, `bonnet`, `engine`, `catalytic`) são carregadas nos braços do jogador, podendo ser largadas `[E]` e recolhidas do chão `[ALT]`.
+6. **Desmanche na Bancada:** Peça carregada é processada no `ox_target` da `chopshop_bench` gerando sucatas e partes.
+7. **Escala de Dano (EngineHealth):** Motor danificado tem recompensas reduzidas e convertidas em sucata de metal. Motor fundido ($<150$ HP) bloqueia reaproveitamento de peças.
+8. **Furto de Catalisador:** Corte de escapamento em veículos de rua, chance de disparar alarme/polícia, e opção de desmanchar na bancada ou vender direto no NPC Fence.
+9. **Roubo em Carros de Jogadores:** Permite furtar catalisadores e rodas de veículos pertencentes a outros jogadores, bloqueando o dono de roubar o próprio veículo (`BlockOwnVehicle` anti-auto-farm).

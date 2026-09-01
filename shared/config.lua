@@ -674,16 +674,16 @@ Config.Tools = {
         dispatchChance = 0.0,
         speedMult = 0.7,
         HandProp = {
-            model    = 'prop_tool_screwflt01',
-            offset   = { 0.10, 0.03, 0.0 },
-            rotation = { 10, 0, -30 },
+            model    = 'prop_tool_drill',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
         },
     },
 }
 
 --- Máquina de solda: objeto colocável (item do inventário). Obrigatória perto da bancada para
 --- craftear/entregar peças. Raio de detecção: WelderBenchRadius metros.
-Config.WelderModel       = `lr_smodd_cm_weldmachine_001`
+Config.WelderModel       = `prop_compressor_02`
 Config.WelderBenchRadius = 8.0
 Config.MinWelderSpacing  = 4.0
 
@@ -830,28 +830,106 @@ Config.AdvancedChop = {
         clip = 'fixing_a_player',
         flag = 1,
         prop = {
-            model    = 'prop_tool_screwflt01',
-            offset   = { 0.10, 0.03, 0.0 },
-            rotation = { 10, 0, -30 },
+            model    = 'prop_tool_wrench',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
         },
     },
 
     --- Animação e prop da mão para corte da carcaça (Fase 4).
     --- flag 1 = ANIM_FLAG_REPEAT — mantém o loop enquanto a barra roda.
     CarcassAnim = {
-        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
-        clip = 'cutting_loop',
+        dict = 'amb@world_human_welding@male@base',
+        clip = 'base',
         flag = 1,
         prop = {
-            model    = 'v_ind_cs_powersaw',
-            offset   = { 0.10, 0.05, 0.0 },
-            rotation = { 15, 0, -55 },
+            model    = 'prop_weld_torch',
+            offset   = { 0.08, 0.03, 0.0 },
+            rotation = { 0, 0, 0 },
         },
     },
 }
 
+--- Carregamento físico de peças retiradas (portas, capô, porta-malas, motor) e processamento na bancada.
+Config.PhysicalCarry = {
+    Enable = true,
+
+    --- Mapeamento de props e offsets ao carregar a peça nos braços (bone 4089 / 28422)
+    Props = {
+        door_dside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_pside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_dside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_pside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        bonnet       = { model = 'prop_car_bonnet_01', offset = { 0.12, 0.18, 0.10 }, rotation = { 0.0, 10.0, 0.0 } },
+        boot         = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        adv_engine          = { model = 'prop_car_engine_01',  offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+        catalytic_converter = { model = 'prop_car_exhaust_01', offset = { 0.10, 0.20, 0.12 }, rotation = { 0.0, 0.0, 90.0 } },
+    },
+
+    --- Animação enquanto carrega a peça pesada
+    CarryAnim = {
+        dict = 'anim@heists@box_carry@',
+        clip = 'idle',
+        flag = 49,
+    },
+}
+
+--- Sistema de Furto de Catalisador Automotivo (Street & Workshop Theft)
+Config.CatalyticTheft = {
+    Enable = true,
+
+    --- Bones no veículo onde a opção de cortar catalisador é exibida
+    Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+
+    --- Chance percentual (0 a 100) de disparar o alarme e chamar a polícia pelo ruído da serra
+    PoliceAlertChance = 40,
+
+    --- Tempo de corte do escapamento em milissegundos
+    ProgressMs = 7000,
+
+    --- Animação de corte com serra
+    Anim = {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+    },
+
+    --- Recompensa em dinheiro ao vender o catalisador diretamente no Fence (Receptador)
+    Payout = { min = 1200, max = 2200 },
+
+    --- Bloqueia o jogador de roubar o catalisador do seu próprio carro pessoal (true = anti-auto-farm em produção; false = desativa para QA local)
+    BlockOwnVehicle = true,
+
+    --- Materiais recebidos caso o jogador decida desmanchar o catalisador na bancada
+    BenchMaterials = {
+        copper     = { amount = 4, chance = 1.0 },
+        metalscrap = { amount = 6, chance = 1.0 },
+        steel      = { amount = 2, chance = 1.0 },
+        car_parts  = { amount = 1, chance = 1.0 },
+    },
+}
+
+--- Sistema de dano físico e escala de recompensas (motor e pneus).
+Config.DamageScaling = {
+    Enable = true,
+
+    --- Vida mínima do motor (0.0 a 1000.0) para permitir reaproveitamento como peças.
+    --- Se estiver abaixo deste valor, o motor é considerado destruído/fundido.
+    MinEngineHealthToChop = 150.0,
+
+    --- Escala as peças de motor (car_parts) proporcionalmente à integridade do motor (1000 HP = 100%).
+    --- A diferença é convertida em sucata de metal (metalscrap).
+    ScaleEngineRewards = true,
+
+    --- Se falso, impede roubar pneus estourados/furados como item intacto de revenda.
+    AllowBurstTyreTheft = false,
+}
+
 Config.Jackstand = {
     Enable = true,
+
+    --- Bloqueia o jogador de levantar e desmanchar seu próprio carro pessoal (true = anti-auto-farm em produção; false = desativa para QA local)
+    BlockOwnVehicle = true,
 
     --- Item do inventário que acciona o macaco.
     Item = 'chopshop_jackstand',
@@ -871,12 +949,10 @@ Config.Jackstand = {
     --- Duração da barra "A retirar macacos..." (ms).
     LowerProgressMs = 5000,
 
-    --- Animação ao COLOCAR o macaco.
-    --- amb@world_human_vehicle_mechanic@male@base/base = ped ajoelha de lado e trabalha
-    --- ao nível do chão (idêntico ao wheel_theft). Mais realista que mini@repair.
+    --- Animação ao COLOCAR o macaco (ped ajoelha naturalmente ao lado do chassi).
     RaiseAnim = {
-        dict = 'amb@world_human_vehicle_mechanic@male@base',
-        clip = 'base',
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
         flag = 1,
         prop = {
             model    = 'prop_tool_wrench',
@@ -887,8 +963,8 @@ Config.Jackstand = {
 
     --- Animação ao RETIRAR o macaco.
     LowerAnim = {
-        dict = 'amb@world_human_vehicle_mechanic@male@base',
-        clip = 'base',
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
         flag = 1,
         prop = {
             model    = 'prop_tool_wrench',

@@ -387,7 +387,17 @@ function VPChopChopPartCommit(source, netId, partKey)
     if alarmCfg and alarmCfg.Enable and not AlarmActive[netId] then
         local vehForAlarm = NetworkGetEntityFromNetworkId(netId)
         if vehForAlarm and vehForAlarm ~= 0 and DoesEntityExist(vehForAlarm) then
-            local class  = GetVehicleClass(vehForAlarm)
+            local class = 0
+            if rawget(_G, 'GetVehicleClass') then
+                local ok, vc = pcall(GetVehicleClass, vehForAlarm)
+                if ok and type(vc) == 'number' then class = vc end
+            elseif rawget(_G, 'GetVehicleClassFromName') then
+                local model = GetEntityModel(vehForAlarm)
+                if model and model ~= 0 then
+                    local ok, vc = pcall(GetVehicleClassFromName, model)
+                    if ok and type(vc) == 'number' and vc >= 0 then class = vc end
+                end
+            end
             local chance = (alarmCfg.ChanceByClass and alarmCfg.ChanceByClass[class])
                            or (alarmCfg.DefaultChance or 0.25)
             if math.random() <= chance then
@@ -494,9 +504,343 @@ lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipe
     return { ok = true }
 end)
 
--- [GAMEPLAY unificação] Callback 'vp_chopshop:deliverPart' REMOVIDO.
--- A recompensa da Fase 1 agora é imediata (ver callback 'vp_chopshop:chopPart' acima),
--- igual às fases avançadas. Não há mais "entrega de peça na bancada" — a bancada só faz craft.
+local ALLOWED_BENCH_MODES = {
+    raw_materials = true,
+    clean_serial  = true,
+    stolen_serial = true,
+}
+
+--- [PHYSICAL CARRY] Processamento de peça física carregada na bancada de trabalho
+lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, entitlementId, mode)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'benchProcess', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
+    benchId = tonumber(benchId)
+    local bench = benchId and benchById(benchId)
+    if not bench then return { ok = false, err = 'bench' } end
+    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
+    if type(entitlementId) ~= 'string' or entitlementId == '' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'invalid_entitlement_param', tostring(entitlementId))
+        end
+        return { ok = false, err = 'invalid' }
+    end
+
+    -- [v1.16 SEC-1.1] Allowlist estrita de modo
+    if type(mode) ~= 'string' or not ALLOWED_BENCH_MODES[mode] then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'invalid_bench_mode', tostring(mode))
+        end
+        return { ok = false, err = 'invalid_mode' }
+    end
+
+    -- [v1.16 SEC-1.1] Validação preliminar do entitlement ANTES de consumir (para policy de partKey e capacidade de inventário)
+    if not (PartEntitlement and PartEntitlement.Validate and PartEntitlement.Consume) then
+        return { ok = false, err = 'internal' }
+    end
+
+    local okVal, ent = PartEntitlement.Validate(entitlementId, source)
+    if not okVal then
+        if PartEntitlement.LogSuspicious and (ent == 'owner_mismatch' or ent == 'already_consumed') then
+            PartEntitlement.LogSuspicious(source, ent, ('entitlement: %s | bench: %s'):format(tostring(entitlementId), tostring(benchId)))
+        end
+        return { ok = false, err = ent }
+    end
+
+    local partKey = ent.partKey
+    local netId   = ent.sourceNetId or 0
+
+    -- [v1.16 SEC-1.1] Política estrita por partKey: catalisador só aceita raw_materials!
+    if partKey == 'catalytic_converter' and mode ~= 'raw_materials' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'disallowed_mode_for_catalytic', tostring(mode))
+        end
+        return { ok = false, err = 'invalid_mode_for_part' }
+    end
+
+    -- [v1.16 SEC-1.1] Pré-cálculo e validação de capacidade de inventário ANTES do consume irreversível
+    local itemsToGrant = {}
+    if partKey == 'catalytic_converter' then
+        local mats = (Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials) or {
+            copper     = { amount = 4, chance = 1.0 },
+            metalscrap = { amount = 6, chance = 1.0 },
+            steel      = { amount = 2, chance = 1.0 },
+            car_parts  = { amount = 1, chance = 1.0 },
+        }
+        for itemName, cfg in pairs(mats) do
+            local chance = tonumber(cfg.chance) or 1.0
+            if math.random() <= chance then
+                local amt = math.random(1, cfg.amount or 1)
+                itemsToGrant[#itemsToGrant + 1] = { item = itemName, amount = amt }
+            end
+        end
+    else
+        local count = (partKey == 'adv_engine' and 5) or 1
+        if mode == 'raw_materials' then
+            if partKey == 'adv_engine' then
+                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 8 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 6 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'aluminum', amount = 4 }
+            elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
+                for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
+                    local chance = tonumber(cfg.chance) or 1.0
+                    if math.random() <= chance then
+                        local amt = math.random(1, (cfg.amount or 1) * 2)
+                        itemsToGrant[#itemsToGrant + 1] = { item = itemName, amount = amt }
+                    end
+                end
+                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 4 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 2 }
+            else
+                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 6 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 3 }
+                itemsToGrant[#itemsToGrant + 1] = { item = 'aluminum', amount = 2 }
+            end
+        elseif mode == 'clean_serial' then
+            local meta = { state = 'scratched', sourceModel = 'CLEAN_PART' }
+            itemsToGrant[#itemsToGrant + 1] = { item = 'car_parts', amount = count, mode = mode, metadata = meta }
+        elseif mode == 'stolen_serial' then
+            itemsToGrant[#itemsToGrant + 1] = { item = 'car_parts', amount = count, mode = mode }
+        end
+    end
+
+    -- [v1.16 SEC-1.2] Checa se o inventário suporta receber todos os itens antes de alterar o estado do entitlement
+    for _, reward in ipairs(itemsToGrant) do
+        local can = false
+        if type(InvCanCarry) == 'function' then
+            can = InvCanCarry(source, reward.item, reward.amount, reward.metadata)
+        end
+        if not can then
+            return { ok = false, err = 'inventory_full' }
+        end
+    end
+
+    -- [v1.16 SEC-1] Agora que a capacidade e o modo foram validados, consome atomicamente o entitlement
+    local res = PartEntitlement.Consume(entitlementId, source, 'bench_' .. tostring(mode))
+    if not res.ok then
+        return { ok = false, err = res.err }
+    end
+
+    -- [v1.16 SEC-1.2] Entrega e verificação rigorosa do resultado real de todas as operações de inventário
+    local anyFailed = false
+    for _, reward in ipairs(itemsToGrant) do
+        local okAdd = false
+        if reward.mode == 'clean_serial' then
+            if Config.PartSerial and Config.PartSerial.Enable then
+                local meta = reward.metadata or { state = 'scratched', sourceModel = 'CLEAN_PART' }
+                local resAdd = exports.ox_inventory:AddItem(source, 'car_parts', reward.amount, meta)
+                okAdd = (resAdd ~= nil and resAdd ~= false)
+            else
+                okAdd = InvAdd(source, 'car_parts', reward.amount)
+            end
+        elseif reward.mode == 'stolen_serial' then
+            okAdd = VPChopAddStolenCarParts(source, netId, reward.amount)
+        else
+            okAdd = InvAdd(source, reward.item, reward.amount)
+        end
+
+        if not okAdd then
+            anyFailed = true
+            print(('[vp_chopshop][bench] CRITICAL: AddItem failed post-consume for src %d (item: %s, amount: %d, entitlement: %s)'):format(source, reward.item, reward.amount, tostring(entitlementId)))
+        end
+    end
+
+    if anyFailed then
+        -- Fail-closed post-consume: o entitlement já foi consumido para impedir dupes.
+        -- O jogador é notificado de falha parcial para suporte administrativo.
+        TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = L('reward_inv_full_partial') })
+        return { ok = true, partial_failure = true }
+    end
+
+    return { ok = true }
+end)
+
+local _catalyticThefts    = {} -- [src] = { token, netId, startedAt, minDurationMs, expiresAt }
+local _catalyticCompleted = {} -- [token] = { entitlementId, completedAt }
+
+local CATALYTIC_REPLAY_TTL_MS = 120000 -- 120s TTL para resultado de replay
+
+CreateThread(function()
+    while true do
+        Wait(60000)
+        local now = GetGameTimer()
+        for tok, entry in pairs(_catalyticCompleted) do
+            if (now - entry.completedAt) > CATALYTIC_REPLAY_TTL_MS then
+                _catalyticCompleted[tok] = nil
+            end
+        end
+    end
+end)
+
+AddEventHandler('playerDropped', function()
+    local src = source
+    _catalyticThefts[src] = nil
+end)
+
+--- [v1.16 SEC-1.1 CAT-ACTION] Início do furto de catalisador (Server Timing Enforced)
+lib.callback.register('vp_chopshop:catalytic:start', function(source, netId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return { ok = false, err = 'vehicle' } end
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
+
+    if not ValidatePlayerNearVehicle(source, veh, 4.0) then return { ok = false, err = 'distance' } end
+    if not VPChopHasTool(source, false) then return { ok = false, err = 'no_saw' } end
+
+    -- [ANTI-EXPLOIT] Bloqueia roubar o catalisador do próprio carro pessoal
+    if Config.CatalyticTheft and Config.CatalyticTheft.BlockOwnVehicle then
+        if BridgeIsPlayerVehicleOwner and BridgeIsPlayerVehicleOwner(source, veh) then
+            return { ok = false, err = 'own_vehicle' }
+        end
+    end
+
+    if Entity(veh).state.catalyticStolen == true then
+        return { ok = false, err = 'catalytic_already_stolen' }
+    end
+
+    local tName, tCfg = nil, nil
+    if type(VPChopGetPlayerTool) == 'function' then
+        tName, tCfg = VPChopGetPlayerTool(source)
+    end
+    local speedMult = (tCfg and tonumber(tCfg.speedMult)) or 1.0
+    local baseMs = (Config.CatalyticTheft and Config.CatalyticTheft.ProgressMs) or 7000
+    local minDurationMs = math.floor(baseMs * speedMult)
+    local now = GetGameTimer()
+
+    local token = ('cat_th:%d:%d'):format(source, now)
+    _catalyticThefts[source] = {
+        token         = token,
+        netId         = netId,
+        startedAt     = now,
+        minDurationMs = minDurationMs,
+        expiresAt     = now + minDurationMs + 8000,
+    }
+
+    return { ok = true, token = token, durationMs = minDurationMs }
+end)
+
+--- [v1.16 SEC-1.1 / SEC-1.2 / SEC-1.3 CAT-ACTION] Conclusão do furto de catalisador (Replay Idempotente + TTL + Token Identity)
+lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, token)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if type(token) ~= 'string' or token == '' then return { ok = false, err = 'invalid' } end
+
+    local now = GetGameTimer()
+
+    -- [v1.16 SEC-1.2 / SEC-1.3] Replay idempotente com retenção de resultado e TTL (120s)
+    local prev = _catalyticCompleted[token]
+    if prev then
+        if (now - prev.completedAt) <= CATALYTIC_REPLAY_TTL_MS then
+            return { ok = true, replay = true, entitlementId = prev.entitlementId, partKey = 'catalytic_converter' }
+        else
+            _catalyticCompleted[token] = nil
+        end
+    end
+
+    local theft = _catalyticThefts[source]
+    if not theft or theft.token ~= token or theft.netId ~= tonumber(netId) then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'catalytic_invalid_session_or_token', tostring(token))
+        end
+        return { ok = false, err = 'invalid' }
+    end
+
+    if now < (theft.startedAt + theft.minDurationMs - 250) then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'catalytic_theft_too_fast', ('elapsed=%d min=%d'):format(now - theft.startedAt, theft.minDurationMs))
+        end
+        return { ok = false, err = 'too_fast' }
+    end
+
+    if now > theft.expiresAt then
+        _catalyticThefts[source] = nil
+        return { ok = false, err = 'expired' }
+    end
+
+    _catalyticThefts[source] = nil
+
+    netId = tonumber(netId)
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
+    if not ValidatePlayerNearVehicle(source, veh, 4.0) then return { ok = false, err = 'distance' } end
+    if not VPChopHasTool(source, false) then return { ok = false, err = 'no_saw' } end
+
+    if Entity(veh).state.catalyticStolen == true then
+        return { ok = false, err = 'catalytic_already_stolen' }
+    end
+
+    Entity(veh).state:set('catalyticStolen', true, true)
+    VPChopConsumeTool(source, false)
+
+    -- [v1.16 SEC-1.2] Emissão autoritativa baseada no theft token (imune a reciclagem de netId)
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(('cat:%s'):format(theft.token), source, 'catalytic_converter', netId, { origin = 'theft' })
+    end
+    TriggerEvent(VPChopEvt.PART_CHOPPED, source, netId, 'catalytic_converter', 1)
+
+    -- Retém resultado terminal para replay idempotente
+    _catalyticCompleted[token] = {
+        entitlementId = peId,
+        completedAt   = now,
+    }
+
+    return { ok = true, entitlementId = peId, partKey = 'catalytic_converter' }
+end)
+
+--- [CATALYTIC THEFT] Venda de catalisador carregado diretamente no Fence NPC
+lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source, entitlementId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'fenceSell', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
+    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
+    if loc and loc.coords and not ValidatePlayerNearCoords(source, loc.coords, 6.0) then
+        return { ok = false, err = 'distance' }
+    end
+
+    if type(entitlementId) ~= 'string' or entitlementId == '' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'fence_invalid_entitlement_param', tostring(entitlementId))
+        end
+        return { ok = false, err = 'invalid' }
+    end
+
+    -- [v1.16 SEC-1] Consome atomicamente o entitlement de catalisador ANTES de adicionar dinheiro
+    if PartEntitlement and PartEntitlement.Consume then
+        local res = PartEntitlement.Consume(entitlementId, source, 'fence_sell_catalytic', 'catalytic_converter')
+        if not res.ok then
+            if PartEntitlement.LogSuspicious and (res.err == 'owner_mismatch' or res.err == 'already_consumed' or res.err == 'invalid_type') then
+                PartEntitlement.LogSuspicious(source, res.err, ('fence_sell | entitlement: %s'):format(tostring(entitlementId)))
+            end
+            return { ok = false, err = res.err }
+        end
+    else
+        return { ok = false, err = 'internal' }
+    end
+
+    local cfg = (Config.CatalyticTheft and Config.CatalyticTheft.Payout) or { min = 1200, max = 2200 }
+    local minPay = tonumber(cfg.min) or 1200
+    local maxPay = tonumber(cfg.max) or 2200
+    local payout = math.random(minPay, maxPay)
+
+    -- [v1.16 SEC-1.3] Paga via API canônica BridgeAddCash e valida retorno booleano
+    local paid = BridgeAddCash(source, payout, 'chopshop_fence_catalytic')
+    if not paid then
+        local playerKey = (type(ServerChopPlayerKey) == 'function' and ServerChopPlayerKey(source)) or tostring(source)
+        print(('[vp_chopshop][fence] CRITICAL: BridgeAddCash failed post-consume for src %d (playerKey: %s, entitlement: %s, payout: %d)'):format(
+            source, playerKey, tostring(entitlementId), payout
+        ))
+        -- Fail-closed post-consume: o entitlement já foi consumido para impedir dupes.
+        -- Não tenta pagar novamente e não restaura o entitlement.
+        return { ok = false, err = 'payment_failed' }
+    end
+
+    return { ok = true, payout = payout }
+end)
 
 --- [v1.15 PR-D hardening] Retries locais de deleção de mundo. Cada tentativa REVALIDA:
 ---   1. sessão continua COMPLETED (tombstone);
@@ -664,6 +1008,11 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     -- CAR_DISCARDED: 1×, SÓ após o terminal commit.
     TriggerEvent(VPChopEvt.CAR_DISCARDED, source, netId, plate, payout)
 
+    local jackItem = (Config.Jackstand and Config.Jackstand.Item) or 'chopshop_jackstand'
+    if jackItem and type(InvAdd) == 'function' then
+        InvAdd(source, jackItem, 1)
+    end
+
     -- [v1.16 P0.4] persiste no ledger. cleanup_pending = a carcaça ficou no mundo
     -- (del falhou). Se foi deletada agora, a linha ainda serve de barreira até o TTL
     -- (protege contra um netId reciclado rápido no MESMO frame de spawn — improvável,
@@ -730,7 +1079,9 @@ lib.callback.register('vp_chopshop:pickupBench', function(source, benchId)
     if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
 
     local key = ServerChopPlayerKey(source)
-    if bench.placed_by and bench.placed_by ~= key then
+    local isPlacer = not bench.placed_by or bench.placed_by == key
+    local isAdmin = IsPlayerAceAllowed(source, 'command.chopshop_admin')
+    if not isPlacer and not isAdmin then
         return { ok = false, err = 'unauthorized' }
     end
 
@@ -781,7 +1132,9 @@ lib.callback.register('vp_chopshop:pickupWelder', function(source, welderId)
     if not ValidatePlayerNearCoords(source, w.coords) then return { ok = false, err = 'distance' } end
 
     local key = ServerChopPlayerKey(source)
-    if w.placed_by and w.placed_by ~= key then
+    local isPlacer = not w.placed_by or w.placed_by == key
+    local isAdmin = IsPlayerAceAllowed(source, 'command.chopshop_admin')
+    if not isPlacer and not isAdmin then
         return { ok = false, err = 'unauthorized' }
     end
 
@@ -794,16 +1147,33 @@ lib.callback.register('vp_chopshop:pickupWelder', function(source, welderId)
     return { ok = true }
 end)
 
-RegisterCommand('chopbenches', function(src, _)  -- [M2 FIX] Renomeado de 'choplifts' (lifts removidos)
+RegisterCommand('chopbenches', function(src, _)
     if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then return end
-    local lines = { '[vp_chopshop] Benches (' .. #ServerBenches .. '):' }
+    local lines = {
+        ('[vp_chopshop] Bancadas (%d) | Soldadoras (%d):'):format(#ServerBenches, #ServerWelders),
+    }
     for _, bench in ipairs(ServerBenches) do
-        lines[#lines + 1] = ('  id=%-4d  pos=%.1f,%.1f,%.1f  by=%s'):format(
+        lines[#lines + 1] = ('  [BENCH]  id=%-4d pos=%.1f,%.1f,%.1f by=%s'):format(
             bench.id, bench.coords.x, bench.coords.y, bench.coords.z,
             tostring(bench.placed_by or '?'))
     end
-    print(table.concat(lines, '\n'))
-end, true)
+    for _, w in ipairs(ServerWelders) do
+        lines[#lines + 1] = ('  [WELDER] id=%-4d pos=%.1f,%.1f,%.1f by=%s'):format(
+            w.id, w.coords.x, w.coords.y, w.coords.z,
+            tostring(w.placed_by or '?'))
+    end
+    local msg = table.concat(lines, '\n')
+    if src == 0 then
+        print(msg)
+    else
+        print(msg)
+        TriggerClientEvent('ox_lib:notify', src, {
+            type = 'inform',
+            title = 'vp_chopshop props',
+            description = ('Bancadas: %d | Soldadoras: %d (detalhes no console F8)'):format(#ServerBenches, #ServerWelders),
+        })
+    end
+end, false)
 
 RegisterCommand('choptest', function(src, args)
     if src == 0 then print('[vp_chopshop] /choptest requer jogador in-game.') return end
@@ -821,7 +1191,6 @@ RegisterCommand('choptest', function(src, args)
         return
     end
 
-    local inv = exports.ox_inventory
     local kit = {
         { item = Config.Items.placeBench,  qty = 1 },
         { item = Config.Items.placeWelder, qty = 1 },
@@ -836,12 +1205,8 @@ RegisterCommand('choptest', function(src, args)
 
     local given, failed = {}, {}
     for _, entry in ipairs(kit) do
-        local result = inv:AddItem(target, entry.item, entry.qty)
-        if Config.Debug then
-            print(('[vp_chopshop] choptest AddItem(%s, %s, %d) → %s'):format(
-                target, entry.item, entry.qty, tostring(result)))
-        end
-        if result and result ~= false then
+        local ok = InvAdd(target, entry.item, entry.qty)
+        if ok then
             given[#given + 1] = entry.item .. ' x' .. entry.qty
         else
             failed[#failed + 1] = entry.item
@@ -865,20 +1230,87 @@ RegisterCommand('choptest', function(src, args)
 end, false)
 
 RegisterCommand('chopremove', function(src, args)
-    if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then return end
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then
+        if src ~= 0 then TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = 'Sem permissão.' }) end
+        return
+    end
     local kind = args[1]
     local id   = tonumber(args[2])
     if not kind or not id then
-        print('[vp_chopshop] Usage: /chopremove bench <id>')
+        local msg = 'Uso: /chopremove <bench|welder> <id>'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'inform', description = msg }) end
         return
     end
-    if kind == 'bench' then
-        if not benchById(id) then print('[vp_chopshop] Bench not found: ' .. id) return end
+    if kind == 'bench' or kind == 'bancada' then
+        if not benchById(id) then
+            local msg = 'Bancada ID ' .. id .. ' não encontrada.'
+            if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = msg }) end
+            return
+        end
         VPChopDbDeleteBench(id)
         removeBenchFromMemory(id)
         broadcastRemoveBench(id)
-        print('[vp_chopshop] Bench ' .. id .. ' removed.')
+        local msg = 'Bancada ID ' .. id .. ' removida do mundo e banco.'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'success', description = msg }) end
+    elseif kind == 'welder' or kind == 'solda' or kind == 'compressor' then
+        if not welderById(id) then
+            local msg = 'Soldadora ID ' .. id .. ' não encontrada.'
+            if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = msg }) end
+            return
+        end
+        VPChopDbDeleteWelder(id)
+        removeWelderFromMemory(id)
+        broadcastRemoveWelder(id)
+        local msg = 'Soldadora ID ' .. id .. ' removida do mundo e banco.'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'success', description = msg }) end
     else
-        print('[vp_chopshop] Usage: /chopremove bench <id>')
+        local msg = 'Uso: /chopremove <bench|welder> <id>'
+        if src == 0 then print('[vp_chopshop] ' .. msg) else TriggerClientEvent('ox_lib:notify', src, { type = 'inform', description = msg }) end
     end
-end, true)
+end, false)
+
+RegisterCommand('chopclear', function(src, args)
+    if src ~= 0 and not IsPlayerAceAllowed(src, 'command.chopshop_admin') then
+        if src ~= 0 then TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = 'Sem permissão.' }) end
+        return
+    end
+
+    local filter = args[1] or 'all'
+    local benchesRemoved, weldersRemoved = 0, 0
+
+    if filter == 'all' or filter == 'bench' or filter == 'benches' or filter == 'bancada' then
+        local benchIds = {}
+        for _, b in ipairs(ServerBenches) do benchIds[#benchIds + 1] = b.id end
+        for _, id in ipairs(benchIds) do
+            VPChopDbDeleteBench(id)
+            removeBenchFromMemory(id)
+            broadcastRemoveBench(id)
+            benchesRemoved = benchesRemoved + 1
+        end
+    end
+
+    if filter == 'all' or filter == 'welder' or filter == 'welders' or filter == 'solda' or filter == 'compressor' then
+        local welderIds = {}
+        for _, w in ipairs(ServerWelders) do welderIds[#welderIds + 1] = w.id end
+        for _, id in ipairs(welderIds) do
+            VPChopDbDeleteWelder(id)
+            removeWelderFromMemory(id)
+            broadcastRemoveWelder(id)
+            weldersRemoved = weldersRemoved + 1
+        end
+    end
+
+    TriggerClientEvent('vp_chopshop:client:clearWorldProps', -1, filter)
+
+    local msg = ('[vp_chopshop] Limpeza concluída: %d bancada(s) e %d soldadora(s) removidas.'):format(benchesRemoved, weldersRemoved)
+    if src == 0 then
+        print(msg)
+    else
+        TriggerClientEvent('ox_lib:notify', src, {
+            type = 'success',
+            title = 'vp_chopshop admin',
+            description = ('Removidos: %d bancada(s), %d soldadora(s)'):format(benchesRemoved, weldersRemoved),
+        })
+        print(('[vp_chopshop] Admin %s executou /chopclear (%s)'):format(GetPlayerName(src), filter))
+    end
+end, false)

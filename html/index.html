@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VP Chopshop Dismantle UI</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="dismantle-app" class="hidden">
+    <!-- Top HUD Banner (Minimalist) -->
+    <header class="hud-header">
+      <div class="hud-title-container">
+        <span class="hud-badge">DESMANCHE</span>
+        <h2 id="hud-title">OPERAÇÃO FÍSICA</h2>
+      </div>
+      <p id="hud-help">Mantenha o clique e gire o mouse ao redor do fixador</p>
+    </header>
+
+    <!-- Hotspots Canvas / Overlay -->
+    <div id="hotspot-container"></div>
+
+    <!-- Bottom Status / Instructions -->
+    <footer class="hud-footer">
+      <div class="progress-bar-container">
+        <div class="progress-label">
+          <span>PROGRESSO TOTAL</span>
+          <span id="overall-progress-text">0%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div id="overall-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+      <div class="hud-controls">
+        <span class="key-tag">ESC</span>
+        <span class="key-desc">CANCELAR</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

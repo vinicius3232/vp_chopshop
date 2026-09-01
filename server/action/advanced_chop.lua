@@ -41,7 +41,20 @@ local function registryValidate(v)
 
     for _, req in ipairs(d.requires or {}) do
         if req.state == 'REMOVED' and not VPChopAdvancedState.wasRemoved(v.sessionId, req.part) then
-            return (req.part == 'bonnet') and 'hood_first' or 'engine_first'
+            local missing = false
+            if req.part == 'bonnet' and v.netId and v.netId > 0 then
+                local veh = NetworkGetEntityFromNetworkId(v.netId)
+                if veh and veh ~= 0 and DoesEntityExist(veh) then
+                    if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
+                        missing = true
+                    elseif type(IsVehicleDoorDamaged) == 'function' and IsVehicleDoorDamaged(veh, 4) then
+                        missing = true
+                    end
+                end
+            end
+            if not missing then
+                return (req.part == 'bonnet') and 'hood_first' or 'engine_first'
+            end
         end
     end
 
@@ -50,6 +63,19 @@ local function registryValidate(v)
 
     if d.gates and d.gates.welder == true and not VPChopWelderNearVehicle(v.netId) then
         return 'no_welder_adv'
+    end
+
+    if v.action == 'adv_engine' and v.netId and v.netId > 0 then
+        if Config.DamageScaling and Config.DamageScaling.Enable then
+            local veh = NetworkGetEntityFromNetworkId(v.netId)
+            if veh and veh ~= 0 and DoesEntityExist(veh) and type(GetVehicleEngineHealth) == 'function' then
+                local eHealth = GetVehicleEngineHealth(veh)
+                local minH = tonumber(Config.DamageScaling.MinEngineHealthToChop) or 150.0
+                if eHealth and eHealth < minH then
+                    return 'engine_destroyed'
+                end
+            end
+        end
     end
     return nil
 end
@@ -75,7 +101,7 @@ ActionSession.RegisterExecutor('adv_door', function(act)
     if type(VPChopAdvDoorCommit) ~= 'function' then return { ok = false, err = 'internal' } end
     local r = VPChopAdvDoorCommit(act.src, act.netId, act.sessionId, act.action)
     if not r.ok then return { ok = false, err = r.err or 'domain' } end
-    return { ok = true, result = { phase = 2, part = act.action } }
+    return { ok = true, result = { phase = 2, part = act.action, partEntitlementId = r.partEntitlementId } }
 end)
 
 -- ─── adv_engine ──────────────────────────────────────────────────────────────
@@ -88,7 +114,7 @@ ActionSession.RegisterExecutor('adv_engine', function(act)
     if type(VPChopAdvEngineCommit) ~= 'function' then return { ok = false, err = 'internal' } end
     local r = VPChopAdvEngineCommit(act.src, act.netId, act.sessionId)
     if not r.ok then return { ok = false, err = r.err or 'domain' } end
-    return { ok = true, result = { phase = 3, part = 'adv_engine' } }
+    return { ok = true, result = { phase = 3, part = 'adv_engine', partEntitlementId = r.partEntitlementId } }
 end)
 
 -- ─── adv_carcass ─────────────────────────────────────────────────────────────

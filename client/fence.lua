@@ -44,6 +44,29 @@ function VPChopIsTruckNearby()
     return _truckNearCache
 end
 
+function VPChopFindNearestTruck(radius)
+    local maxDist = radius or 5.0
+    local ppos = GetEntityCoords(PlayerPedId())
+    local hashes = getTruckHashes()
+    local nearest, minDist = nil, maxDist
+    for _, veh in ipairs(GetGamePool('CVehicle')) do
+        if DoesEntityExist(veh) then
+            local dist = #(ppos - GetEntityCoords(veh))
+            if dist < minDist then
+                local model = GetEntityModel(veh)
+                for _, h in ipairs(hashes) do
+                    if model == h then
+                        nearest = veh
+                        minDist = dist
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return nearest
+end
+
 -- ─── Blip ─────────────────────────────────────────────────────────────────────
 
 local function removeFenceBlip()
@@ -131,7 +154,33 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
             }
         end
 
+local function sellCarriedCatalytic()
+    if not VPChopCarryingPart or VPChopCarryingPart.partKey ~= 'catalytic_converter' then return end
+    local entId = VPChopCarryingPart.entitlementId
+    if not entId then
+        VPChopNotify(L('notify_generic_error'), 'error')
+        return
+    end
+
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellCatalytic', false, entId)
+    if not cbOk or not res or not res.ok then
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
+        return
+    end
+
+    VPChopDropCarryPart()
+    VPChopNotify(L('fence_catalytic_sold_fmt', res.payout or 1500), 'success')
+end
+
         if trust >= 1 then
+            options[#options+1] = {
+                name='vp_fence_sell_catalytic', label=L('fence_sell_catalytic_label'),
+                icon='fa-solid fa-fire-flame-curved', distance=2.5,
+                canInteract=function()
+                    return VPChopCarryingPart and VPChopCarryingPart.partKey == 'catalytic_converter'
+                end,
+                onSelect=function() sellCarriedCatalytic() end,
+            }
             options[#options+1] = {
                 name='vp_fence_sell_items', label=L('fence_target_sell_items'),
                 icon='fa-solid fa-boxes-stacked', distance=2.5,

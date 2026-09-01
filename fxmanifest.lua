@@ -27,6 +27,8 @@ shared_scripts {
     'shared/action_gate.lua',   -- [v1.15 PR-G] predicate ActionSession vs legacy (client+server)
 }
 
+ui_page 'html/index.html'
+
 client_scripts {
     'bridge/client_notify.lua',
     'client/placement.lua',
@@ -41,6 +43,16 @@ client_scripts {
     'client/alarm.lua',
     'client/plates.lua',  -- [FASE1 placas] antes de main.lua (usa VPChopTriggerDispatch dele em runtime)
     'client/tyremarks.lua',  -- [TYRE] marcas de pneu (armar burnout + ox_target da polícia); antes de main.lua
+    -- [UX-A / UX-C / UX-D / UX-E] Módulos do minigame de interação física (carregados antes de main.lua)
+    'client/minigame/camera.lua',
+    'client/minigame/projection.lua',
+    'client/minigame/profiles/panels.lua',
+    'client/minigame/profiles/engine.lua',
+    'client/minigame/profiles/carcass.lua',
+    'client/minigame/profiles.lua',
+    'client/minigame/fallback.lua',
+    'client/minigame/core.lua',
+    'client/minigame/demo.lua',
     'client/main.lua',
 }
 
@@ -98,6 +110,9 @@ server_scripts {
     'server/logistics/tyre_entitlement.lua',
     'server/logistics/truck_storage.lua',
     'server/logistics/tyre_entitlement_spec.lua',  -- self-gated
+    -- [v1.16 SEC-1] logística física de peças de carro e catalisador: entitlement autoritativo
+    'server/logistics/part_entitlement.lua',
+    'server/logistics/part_entitlement_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
     -- [v1.15 PR-F] ActionSession core (autorização temporal + commit). Depois da
     -- ChopSession; usa VPChopHasTool/VPChopChopPartCommit em runtime (main.lua carrega
     -- depois). O executor de domínio (base_tyre) carrega DEPOIS de main.lua.
@@ -122,6 +137,7 @@ server_scripts {
     -- progression.lua (VPChopGetProgression) e bridges (Inv*, Bridge*, IsValidSource);
     -- ANTES de advanced_chop.lua (que usa VPChopAddStolenCarParts) e main.lua.
     'server/partserial.lua',
+    'server/partserial_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
     -- [FASE1 placas] depois de heat.lua e progression.lua (usa VPChopMDT, Validate*, Inv*,
     -- VPChopEvt e o listener de PART_CHOPPED da progressão), antes de main.lua.
     'server/plates.lua',
@@ -148,4 +164,5 @@ server_scripts {
 files {
     'installation/ox_items_snippet.txt',
     'sounds/*.ogg',
+    'html/**',
 }

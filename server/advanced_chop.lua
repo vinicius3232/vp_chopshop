@@ -120,13 +120,24 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
     if mDup then return { ok = false, err = 'done' } end
     advMarkCooldown(src)
 
-    giveReward(src, netId, Config.AdvancedChop.DoorReward or { item = 'car_parts', amount = 1 })
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(sessionId, src, partKey, netId, { origin = 'advanced' })
+    end
+
+    -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, a peça vai para os braços
+    -- e o jogador escolhe como processá-la na bancada (matérias-primas / serial limpo / serial roubado).
+    if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
+        giveReward(src, netId, Config.AdvancedChop.DoorReward or { item = 'car_parts', amount = 1 })
+    end
 
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, partKey, 2)
 
     -- [H4 FIX] breakDoor filtrado por proximidade.
+    local partDef = VPChopPartRegistry.get(partKey)
+    local doorIndex = (partDef and partDef.gtaIndex) or 0
     local ent = NetworkGetEntityFromNetworkId(netId)
     local bpos = (ent and ent ~= 0 and DoesEntityExist(ent)) and GetEntityCoords(ent) or nil
     for _, pid in ipairs(GetPlayers()) do
@@ -137,15 +148,26 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
                 local pped = GetPlayerPed(pidN)
                 send = pped and pped ~= 0 and #(GetEntityCoords(pped) - bpos) < 150.0
             end
-            if send then TriggerClientEvent('vp_chopshop:adv:breakDoor', pidN, netId, partKey, partDef.index) end
+            if send then TriggerClientEvent('vp_chopshop:adv:breakDoor', pidN, netId, partKey, doorIndex) end
         end
     end
-    return { ok = true }
+    return { ok = true, partEntitlementId = peId }
 end
 
 ---@return { ok:boolean, err:string|nil }
 function VPChopAdvEngineCommit(src, netId, sessionId)
-    if not VPChopAdvancedState.wasRemoved(sessionId, 'bonnet') then return { ok = false, err = 'hood_first' } end
+    local bonnetDone = VPChopAdvancedState.wasRemoved(sessionId, 'bonnet')
+    if not bonnetDone and netId and netId > 0 then
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        if veh and veh ~= 0 and DoesEntityExist(veh) then
+            if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
+                bonnetDone = true
+            elseif type(IsVehicleDoorDamaged) == 'function' and IsVehicleDoorDamaged(veh, 4) then
+                bonnetDone = true
+            end
+        end
+    end
+    if not bonnetDone then return { ok = false, err = 'hood_first' } end
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'done' } end
     if not VPChopConsumeTool(src, true) then return { ok = false, err = 'no_screwdriver' } end
 
@@ -154,12 +176,58 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
     if mDup then return { ok = false, err = 'done' } end
     advMarkCooldown(src)
 
-    giveReward(src, netId, Config.AdvancedChop.EngineReward or { item = 'car_parts', amount = 5 })
+    -- [UX-D Damage Scaling] Recompensa do motor ajustada pelo dano físico (EngineHealth)
+    local baseParts = (Config.AdvancedChop and Config.AdvancedChop.EngineReward and Config.AdvancedChop.EngineReward.amount) or 5
+    local finalParts = baseParts
+    local scrapBonus = 0
+
+    if Config.DamageScaling and Config.DamageScaling.Enable and netId and netId > 0 then
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        if veh and veh ~= 0 and DoesEntityExist(veh) and type(GetVehicleEngineHealth) == 'function' then
+            local eHealth = GetVehicleEngineHealth(veh)
+            local minH = tonumber(Config.DamageScaling.MinEngineHealthToChop) or 150.0
+            if eHealth and eHealth < minH then
+                finalParts = 0
+                scrapBonus = 6
+                TriggerClientEvent('ox_lib:notify', src, {
+                    type = 'warning',
+                    title = L('notify_title') or 'Chop Shop',
+                    description = L('err_engine_destroyed')
+                })
+            elseif Config.DamageScaling.ScaleEngineRewards and eHealth and eHealth < 950.0 then
+                local healthRatio = math.max(0.2, math.min(1.0, eHealth / 1000.0))
+                finalParts = math.max(1, math.floor(baseParts * healthRatio))
+                local lostParts = baseParts - finalParts
+                scrapBonus = lostParts * 2
+                TriggerClientEvent('ox_lib:notify', src, {
+                    type = 'inform',
+                    title = L('notify_title') or 'Chop Shop',
+                    description = L('notify_engine_scaled')
+                })
+            end
+        end
+    end
+
+    local peId = nil
+    if PartEntitlement and PartEntitlement.Issue then
+        peId = PartEntitlement.Issue(sessionId, src, 'adv_engine', netId, { origin = 'advanced' })
+    end
+
+    -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, o bloco do motor vai para os braços
+    -- e o jogador escolhe como processá-lo na bancada (matérias-primas / serial limpo / serial roubado).
+    if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
+        if finalParts > 0 then
+            giveReward(src, netId, { item = 'car_parts', amount = finalParts })
+        end
+        if scrapBonus > 0 then
+            giveReward(src, netId, { item = 'metalscrap', amount = scrapBonus })
+        end
+    end
 
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_engine', 3)
-    return { ok = true }
+    return { ok = true, partEntitlementId = peId }
 end
 
 ---@return { ok:boolean, err:string|nil }
@@ -167,6 +235,19 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     if not VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'engine_first' } end
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_carcass') then return { ok = false, err = 'done' } end
     if not VPChopWelderNearVehicle(netId) then return { ok = false, err = 'no_welder_adv' } end
+
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    local model = (veh and veh ~= 0 and DoesEntityExist(veh)) and GetEntityModel(veh) or 0
+
+    -- [v1.16 SEC-1.1] Barreira persistente anti-rechop / double-carcass
+    if VPChopCarcassLedger and VPChopCarcassLedger.alreadyProcessed and model ~= 0 then
+        if VPChopCarcassLedger.alreadyProcessed(netId, model) then
+            return { ok = false, err = 'done' }
+        end
+    end
+    if veh and veh ~= 0 and DoesEntityExist(veh) and Entity(veh).state.vpChopCarcassDone == true then
+        return { ok = false, err = 'done' }
+    end
 
     local mOk, mDup = VPChopAdvancedState.markPart(sessionId, src, 'adv_carcass')
     if not mOk then return { ok = false, err = 'session' } end
@@ -189,6 +270,31 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_carcass', 4)
+
+    -- [UX-E Terminal Chassis Destruction]
+    local stillExists = false
+    if veh and veh ~= 0 and DoesEntityExist(veh) then
+        Entity(veh).state:set('vpChopCarcassDone', true, true)
+        if type(BridgeDeleteWorldVehicle) == 'function' then
+            BridgeDeleteWorldVehicle(veh)
+        else
+            DeleteEntity(veh)
+        end
+        stillExists = (veh ~= 0 and DoesEntityExist(veh) == true)
+    end
+
+    -- [v1.16 SEC-1.1] Grava no CarcassLedger persistente para bloquear repetição mesmo pós restart
+    if VPChopCarcassLedger and VPChopCarcassLedger.mark and model ~= 0 then
+        local s = type(ChopSession) == 'table' and ChopSession.Get and ChopSession.Get(sessionId)
+        local vsid = s and s.vehicle and s.vehicle.identity or nil
+        VPChopCarcassLedger.mark(netId, model, vsid, 'carcass', ServerChopPlayerKey(src), stillExists)
+    end
+
+    local jackItem = (Config.Jackstand and Config.Jackstand.Item) or 'chopshop_jackstand'
+    if jackItem and type(InvAdd) == 'function' then
+        InvAdd(src, jackItem, 1)
+    end
+
     return { ok = true }
 end
 
@@ -254,8 +360,18 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     if not ValidatePlayerNearPoint(src, vehCoords, 6.0) then return { ok = false, err = 'distance' } end
 
     sessionId = resolveSession(sessionId, netId, src)
-    if not sessionId then return { ok = false, err = 'session' } end
-    if not VPChopAdvancedState.wasRemoved(sessionId, 'bonnet') then return { ok = false, err = 'hood_first' } end
+    local bonnetDone = VPChopAdvancedState.wasRemoved(sessionId, 'bonnet')
+    if not bonnetDone and netId and netId > 0 then
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        if veh and veh ~= 0 and DoesEntityExist(veh) then
+            if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
+                bonnetDone = true
+            elseif type(IsVehicleDoorDamaged) == 'function' and IsVehicleDoorDamaged(veh, 4) then
+                bonnetDone = true
+            end
+        end
+    end
+    if not bonnetDone then return { ok = false, err = 'hood_first' } end
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_engine') then return { ok = false, err = 'done' } end
     if not VPChopHasTool(src, true) then return { ok = false, err = 'no_screwdriver' } end
 
