@@ -122,30 +122,30 @@ local function focusCarcassPoint(vehicle, pointId)
     local camPos, lookAt, fov = nil, nil, 42.0
 
     if pointId == 'carcass_crossmember_f' then
-        -- 1. Travessa Dianteira: enquadramento frontal focado no radiador/longarinas dianteiras
-        camPos = getOffset(vehicle, -w * 0.70, maxDim.y + 0.85, maxDim.z + 0.90)
-        lookAt = getOffset(vehicle, 0.0, maxDim.y - 0.15, minDim.z + 0.35)
-        fov = 40.0
+        -- 1. Travessa Dianteira: enquadramento frontal elevado
+        camPos = getOffset(vehicle, -w * 0.90, maxDim.y + 1.10, maxDim.z + 1.15)
+        lookAt = getOffset(vehicle, 0.0, maxDim.y - 0.10, minDim.z + 0.35)
+        fov = 44.0
     elseif pointId == 'carcass_pillar_l' then
-        -- 2. Coluna Lateral Esq: enquadramento lateral esquerdo da soleira/coluna A e B
-        camPos = getOffset(vehicle, -w * 1.30, cLocal.y - (len * 0.05), maxDim.z + 0.75)
+        -- 2. Coluna Lateral Esq: enquadramento lateral esquerdo elevado
+        camPos = getOffset(vehicle, -w * 1.45, cLocal.y - (len * 0.05), maxDim.z + 1.05)
         lookAt = getOffset(vehicle, -w * 0.45, cLocal.y - (len * 0.04), minDim.z + 0.45)
-        fov = 40.0
+        fov = 44.0
     elseif pointId == 'carcass_pillar_r' then
-        -- 3. Coluna Lateral Dir: enquadramento lateral direito da soleira/coluna A e B
-        camPos = getOffset(vehicle, w * 1.30, cLocal.y - (len * 0.05), maxDim.z + 0.75)
+        -- 3. Coluna Lateral Dir: enquadramento lateral direito elevado
+        camPos = getOffset(vehicle, w * 1.45, cLocal.y - (len * 0.05), maxDim.z + 1.05)
         lookAt = getOffset(vehicle, w * 0.45, cLocal.y - (len * 0.04), minDim.z + 0.45)
-        fov = 40.0
+        fov = 44.0
     elseif pointId == 'carcass_floor_cross' then
-        -- 4. Túnel do Assoalho: enquadramento três-quartos elevado diretamente para o interior do assoalho
-        camPos = getOffset(vehicle, -w * 0.85, cLocal.y - (len * 0.25), maxDim.z + 1.10)
+        -- 4. Túnel do Assoalho: enquadramento superior do interior do assoalho
+        camPos = getOffset(vehicle, -w * 1.05, cLocal.y - (len * 0.15), maxDim.z + 1.35)
         lookAt = getOffset(vehicle, 0.0, cLocal.y - (len * 0.06), minDim.z + 0.30)
-        fov = 38.0
+        fov = 42.0
     elseif pointId == 'carcass_crossmember_r' then
-        -- 5. Longarina Traseira: enquadramento traseiro da suspensão/chassi traseiro
-        camPos = getOffset(vehicle, -w * 0.70, minDim.y - 0.85, maxDim.z + 0.90)
-        lookAt = getOffset(vehicle, 0.0, minDim.y + 0.20, minDim.z + 0.38)
-        fov = 40.0
+        -- 5. Longarina Traseira: enquadramento traseiro elevado
+        camPos = getOffset(vehicle, -w * 0.90, minDim.y - 1.10, maxDim.z + 1.15)
+        lookAt = getOffset(vehicle, 0.0, minDim.y + 0.15, minDim.z + 0.38)
+        fov = 44.0
     else
         camPos, lookAt = calculateCarcassCamera(vehicle)
         fov = 48.0

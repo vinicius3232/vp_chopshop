@@ -174,15 +174,31 @@
           const w = window.innerWidth;
           const h = window.innerHeight;
           let d = '';
+          let allNodesVisible = true;
           pathNodes.forEach((node, i) => {
+            if (node.visible === false) {
+              allNodesVisible = false;
+            }
             const px = (node.x || 0.5) * w;
             const py = (node.y || 0.5) * h;
             d += (i === 0 ? `M ${px} ${py} ` : `L ${px} ${py} `);
             if (i === 0 && startNode) {
-              startNode.style.left = `${px}px`;
-              startNode.style.top = `${py}px`;
+              if (node.visible !== false) {
+                startNode.style.display = 'flex';
+                startNode.style.left = `${px}px`;
+                startNode.style.top = `${py}px`;
+              } else {
+                startNode.style.display = 'none';
+              }
             }
           });
+          if (!allNodesVisible) {
+            bgPath.style.display = 'none';
+            fgPath.style.display = 'none';
+            return;
+          }
+          bgPath.style.display = 'block';
+          fgPath.style.display = 'block';
           bgPath.setAttribute('d', d);
           fgPath.setAttribute('d', d);
           const totalLen = fgPath.getTotalLength ? fgPath.getTotalLength() : 500;
