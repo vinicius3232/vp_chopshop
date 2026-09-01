@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (empilhada sobre `pr-h`)
+**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (HEAD: `7a3de41`, base de PR #40)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1031 PASS / 0 FAIL / 1031 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1087 PASS / 0 FAIL / 1087 asserts**
 
 ---
 
@@ -31,6 +31,12 @@ PHYS-2 — Workbench Part Dismantling     ✅ TESTADO IN-GAME (OK)  (ffe26e5)
 DMG-1  — Damage Health Scaling (Motor)  ✅ TESTADO IN-GAME (OK)  (bedfb9a)
 CAT-1  — Catalytic Converter Theft      ✅ TESTADO IN-GAME (OK)  (3feab7a)
 OWN-1  — Player-Vehicle Theft & Anti-Exp✅ TESTADO IN-GAME (OK)  (b39dd5e)
+─────────────────────────────────────────────────────────────────────────
+Hardening de Segurança & Autoridade Econômica:
+SEC-1  — Part Entitlement Core Authority✅ HOMOLOGADO & MERGED   (#41)
+         (Bench Server Authority, Fence Tokenized Sale, Strict Mode Allowlist,
+          Fail-Closed InvCanCarry, Catalytic 2-step Server Timing & Replay TTL,
+          Carcass Statebag Fail-safe, Canonical BridgeAddCash Payment)
 ─────────────────────────────────────────────────────────────────────────
 Fase 3 — Processamento de Peça Avançado  ✅ EM ANDAMENTO / INTEGRADO
 Fase 4 — Camada de Crime & Perícia       ⏸
