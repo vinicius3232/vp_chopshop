@@ -850,6 +850,22 @@ Config.AdvancedChop = {
     },
 }
 
+--- Sistema de dano físico e escala de recompensas (motor e pneus).
+Config.DamageScaling = {
+    Enable = true,
+
+    --- Vida mínima do motor (0.0 a 1000.0) para permitir reaproveitamento como peças.
+    --- Se estiver abaixo deste valor, o motor é considerado destruído/fundido.
+    MinEngineHealthToChop = 150.0,
+
+    --- Escala as peças de motor (car_parts) proporcionalmente à integridade do motor (1000 HP = 100%).
+    --- A diferença é convertida em sucata de metal (metalscrap).
+    ScaleEngineRewards = true,
+
+    --- Se falso, impede roubar pneus estourados/furados como item intacto de revenda.
+    AllowBurstTyreTheft = false,
+}
+
 Config.Jackstand = {
     Enable = true,
 

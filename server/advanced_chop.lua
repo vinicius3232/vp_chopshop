@@ -167,7 +167,44 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
     if mDup then return { ok = false, err = 'done' } end
     advMarkCooldown(src)
 
-    giveReward(src, netId, Config.AdvancedChop.EngineReward or { item = 'car_parts', amount = 5 })
+    -- [UX-D Damage Scaling] Recompensa do motor ajustada pelo dano físico (EngineHealth)
+    local baseParts = (Config.AdvancedChop and Config.AdvancedChop.EngineReward and Config.AdvancedChop.EngineReward.amount) or 5
+    local finalParts = baseParts
+    local scrapBonus = 0
+
+    if Config.DamageScaling and Config.DamageScaling.Enable and netId and netId > 0 then
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        if veh and veh ~= 0 and DoesEntityExist(veh) and type(GetVehicleEngineHealth) == 'function' then
+            local eHealth = GetVehicleEngineHealth(veh)
+            local minH = tonumber(Config.DamageScaling.MinEngineHealthToChop) or 150.0
+            if eHealth and eHealth < minH then
+                finalParts = 0
+                scrapBonus = 6
+                TriggerClientEvent('ox_lib:notify', src, {
+                    type = 'warning',
+                    title = L('notify_title') or 'Chop Shop',
+                    description = L('err_engine_destroyed')
+                })
+            elseif Config.DamageScaling.ScaleEngineRewards and eHealth and eHealth < 950.0 then
+                local healthRatio = math.max(0.2, math.min(1.0, eHealth / 1000.0))
+                finalParts = math.max(1, math.floor(baseParts * healthRatio))
+                local lostParts = baseParts - finalParts
+                scrapBonus = lostParts * 2
+                TriggerClientEvent('ox_lib:notify', src, {
+                    type = 'inform',
+                    title = L('notify_title') or 'Chop Shop',
+                    description = L('notify_engine_scaled')
+                })
+            end
+        end
+    end
+
+    if finalParts > 0 then
+        giveReward(src, netId, { item = 'car_parts', amount = finalParts })
+    end
+    if scrapBonus > 0 then
+        giveReward(src, netId, { item = 'metalscrap', amount = scrapBonus })
+    end
 
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end

@@ -64,6 +64,19 @@ local function registryValidate(v)
     if d.gates and d.gates.welder == true and not VPChopWelderNearVehicle(v.netId) then
         return 'no_welder_adv'
     end
+
+    if v.action == 'adv_engine' and v.netId and v.netId > 0 then
+        if Config.DamageScaling and Config.DamageScaling.Enable then
+            local veh = NetworkGetEntityFromNetworkId(v.netId)
+            if veh and veh ~= 0 and DoesEntityExist(veh) and type(GetVehicleEngineHealth) == 'function' then
+                local eHealth = GetVehicleEngineHealth(veh)
+                local minH = tonumber(Config.DamageScaling.MinEngineHealthToChop) or 150.0
+                if eHealth and eHealth < minH then
+                    return 'engine_destroyed'
+                end
+            end
+        end
+    end
     return nil
 end
 

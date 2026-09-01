@@ -1692,6 +1692,16 @@ local function doAdvChopEngine(veh, netId)
         VPChopNotify(L('err_hood_first') or 'Remova o capô primeiro.', 'error')
         return
     end
+
+    if Config.DamageScaling and Config.DamageScaling.Enable then
+        local eHealth = GetVehicleEngineHealth(veh)
+        local minH = tonumber(Config.DamageScaling.MinEngineHealthToChop) or 150.0
+        if eHealth and eHealth < minH then
+            VPChopNotify(L('err_engine_destroyed') or 'Motor totalmente destruído/fundido.', 'error')
+            return
+        end
+    end
+
     local tName, tCfg = getPlayerTool('drill')
     if not tName then VPChopNotify(L('notify_no_drill'), 'error'); return end
     JackstandBusy = true
@@ -1899,9 +1909,12 @@ local function addRaisedCarTargets(veh)
                 bones    = { tBone },
                 distance = 3.0,
                 canInteract = function()
+                    local burst = isPartMissing(veh, def)
+                    local allowBurst = (Config.DamageScaling and Config.DamageScaling.AllowBurstTyreTheft) or false
                     return JackstandData[veh] ~= nil
                         and not JackstandBusy
                         and math.abs(GetVehicleWheelXOffset(veh, tSeqIdx)) < 300.0
+                        and (allowBurst or not burst)
                 end,
                 onSelect = function()
                     doJackstandTyreSteal(veh, tSeqIdx, tKey)
