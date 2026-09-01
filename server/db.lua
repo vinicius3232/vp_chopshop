@@ -169,6 +169,35 @@ function VPChopDbInit()
                     INDEX `idx_contracts_global` (`for_identifier`, `state`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [v1.17 BROKER-4] Workshop Bridge & Persistent SAGA Journal.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_workshop_journal` (
+                    `txn_id`          VARCHAR(80)       NOT NULL,
+                    `provider`        VARCHAR(40)       NOT NULL,
+                    `player_key`      VARCHAR(60)       NOT NULL,
+                    `asset_kind`      VARCHAR(24)       NOT NULL,
+                    `entitlement_id`  VARCHAR(96)       NULL DEFAULT NULL,
+                    `stable_part_id`  VARCHAR(128)      NOT NULL,
+                    `part_key`        VARCHAR(50)       NOT NULL,
+                    `price`           INT UNSIGNED      NOT NULL,
+                    `state`           VARCHAR(20)       NOT NULL,
+                    `reconcile_count` TINYINT UNSIGNED  NOT NULL DEFAULT 0,
+                    `metadata`        TEXT              NULL DEFAULT NULL,
+                    `created_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`txn_id`),
+                    INDEX `idx_workshop_state` (`state`),
+                    INDEX `idx_workshop_stable` (`stable_part_id`),
+                    INDEX `idx_workshop_player` (`player_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
+            -- Migração idempotente para tabelas criadas em rascunhos anteriores
+            pcall(function()
+                MySQL.query.await('ALTER TABLE `vp_chop_workshop_journal` ADD COLUMN `asset_kind` VARCHAR(24) NOT NULL AFTER `player_key`')
+            end)
+            pcall(function()
+                MySQL.query.await('ALTER TABLE `vp_chop_workshop_journal` ADD COLUMN `stable_part_id` VARCHAR(128) NOT NULL AFTER `entitlement_id`')
+            end)
             VPChopDBReady = true
             TriggerEvent('vp_chopshop:server:dbReady')
         end)
