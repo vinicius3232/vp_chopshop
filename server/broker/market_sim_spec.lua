@@ -1,13 +1,18 @@
 -- server/broker/market_sim_spec.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.17 BROKER-1] DYNAMIC MARKET PRICING & ECONOMIC SIMULATION ENGINE SPECS
+--  [v1.17 BROKER-1.1] DYNAMIC MARKET PRICING & ECONOMIC SIMULATION ENGINE SPECS
 --  Self-gated na convar vp_chopshop_selftest 1.
 --
 --  Cobre:
+--    - FXMANIFEST-SELFTEST-01 (preservação simultânea de action_session_spec e market_sim_spec)
 --    - MARKET-01 a MARKET-09 contra o módulo REAL BrokerMarket
+--    - MARKET-PERSIST-01 a 06 (pcall closures, dirty retry, nil result handling, periodic flush seam)
+--    - MARKET-READY-01 e 02 (degraded/unavailable policy em caso de falha no DB Init)
+--    - MARKET-CONFIG-ENABLE-01 (fail-closed quando Config.Broker.Enable == false)
 --    - Volume Diminishing Returns Simulation (20 catalytics, 20 engines, 50 tyres, 50 plates, 100 scrap)
 --    - Asymptotic Lazy Time Recovery Simulation (+1h, +3h, +6h, +12h, +24h)
---    - 1.000+ iterações determinísticas de teste de propriedades e invariantes
+--    - 108.000+ iterações determinísticas usando o tier real Config.Progression.FencePriceMult
+--    - SIM-GRID-01 a 07 (invariantes, estatística de ceiling hits, clamp de demandOverride e NaN/Inf guard)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 if (GetConvarInt and GetConvarInt('vp_chopshop_selftest', 0) or 0) ~= 1 then return end
@@ -25,6 +30,32 @@ local function check(name, cond)
 end
 
 local function run()
+    -- ─── FXMANIFEST-SELFTEST-01: Verificação de Registro dos Specs ────────────
+    local fxContent
+    local candidatePaths = {
+        'fxmanifest.lua',
+        './fxmanifest.lua',
+        (_G.BASE_RESOURCE_PATH or '.') .. '/fxmanifest.lua',
+        (_G._HARNESS_BASE or '.') .. '/fxmanifest.lua',
+        '../fxmanifest.lua',
+    }
+    for _, p in ipairs(candidatePaths) do
+        local f = io.open(p, 'r')
+        if f then
+            fxContent = f:read('*a')
+            f:close()
+            break
+        end
+    end
+
+    if fxContent then
+        local hasActionSpec = fxContent:find("server/session/action_session_spec.lua", 1, true) ~= nil
+        local hasMarketSpec = fxContent:find("server/broker/market_sim_spec.lua", 1, true) ~= nil
+        check('FXMANIFEST-SELFTEST-01 fxmanifest.lua registra simultaneamente action_session_spec e market_sim_spec', hasActionSpec and hasMarketSpec)
+    else
+        check('FXMANIFEST-SELFTEST-01 fxmanifest.lua encontrado e validado', false)
+    end
+
     local BM = _G.BrokerMarket
     check('CANARY-MARKET-01 BrokerMarket module exists and is loaded', type(BM) == 'table')
     if not BM then return end
@@ -35,10 +66,19 @@ local function run()
     BM.SetRng(function() return 0.5 end) -- jitter neutro (0.0) por padrão
 
     local mockDb
+    local shouldFailQuery = false
+    local shouldReturnNilQuery = false
+
     mockDb = {
         _rows = {},
         query = {
             await = function(query, params)
+                if shouldFailQuery then
+                    error('SQL_MOCK_SIMULATED_FAILURE')
+                end
+                if shouldReturnNilQuery then
+                    return nil
+                end
                 if query:find('SELECT') then
                     local list = {}
                     for k, v in pairs(mockDb._rows) do
@@ -67,12 +107,17 @@ local function run()
 
     local function resetMarket()
         virtualTime = 1700000000
+        shouldFailQuery = false
+        shouldReturnNilQuery = false
         mockDb._rows = {}
+        Config.Broker.Enable = true
         BM.Init(function() return virtualTime end, mockDb, function() return 0.5 end)
     end
 
     -- ─── MARKET-01: Venda reduz a demanda com pressão de volume ──────────────
     resetMarket()
+    check('MARKET-READY-01 BrokerMarket.IsReady() é true após Init com DB saudável', BM.IsReady() == true)
+
     local snap0 = BM.GetSnapshot('catalytic_converter')
     check('MARKET-01 Demanda inicial de catalytic_converter é 1.0000', math.abs(snap0.demandIndex - 1.0000) < 0.0001)
 
@@ -100,7 +145,6 @@ local function run()
 
     -- ─── MARKET-03: Preço nunca abaixo do Floor em operações elegíveis ───────
     resetMarket()
-    -- Saturar mercado até o floor (0.40) + heat hot (0.75) + tier 1 + trust 1 + -3% jitter
     BM.SetDemand('catalytic_converter', 0.4000, virtualTime)
     local minPriceRes = BM.ResolvePrice('catalytic_converter', {
         demandOverride = 0.4000,
@@ -117,7 +161,7 @@ local function run()
 
     -- ─── MARKET-04: Preço nunca acima do Ceiling em max stack de bônus ───────
     resetMarket()
-    -- Max stack: Demanda 1.30 * Trust 1.50 * Tier 1.50 * Night 1.30 * Jitter +3% (1.03) = ~3.92x base
+    -- Max stack com o multiplicador real: Demanda 1.30 * Trust 1.50 * Tier 1.10 * Night 1.30 * Jitter +3% (1.03) = ~2.87x base
     local maxPriceRes = BM.ResolvePrice('adv_engine', {
         demandOverride = 1.3000,
         trustLevel = 4,
@@ -133,7 +177,6 @@ local function run()
 
     -- ─── MARKET-05: Limites rígidos de demanda (DemandFloor e DemandCeiling) ──
     resetMarket()
-    -- Vender 50 unidades de uma vez (queda de 50 * 0.04 = 2.00)
     local massiveSale = BM.RecordSale('catalytic_converter', 50, virtualTime)
     check('MARKET-05 Venda massiva não derruba demanda abaixo de DemandFloor (0.40)', math.abs(massiveSale.newDemand - 0.4000) < 0.0001)
 
@@ -184,6 +227,81 @@ local function run()
         jitter = 0.50, -- tentativa de forçar jitter excessivo positivo
     })
     check('MARKET-09 Jitter positivo extremo respeita ceiling ($180 * 2.50 = $450)', jitterCeilRes.unitPrice == 450)
+
+    -- ─── MARKET-PERSIST: PERSISTÊNCIA ASSÍNCRONA, RETRY E SEAMS ──────────────
+    resetMarket()
+    -- MARKET-PERSIST-01: Flush manual salva dirty commodity
+    BM.RecordSale('adv_engine', 4, virtualTime) -- dirty = true
+    local saved = BM.Flush(virtualTime)
+    check('MARKET-PERSIST-01 Flush manual salva dirty commodity no MySQL', saved >= 1 and mockDb._rows.adv_engine ~= nil)
+
+    -- MARKET-PERSIST-02: Snapshot persistido sobrevive a restart
+    local reloadBM = _G.BrokerMarket
+    reloadBM.Init(function() return virtualTime end, mockDb, function() return 0.5 end)
+    local restoredSnap = reloadBM.GetSnapshot('adv_engine', virtualTime)
+    check('MARKET-PERSIST-02 Snapshot persistido sobrevive a restart e é recarregado', math.abs(restoredSnap.demandIndex - 0.8000) < 0.0001 and restoredSnap.recentVolume == 4)
+
+    -- MARKET-PERSIST-03: RecordSale -> dirty -> periodic flush -> DB contém novo demand
+    resetMarket()
+    BM.RecordSale('tyre', 10, virtualTime) -- 1.0 - (10 * 0.015) = 0.85
+    check('MARKET-PERSIST-03 DB ainda não tem a linha antes do flush', mockDb._rows.tyre == nil)
+    local periodicFlushed = BM.TriggerPeriodicFlush(virtualTime)
+    check('MARKET-PERSIST-03 TriggerPeriodicFlush grava dirty item', periodicFlushed == 1 and mockDb._rows.tyre ~= nil)
+    check('MARKET-PERSIST-03 DB contém novo demand após periodic flush (0.85)', math.abs(mockDb._rows.tyre.demand_index - 0.8500) < 0.0001)
+
+    -- MARKET-PERSIST-04: DB write falha -> dirty permanece true -> retry posterior funciona
+    resetMarket()
+    BM.RecordSale('stolen_plate', 5, virtualTime)
+    shouldFailQuery = true
+    local failSaved = BM.Flush(virtualTime)
+    check('MARKET-PERSIST-04 Falha de SQL retorna 0 salvos', failSaved == 0)
+    check('MARKET-PERSIST-04 DB não foi atualizado na falha', mockDb._rows.stolen_plate == nil)
+
+    -- Retry com DB restaurado
+    shouldFailQuery = false
+    local retrySaved = BM.Flush(virtualTime)
+    check('MARKET-PERSIST-04 Retry subsequente tem sucesso (dirty foi preservado)', retrySaved == 1 and mockDb._rows.stolen_plate ~= nil)
+
+    -- MARKET-PERSIST-05: Query retorna nil/resultado inválido -> NÃO considerar salvo
+    resetMarket()
+    BM.RecordSale('copper', 4, virtualTime)
+    shouldReturnNilQuery = true
+    local nilSaved = BM.Flush(virtualTime)
+    check('MARKET-PERSIST-05 Query retornando nil rejeita flush', nilSaved == 0)
+    shouldReturnNilQuery = false
+    local recoverNil = BM.Flush(virtualTime)
+    check('MARKET-PERSIST-05 Dirty mantido após retorno nil e salvo no próximo flush', recoverNil == 1 and mockDb._rows.copper ~= nil)
+
+    -- MARKET-PERSIST-06: Restart após flush restaura snapshot de múltiplas commodities
+    resetMarket()
+    BM.RecordSale('metalscrap', 50, virtualTime) -- 1.0 - (50 * 0.002) = 0.90
+    BM.RecordSale('aluminum', 25, virtualTime)   -- 1.0 - (25 * 0.004) = 0.90
+    BM.Flush(virtualTime)
+    BM.Init(function() return virtualTime end, mockDb, function() return 0.5 end)
+    local snapScrap = BM.GetSnapshot('metalscrap', virtualTime)
+    local snapAlum = BM.GetSnapshot('aluminum', virtualTime)
+    check('MARKET-PERSIST-06 Restart restaura snapshot completo', math.abs(snapScrap.demandIndex - 0.9000) < 0.0001 and math.abs(snapAlum.demandIndex - 0.9000) < 0.0001)
+
+    -- ─── DB INIT FAILURE / DEGRADED STATE ────────────────────────────────────
+    resetMarket()
+    shouldFailQuery = true
+    local initOk = BM.Init(function() return virtualTime end, mockDb, function() return 0.5 end)
+    check('MARKET-READY-02 Init com falha no DB retorna false', initOk == false)
+    check('MARKET-READY-02 IsReady() é false em estado degradado', BM.IsReady() == false)
+    local priceDegraded = BM.ResolvePrice('metalscrap', {})
+    check('MARKET-READY-02 ResolvePrice falha closed em estado degradado (market_not_ready)', priceDegraded.ok == false and priceDegraded.err == 'market_not_ready')
+    local saleDegraded = BM.RecordSale('metalscrap', 1, virtualTime)
+    check('MARKET-READY-02 RecordSale falha closed em estado degradado (market_not_ready)', saleDegraded.ok == false and saleDegraded.err == 'market_not_ready')
+    shouldFailQuery = false
+
+    -- ─── CONFIG.BROKER.ENABLE == FALSE ───────────────────────────────────────
+    resetMarket()
+    Config.Broker.Enable = false
+    local disabledPrice = BM.ResolvePrice('metalscrap', {})
+    check('MARKET-CONFIG-ENABLE-01 Config.Broker.Enable=false retorna broker_disabled em ResolvePrice', disabledPrice.ok == false and disabledPrice.err == 'broker_disabled')
+    local disabledSale = BM.RecordSale('metalscrap', 1, virtualTime)
+    check('MARKET-CONFIG-ENABLE-01 Config.Broker.Enable=false retorna broker_disabled em RecordSale', disabledSale.ok == false and disabledSale.err == 'broker_disabled')
+    Config.Broker.Enable = true
 
     -- ─── SIMULAÇÃO 1: CURVA DE VOLUME (DIMINISHING RETURNS) ───────────────────
     resetMarket()
@@ -238,7 +356,7 @@ local function run()
     local d24 = BM.GetDemandIndex('catalytic_converter', virtualTime)
     check('SIM-REC-05 +12h e +24h permanecem perfeitamente estáveis em 1.0000', math.abs(d12 - 1.0000) < 0.0001 and math.abs(d24 - 1.0000) < 0.0001)
 
-    -- ─── SIMULAÇÃO 3: 1.000+ ITERAÇÕES DETERMINÍSTICAS DE PROPRIEDADES ───────
+    -- ─── SIMULAÇÃO 3: 108.000+ ITERAÇÕES COM TIER MULTIPLIER REAL ────────────
     resetMarket()
     local commoditiesList = {
         'catalytic_converter', 'adv_engine', 'tyre', 'stolen_plate',
@@ -317,23 +435,37 @@ local function run()
         end
     end
 
+    local ceilPercentage = (eligibleCount > 0) and ((hitCeilingCount / eligibleCount) * 100.0) or 0.0
+    local floorPercentage = (eligibleCount > 0) and ((hitFloorCount / eligibleCount) * 100.0) or 0.0
+
+    print(('[broker_market/spec] ─── SIMULAÇÃO ESTATÍSTICA 108K ───'))
+    print(('[broker_market/spec] Total Iterações: %d (Elegíveis: %d | Bloqueadas: %d)'):format(iterationsCount, eligibleCount, blockedCount))
+    print(('[broker_market/spec] Hit Floor: %d (%.2f%% dos elegíveis)'):format(hitFloorCount, floorPercentage))
+    print(('[broker_market/spec] Hit Ceiling: %d (%.2f%% dos elegíveis)'):format(hitCeilingCount, ceilPercentage))
+
     check(('SIM-GRID-01 Executadas %d iterações sintéticas (mínimo 1.000)'):format(iterationsCount), iterationsCount >= 1000)
     check('SIM-GRID-02 100% dos invariantes de economia, floor, ceiling e bloqueio mantidos', allInvariantsHold)
     check(('SIM-GRID-03 Transações bloqueadas (%d) mantiveram ZERO payout'):format(blockedCount), blockedCount > 0)
     check(('SIM-GRID-04 Transações elegíveis (%d) contidas no envelope [$Floor, $Ceiling]'):format(eligibleCount), eligibleCount > 0)
+    check(('SIM-GRID-05 Percentual de Ceiling Hits reportado (%.2f%%)'):format(ceilPercentage), true)
 
-    -- ─── PERSISTÊNCIA: FLUSH E BOOTSTRAP ─────────────────────────────────────
-    resetMarket()
-    BM.RecordSale('adv_engine', 4, virtualTime) -- dirty = true
-    local saved = BM.Flush(virtualTime)
-    check('MARKET-PERSIST-01 Flush salva dirty commodity no MySQL', saved >= 1 and mockDb._rows.adv_engine ~= nil)
+    -- ─── SIM-GRID-06: DEMAND OVERRIDE FORA DO RANGE É CLAMPADO ──────────────
+    local overLowRes = BM.ResolvePrice('metalscrap', { demandOverride = -5.0 })
+    check('SIM-GRID-06 demandOverride negativo (-5.0) é clampado no DemandFloor (0.40)', overLowRes.ok == true and math.abs(overLowRes.demand - 0.4000) < 0.0001)
 
-    -- Simulação de restart de resource com re-load do DB
-    local newBMState = {}
-    local reloadBM = _G.BrokerMarket
-    reloadBM.Init(function() return virtualTime end, mockDb, function() return 0.5 end)
-    local restoredSnap = reloadBM.GetSnapshot('adv_engine', virtualTime)
-    check('MARKET-PERSIST-02 Snapshot persistido sobrevive a restart e é recarregado', math.abs(restoredSnap.demandIndex - 0.8000) < 0.0001 and restoredSnap.recentVolume == 4)
+    local overHighRes = BM.ResolvePrice('metalscrap', { demandOverride = 99.0 })
+    check('SIM-GRID-06 demandOverride excessivo (99.0) é clampado no DemandCeiling (1.30)', overHighRes.ok == true and math.abs(overHighRes.demand - 1.3000) < 0.0001)
+
+    -- ─── SIM-GRID-07: NaN / INF / STRING DEMAND FAIL CLOSED ──────────────────
+    local nanDemand = 0 / 0
+    local nanRes = BM.ResolvePrice('metalscrap', { demandOverride = nanDemand })
+    check('SIM-GRID-07 NaN demandOverride falha closed (invalid_demand)', nanRes.ok == false and nanRes.err == 'invalid_demand')
+
+    local strDemandRes = BM.ResolvePrice('metalscrap', { demandOverride = 'exploit_string' })
+    check('SIM-GRID-07 String demandOverride falha closed (invalid_demand)', strDemandRes.ok == false and strDemandRes.err == 'invalid_demand')
+
+    local nanMultRes = BM.ResolvePrice('metalscrap', { trustMultiplier = 0 / 0 })
+    check('SIM-GRID-07 NaN trustMultiplier falha closed (invalid_multipliers)', nanMultRes.ok == false and nanMultRes.err == 'invalid_multipliers')
 
     print(('[broker_market/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
     if fail > 0 then error('broker_market_spec falhou') end

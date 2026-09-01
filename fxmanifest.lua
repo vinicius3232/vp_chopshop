@@ -117,6 +117,7 @@ server_scripts {
     -- ChopSession; usa VPChopHasTool/VPChopChopPartCommit em runtime (main.lua carrega
     -- depois). O executor de domínio (base_tyre) carrega DEPOIS de main.lua.
     'server/session/action_session.lua',
+    'server/session/action_session_spec.lua',  -- self-gated
     -- [v1.17 BROKER-1] Dynamic Broker Market Engine & Sim
     'server/broker/market.lua',
     'server/broker/market_sim_spec.lua',  -- self-gated (vp_chopshop_selftest 1)

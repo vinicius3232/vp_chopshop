@@ -258,7 +258,7 @@ _G.Config = {
         NightBonus = { Enable = false },
     },
     Progression = {
-        FencePriceMult = { [1] = 1.0, [2] = 1.15, [3] = 1.30, [4] = 1.50 },
+        FencePriceMult = { [1] = 1.0, [2] = 1.0, [3] = 1.0, [4] = 1.10 },
     },
     Broker = {
         Enable = true,
@@ -375,6 +375,7 @@ function RegisterCommand(_, _, _) end
 function IsPlayerAceAllowed(_, _) return false end
 
 local base = arg[1] or '.'
+_G.BASE_RESOURCE_PATH = base
 _G._HARNESS_BASE = base
 dofile(base .. '/shared/registry/tools.lua')          -- [P1.1] VPChopToolRegistry
 dofile(base .. '/shared/registry/parts.lua')          -- [P1.1] VPChopPartRegistry

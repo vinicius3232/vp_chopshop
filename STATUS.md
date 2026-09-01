@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-01
 **Branch de integração:** `feat/v1.17-broker-1-market-engine` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `53683d7`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1151 PASS / 0 FAIL / 1151 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1174 PASS / 0 FAIL / 1174 asserts**
 
 ---
 
@@ -21,17 +21,18 @@ Stack UX & Gameplay v1.16:              ✅ HOMOLOGADO & MERGED   (#40)
  Dano de Motor, Furto Catalisador, Roubo Player Vehicles, SEC-1, PAY-1.1)
 ─────────────────────────────────────────────────────────────────────────
 v1.17 Chop Broker, Dynamic Market & Workshop Economy:
-BROKER-0 — Architecture Frozen & Canonical Design ✅ CONCLUÍDO (Docs)
-BROKER-1 — Dynamic Market Engine & Simulation     ✅ CODE READY (PR PENDING)
-           (vp_chop_broker_market schema, demand index bounds [0.40, 1.30],
-            lazy asymptotic time recovery, volume pressure diminishing returns,
-            server-authoritative price resolver with strict Trust 0 / Burning
-            NO TRADE gates, hard PriceFloor/Ceiling, 108.000+ simulation iterations)
-BROKER-2 — Fence Integration & Dynamic Payouts    ⏸
-BROKER-3 — Contracts & High-Demand Lists          ⏸
-BROKER-4 — WorkshopBridge & SAGA Journal          ⏸
-BROKER-5 — NPC Ambient Speech & Context UI        ⏸
-BROKER-6 — Live QA & Final Release Gate           ⏸
+BROKER-0   — Architecture Frozen & Canonical Design ✅ CONCLUÍDO (Docs)
+BROKER-1.1 — Market Persistence & Parity Hardening  ✅ CODE READY (PR #42)
+             (vp_chop_broker_market schema, pcall closure patterns,
+              dirty state retry on DB error/nil, low-frequency flush thread,
+              fail-closed BrokerMarket.IsReady() & Config.Broker.Enable,
+              action_session_spec restoration, FencePriceMult tier parity,
+              NaN/Inf guards, 108.000+ simulation iterations @ 1174 PASS)
+BROKER-2   — Fence Integration & Dynamic Payouts    ⏸
+BROKER-3   — Contracts & High-Demand Lists          ⏸
+BROKER-4   — WorkshopBridge & SAGA Journal          ⏸
+BROKER-5   — NPC Ambient Speech & Context UI        ⏸
+BROKER-6   — Live QA & Final Release Gate           ⏸
 ─────────────────────────────────────────────────────────────────────────
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)

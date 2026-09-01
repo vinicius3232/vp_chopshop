@@ -1,8 +1,8 @@
 -- server/broker/market.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.17 BROKER-1] DYNAMIC BROKER MARKET ENGINE
+--  [v1.17 BROKER-1.1] DYNAMIC BROKER MARKET ENGINE
 --  Autoridade econômica server-side para precificação dinâmica, pressão de volume,
---  recuperação temporal (lazy) e aplicação estrita de floor/ceiling.
+--  recuperação temporal (lazy), persistência assíncrona segura e aplicação de bounds.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 BrokerMarket = BrokerMarket or {}
@@ -11,6 +11,8 @@ local _marketState = {}
 local _clockFn = nil
 local _rngFn = nil
 local _dbInstance = nil
+local _isReady = false
+local _flushLoopStarted = false
 
 local function getNow()
     if _clockFn then return _clockFn() end
@@ -26,6 +28,22 @@ local function logDebug(...)
     if Config.Broker and Config.Broker.Debug then
         print('[vp_chopshop:broker_market]', ...)
     end
+end
+
+--- Sanitiza e valida números contra NaN, Infinity e tipos inválidos
+---@param val any
+---@param default number|nil
+---@param minVal number|nil
+---@param maxVal number|nil
+---@return number|nil, boolean
+local function sanitizeNumber(val, default, minVal, maxVal)
+    if type(val) ~= 'number' or val ~= val or val == math.huge or val == -math.huge then
+        return default, false
+    end
+    local clamped = val
+    if minVal and clamped < minVal then clamped = minVal end
+    if maxVal and clamped > maxVal then clamped = maxVal end
+    return clamped, true
 end
 
 --- Retorna a configuração global de mercado
@@ -66,6 +84,12 @@ local function ensureState(commodity, now)
     return _marketState[commodity]
 end
 
+--- Informa se a engine de mercado foi inicializada e está pronta
+---@return boolean
+function BrokerMarket.IsReady()
+    return _isReady == true
+end
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. RECUPERAÇÃO TEMPORAL (LAZY TIME RECOVERY)
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +99,13 @@ end
 ---@param now integer|nil
 ---@return number|nil demand, string|nil err
 function BrokerMarket.RecoverDemand(commodity, now)
+    if Config.Broker and Config.Broker.Enable == false then
+        return nil, 'broker_disabled'
+    end
+    if not BrokerMarket.IsReady() then
+        return nil, 'market_not_ready'
+    end
+
     local cfg = getCommodityConfig(commodity)
     if not cfg then return nil, 'unknown_commodity' end
 
@@ -110,6 +141,13 @@ end
 ---@param now integer|nil
 ---@return number|nil demand, string|nil err
 function BrokerMarket.GetDemandIndex(commodity, now)
+    if Config.Broker and Config.Broker.Enable == false then
+        return nil, 'broker_disabled'
+    end
+    if not BrokerMarket.IsReady() then
+        return nil, 'market_not_ready'
+    end
+
     local demand, err = BrokerMarket.RecoverDemand(commodity, now)
     if not demand then return nil, err end
 
@@ -127,15 +165,22 @@ end
 ---@param now integer|nil
 ---@return table
 function BrokerMarket.RecordSale(commodity, count, now)
+    if Config.Broker and Config.Broker.Enable == false then
+        return { ok = false, err = 'broker_disabled' }
+    end
+    if not BrokerMarket.IsReady() then
+        return { ok = false, err = 'market_not_ready' }
+    end
+
     local cfg = getCommodityConfig(commodity)
     if not cfg then
         return { ok = false, err = 'unknown_commodity' }
     end
 
-    local qty = tonumber(count)
-    if not qty or qty <= 0 or qty ~= math.floor(qty) or qty > 10000 then
+    if type(count) ~= 'number' or count ~= count or count == math.huge or count == -math.huge or count < 1 or count > 10000 or count ~= math.floor(count) then
         return { ok = false, err = 'invalid_count' }
     end
+    local qty = count
 
     local t = now or getNow()
     local prevDemand = BrokerMarket.RecoverDemand(commodity, t)
@@ -173,6 +218,13 @@ end
 ---@param context table|nil
 ---@return table
 function BrokerMarket.ResolvePrice(commodity, context)
+    if Config.Broker and Config.Broker.Enable == false then
+        return { ok = false, err = 'broker_disabled' }
+    end
+    if not BrokerMarket.IsReady() then
+        return { ok = false, err = 'market_not_ready' }
+    end
+
     local cfg = getCommodityConfig(commodity)
     if not cfg then
         return { ok = false, err = 'unknown_commodity' }
@@ -194,31 +246,49 @@ function BrokerMarket.ResolvePrice(commodity, context)
 
     -- ─── 2. Resolução de Multiplicadores ────────────────────────────────────
     -- Demanda
-    local demand = ctx.demandOverride
-    if not demand then
+    local demand
+    if ctx.demandOverride ~= nil then
+        local validDem, isNum = sanitizeNumber(ctx.demandOverride, nil, mCfg.DemandFloor, mCfg.DemandCeiling)
+        if not isNum then
+            return { ok = false, err = 'invalid_demand' }
+        end
+        demand = validDem
+    else
         local d = BrokerMarket.GetDemandIndex(commodity, ctx.timestamp)
         demand = d or 1.0000
     end
 
-    -- Trust
+    -- Trust Multiplier
     local trustMult = ctx.trustMultiplier
-    if not trustMult then
+    if trustMult ~= nil then
+        local sanitized, okNum = sanitizeNumber(trustMult, 1.00, 0.0, 5.0)
+        if not okNum then return { ok = false, err = 'invalid_multipliers' } end
+        trustMult = sanitized
+    else
         local trustLevel = ctx.trustLevel or 1
         local trustTable = { [1] = 1.00, [2] = 1.15, [3] = 1.30, [4] = 1.50 }
         trustMult = trustTable[trustLevel] or 1.00
     end
 
-    -- Progression Tier
+    -- Progression Tier Multiplier (Reutiliza Config.Progression.FencePriceMult)
     local tierMult = ctx.tierMultiplier
-    if not tierMult then
+    if tierMult ~= nil then
+        local sanitized, okNum = sanitizeNumber(tierMult, 1.00, 0.0, 5.0)
+        if not okNum then return { ok = false, err = 'invalid_multipliers' } end
+        tierMult = sanitized
+    else
         local tier = ctx.progressionTier or 1
-        local tierTable = { [1] = 1.00, [2] = 1.10, [3] = 1.25, [4] = 1.50 }
-        tierMult = tierTable[tier] or 1.00
+        local multTable = (Config.Progression and Config.Progression.FencePriceMult) or {}
+        tierMult = multTable[tier] or 1.00
     end
 
     -- Bônus Noturno
     local nightMult = ctx.nightMultiplier
-    if not nightMult then
+    if nightMult ~= nil then
+        local sanitized, okNum = sanitizeNumber(nightMult, 1.00, 0.0, 5.0)
+        if not okNum then return { ok = false, err = 'invalid_multipliers' } end
+        nightMult = sanitized
+    else
         local h = ctx.hour
         if h == nil and GetClockHours then
             h = GetClockHours()
@@ -232,22 +302,26 @@ function BrokerMarket.ResolvePrice(commodity, context)
 
     -- Penalidade de Heat Policial
     local heatMult = ctx.heatMultiplier
-    if not heatMult then
+    if heatMult ~= nil then
+        local sanitized, okNum = sanitizeNumber(heatMult, 1.00, 0.0, 5.0)
+        if not okNum then return { ok = false, err = 'invalid_multipliers' } end
+        heatMult = sanitized
+    else
         if ctx.heatLabel == 'warm' then heatMult = 0.90
         elseif ctx.heatLabel == 'hot' then heatMult = 0.75
         else heatMult = 1.00 end
     end
 
     -- Jitter de Negociação
+    local maxJitter = mCfg.Jitter or 0.03
     local jitterVal = ctx.jitter
     if jitterVal == nil then
-        local maxJitter = mCfg.Jitter or 0.03
         local r = getRng() -- [0.0, 1.0]
         jitterVal = (r * 2.0 - 1.0) * maxJitter -- [-maxJitter, +maxJitter]
     else
-        -- Clampa jitter injetado
-        local maxJitter = mCfg.Jitter or 0.03
-        jitterVal = math.max(-maxJitter, math.min(maxJitter, jitterVal))
+        local sanitized, okNum = sanitizeNumber(jitterVal, 0.0, -maxJitter, maxJitter)
+        if not okNum then return { ok = false, err = 'invalid_multipliers' } end
+        jitterVal = sanitized
     end
     local jitterMult = 1.0 + jitterVal
 
@@ -283,7 +357,7 @@ function BrokerMarket.ResolvePrice(commodity, context)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 4. SNAPSHOT E PERSISTÊNCIA
+-- 4. SNAPSHOT E PERSISTÊNCIA ASSÍNCRONA
 -- ─────────────────────────────────────────────────────────────────────────────
 
 --- Obtém o snapshot de mercado de uma ou todas as commodities
@@ -335,16 +409,18 @@ function BrokerMarket.SaveCommodity(commodity)
         return false
     end
 
-    local ok, res = pcall(db.query.await, [[
-        INSERT INTO `vp_chop_broker_market` (`commodity`, `demand_index`, `recent_volume`, `last_recovery`)
-        VALUES (?, ?, ?, FROM_UNIXTIME(?))
-        ON DUPLICATE KEY UPDATE
-            `demand_index`  = VALUES(`demand_index`),
-            `recent_volume` = VALUES(`recent_volume`),
-            `last_recovery` = VALUES(`last_recovery`)
-    ]], { commodity, state.demand, state.recentVolume, state.lastRecovery })
+    local ok, res = pcall(function()
+        return db.query.await([[
+            INSERT INTO `vp_chop_broker_market` (`commodity`, `demand_index`, `recent_volume`, `last_recovery`)
+            VALUES (?, ?, ?, FROM_UNIXTIME(?))
+            ON DUPLICATE KEY UPDATE
+                `demand_index`  = VALUES(`demand_index`),
+                `recent_volume` = VALUES(`recent_volume`),
+                `last_recovery` = VALUES(`last_recovery`)
+        ]], { commodity, state.demand, state.recentVolume, state.lastRecovery })
+    end)
 
-    if ok then
+    if ok and res ~= nil and (type(res) == 'table' or type(res) == 'number') then
         state.dirty = false
         return true
     else
@@ -368,17 +444,33 @@ function BrokerMarket.Flush(now)
     return count
 end
 
+--- Seam de teste determinístico para disparo de flush periódico
+---@param now integer|nil
+---@return integer savedCount
+function BrokerMarket.TriggerPeriodicFlush(now)
+    return BrokerMarket.Flush(now)
+end
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 5. BOOTSTRAP & TEST INJECTION HOOKS
 -- ─────────────────────────────────────────────────────────────────────────────
 
 --- Carrega o snapshot persistido do banco de dados
+---@param clockFn function|nil
 ---@param dbOverride table|nil
+---@param rngFn function|nil
+---@return boolean isReady
 function BrokerMarket.Init(clockFn, dbOverride, rngFn)
     _clockFn = clockFn
     _rngFn = rngFn
     _dbInstance = dbOverride
     _marketState = {}
+    _isReady = false
+
+    if Config.Broker and Config.Broker.Enable == false then
+        logDebug('BrokerMarket disabled by config.')
+        return false
+    end
 
     local t = getNow()
     local db = _dbInstance or _G.MySQL
@@ -395,7 +487,10 @@ function BrokerMarket.Init(clockFn, dbOverride, rngFn)
     end
 
     if db and db.query and db.query.await then
-        local ok, rows = pcall(db.query.await, 'SELECT `commodity`, `demand_index`, `recent_volume`, UNIX_TIMESTAMP(`last_recovery`) AS last_rec FROM `vp_chop_broker_market`')
+        local ok, rows = pcall(function()
+            return db.query.await('SELECT `commodity`, `demand_index`, `recent_volume`, UNIX_TIMESTAMP(`last_recovery`) AS last_rec FROM `vp_chop_broker_market`')
+        end)
+
         if ok and type(rows) == 'table' then
             for _, row in ipairs(rows) do
                 if _marketState[row.commodity] then
@@ -405,10 +500,18 @@ function BrokerMarket.Init(clockFn, dbOverride, rngFn)
                     _marketState[row.commodity].dirty = false
                 end
             end
+            _isReady = true
+        else
+            logDebug('BrokerMarket DB Init failed. Running in DEGRADED/UNAVAILABLE state.')
+            _isReady = false
+            return false
         end
+    else
+        _isReady = true
     end
 
-    logDebug('BrokerMarket initialized.')
+    logDebug('BrokerMarket initialized successfully.')
+    return true
 end
 
 --- Hooks para testes determinísticos
@@ -422,9 +525,28 @@ function BrokerMarket.SetDemand(commodity, demand, now)
     state.dirty = true
 end
 
--- Inicialização automática no servidor real quando o DB estiver pronto
+-- Thread de flush periódico em background (registrada no carregamento do módulo)
+if _G.CreateThread then
+    CreateThread(function()
+        while true do
+            local intervalSec = (Config.Broker and Config.Broker.Market and Config.Broker.Market.FlushIntervalSec) or 300
+            Wait(intervalSec * 1000)
+            if Config.Broker and Config.Broker.Enable and BrokerMarket.IsReady() then
+                BrokerMarket.Flush()
+            end
+        end
+    end)
+end
+
+-- Inicialização automática no servidor FiveM quando o DB estiver pronto
 if _G.AddEventHandler then
     AddEventHandler('vp_chopshop:server:dbReady', function()
         BrokerMarket.Init()
+    end)
+
+    AddEventHandler('onResourceStop', function(resName)
+        if _G.GetCurrentResourceName and resName == GetCurrentResourceName() and BrokerMarket.IsReady() then
+            BrokerMarket.Flush()
+        end
     end)
 end
