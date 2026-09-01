@@ -88,6 +88,13 @@ lib.callback.register('vp_chopshop:session:requestRaise', function(src, netId)
     if not isJackableClass(veh) then return denyRaise(src, netId, 'class') end
     if not ValidatePlayerNearVehicle(src, veh, maxRaiseDist()) then return denyRaise(src, netId, 'range') end
 
+    -- [ANTI-EXPLOIT] Bloqueia desmanchar o próprio carro pessoal para farmar peças/dupe
+    if Config.Jackstand and Config.Jackstand.BlockOwnVehicle then
+        if BridgeIsPlayerVehicleOwner and BridgeIsPlayerVehicleOwner(src, veh) then
+            return denyRaise(src, netId, 'own_vehicle')
+        end
+    end
+
     -- Item exigido (trust-no-client — o export client só implica posse).
     local item = Config.Jackstand.Item or 'chopshop_jackstand'
     if (tonumber(InvCount(src, item)) or 0) < 1 then return denyRaise(src, netId, 'no_item') end

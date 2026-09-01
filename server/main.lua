@@ -562,6 +562,13 @@ lib.callback.register('vp_chopshop:stealCatalytic', function(source, netId)
     if not ValidatePlayerNearVehicle(source, veh, 4.0) then return { ok = false, err = 'distance' } end
     if not VPChopHasTool(source, false) then return { ok = false, err = 'no_saw' } end
 
+    -- [ANTI-EXPLOIT] Bloqueia roubar o catalisador do próprio carro pessoal
+    if Config.CatalyticTheft and Config.CatalyticTheft.BlockOwnVehicle then
+        if BridgeIsPlayerVehicleOwner and BridgeIsPlayerVehicleOwner(source, veh) then
+            return { ok = false, err = 'own_vehicle' }
+        end
+    end
+
     if Entity(veh).state.catalyticStolen == true then
         return { ok = false, err = 'catalytic_already_stolen' }
     end

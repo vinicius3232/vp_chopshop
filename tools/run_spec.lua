@@ -165,8 +165,14 @@ _G.Config = {
         },
         CarryAnim = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 49 },
     },
+    Jackstand = {
+        Enable = true,
+        BlockOwnVehicle = true,
+        Item = 'chopshop_jackstand',
+    },
     CatalyticTheft = {
         Enable = true,
+        BlockOwnVehicle = true,
         Bones = { 'exhaust', 'exhaust_2', 'chassis' },
         PoliceAlertChance = 40,
         ProgressMs = 7000,

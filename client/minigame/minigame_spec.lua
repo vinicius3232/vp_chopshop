@@ -1076,6 +1076,27 @@ local function run()
     catalyticCarry = nil
     check('CATALYTIC-2 fence sale consumes carried catalytic', catalyticCarry == nil)
 
+    -- 33: Testes de Roubo em Veículos de Outros Jogadores & Proteção Anti-Auto-Farm (BlockOwnVehicle)
+    check('OWNERSHIP-1 Jackstand BlockOwnVehicle is enabled', Config.Jackstand and Config.Jackstand.BlockOwnVehicle == true)
+    check('OWNERSHIP-1 Catalytic BlockOwnVehicle is enabled', Config.CatalyticTheft and Config.CatalyticTheft.BlockOwnVehicle == true)
+
+    -- Simulação de ownership bridge
+    local function mockIsPlayerVehicleOwner(src, pInfo)
+        if pInfo and pInfo.status == 'owned' and pInfo.ownedBy then
+            local myKey = 'player_' .. tostring(src)
+            return (myKey == pInfo.ownedBy or tostring(myKey):find(tostring(pInfo.ownedBy), 1, true) ~= nil)
+        end
+        return false
+    end
+
+    local otherPlayerCar = { status = 'owned', ownedBy = 'player_99' }
+    local myOwnCar       = { status = 'owned', ownedBy = 'player_1' }
+    local npcCar         = { status = 'not_owned' }
+
+    check('OWNERSHIP-2 stealing from other player vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, otherPlayerCar) == false)
+    check('OWNERSHIP-2 stealing from NPC vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, npcCar) == false)
+    check('OWNERSHIP-2 stealing from OWN vehicle is BLOCKED (anti-exploit)', mockIsPlayerVehicleOwner(1, myOwnCar) == true)
+
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 

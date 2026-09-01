@@ -165,6 +165,23 @@ function BridgeResolveVehiclePersistence(vehicle, context)
     return out
 end
 
+--- Retorna true se o veículo pertence ao jogador `src` (mesmo citizenid).
+--- Usado para bloquear auto-farm/exploit de desmanchar o próprio carro pessoal.
+---@param src number
+---@param vehicle integer
+---@return boolean
+function BridgeIsPlayerVehicleOwner(src, vehicle)
+    if not src or not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then return false end
+    local pInfo = BridgeResolveVehiclePersistence(vehicle, 'owner_check')
+    if pInfo and pInfo.status == 'owned' and pInfo.ownedBy then
+        local myKey = ServerChopPlayerKey(src)
+        if myKey and (myKey == pInfo.ownedBy or tostring(myKey):find(tostring(pInfo.ownedBy), 1, true) ~= nil) then
+            return true
+        end
+    end
+    return false
+end
+
 --- Remove a ENTIDADE do mundo. No QBox, desliga persistence ANTES (senão respawna)
 --- e SÓ deleta se isso for confirmado. NÃO apaga registro de banco.
 ---
