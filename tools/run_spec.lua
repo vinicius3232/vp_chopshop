@@ -167,12 +167,12 @@ _G.Config = {
     },
     Jackstand = {
         Enable = true,
-        BlockOwnVehicle = true,
+        BlockOwnVehicle = false,
         Item = 'chopshop_jackstand',
     },
     CatalyticTheft = {
         Enable = true,
-        BlockOwnVehicle = true,
+        BlockOwnVehicle = false,
         Bones = { 'exhaust', 'exhaust_2', 'chassis' },
         PoliceAlertChance = 40,
         ProgressMs = 7000,

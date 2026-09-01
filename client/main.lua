@@ -2222,6 +2222,7 @@ function VPChopSessionErr(err)
     if err == 'player' then return 'Jogador ainda não carregado no servidor.' end
     if err == 'disabled' then return 'Sistema de macaco desativado.' end
     if err == 'session' then return 'Falha ao registrar sessão no servidor.' end
+    if err == 'own_vehicle' then return L('err_own_vehicle') end
     return (err and ('Erro: ' .. tostring(err))) or L('notify_generic_error')
 end
 

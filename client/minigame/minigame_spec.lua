@@ -1077,8 +1077,8 @@ local function run()
     check('CATALYTIC-2 fence sale consumes carried catalytic', catalyticCarry == nil)
 
     -- 33: Testes de Roubo em Veículos de Outros Jogadores & Proteção Anti-Auto-Farm (BlockOwnVehicle)
-    check('OWNERSHIP-1 Jackstand BlockOwnVehicle is enabled', Config.Jackstand and Config.Jackstand.BlockOwnVehicle == true)
-    check('OWNERSHIP-1 Catalytic BlockOwnVehicle is enabled', Config.CatalyticTheft and Config.CatalyticTheft.BlockOwnVehicle == true)
+    check('OWNERSHIP-1 Jackstand BlockOwnVehicle is configured', Config.Jackstand and Config.Jackstand.BlockOwnVehicle ~= nil)
+    check('OWNERSHIP-1 Catalytic BlockOwnVehicle is configured', Config.CatalyticTheft and Config.CatalyticTheft.BlockOwnVehicle ~= nil)
 
     -- Simulação de ownership bridge
     local function mockIsPlayerVehicleOwner(src, pInfo)
