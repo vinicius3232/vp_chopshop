@@ -2,10 +2,10 @@
 
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
-**Atualizado:** 2026-08-31
+**Atualizado:** 2026-09-01
 **Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (empilhada sobre `pr-h`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1026 PASS / 0 FAIL / 1026 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1031 PASS / 0 FAIL / 1031 asserts**
 
 ---
 
@@ -30,6 +30,7 @@ PHYS-1 — Physical Part Carry (Braços)   ✅ TESTADO IN-GAME (OK)  (ffe26e5)
 PHYS-2 — Workbench Part Dismantling     ✅ TESTADO IN-GAME (OK)  (ffe26e5)
 DMG-1  — Damage Health Scaling (Motor)  ✅ TESTADO IN-GAME (OK)  (bedfb9a)
 CAT-1  — Catalytic Converter Theft      ✅ TESTADO IN-GAME (OK)  (3feab7a)
+OWN-1  — Player-Vehicle Theft & Anti-Exp✅ TESTADO IN-GAME (OK)  (b39dd5e)
 ─────────────────────────────────────────────────────────────────────────
 Fase 3 — Processamento de Peça Avançado  ✅ EM ANDAMENTO / INTEGRADO
 Fase 4 — Camada de Crime & Perícia       ⏸
@@ -46,3 +47,4 @@ Fase 5 — Polish Final + CI + Release     ⏸
 6. **Desmanche na Bancada:** Peça carregada é processada no `ox_target` da `chopshop_bench` gerando sucatas e partes.
 7. **Escala de Dano (EngineHealth):** Motor danificado tem recompensas reduzidas e convertidas em sucata de metal. Motor fundido ($<150$ HP) bloqueia reaproveitamento de peças.
 8. **Furto de Catalisador:** Corte de escapamento em veículos de rua, chance de disparar alarme/polícia, e opção de desmanchar na bancada ou vender direto no NPC Fence.
+9. **Roubo em Carros de Jogadores:** Permite furtar catalisadores e rodas de veículos pertencentes a outros jogadores, bloqueando o dono de roubar o próprio veículo (`BlockOwnVehicle` anti-auto-farm).

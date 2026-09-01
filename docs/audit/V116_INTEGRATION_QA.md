@@ -139,7 +139,7 @@ Q1–Q4 sem FAIL P0/P1. Aí sim: P2.2 (Wheels V2) → P2.3 (condition) → P2.4 
 
 ---
 
-## RESULTADOS DA HOMOLOGAÇÃO IN-GAME LIVE (2026-08-31)
+## RESULTADOS DA HOMOLOGAÇÃO IN-GAME LIVE (2026-09-01)
 
 | Bloco | Funcionalidade | Status In-Game | Notas de Validação |
 |---|---|---|---|
@@ -150,5 +150,6 @@ Q1–Q4 sem FAIL P0/P1. Aí sim: P2.2 (Wheels V2) → P2.3 (condition) → P2.4 
 | **Q5** | Carregamento Físico & Bancada (`PhysicalCarry`) | **PASS (100%)** | Peça nos braços (`box_carry`), drop `[E]`, pickup `[ALT]`, desmanche na bancada |
 | **Q6** | Escala de Dano Físico (`DamageScaling`) | **PASS (100%)** | `EngineHealth` reduz partes e converte em sucata; motor $<150$ HP bloqueia peças |
 | **Q7** | Furto de Catalisador (`CatalyticTheft`) | **PASS (100%)** | Corte no escapamento, alarme/polícia, desmanche na bancada ou venda no Fence |
+| **Q8** | Roubo em Carros de Outros Jogadores (`BlockOwnVehicle`) | **PASS (100%)** | Roubo de rodas/catalisador de terceiros liberado; bloqueio anti-auto-farm no próprio carro |
 
-**Veredito:** Todos os sistemas foram validados em ambiente real FiveM/QBox sem nenhum erro P0/P1. Teste estático: **1026 PASS / 0 FAIL**.
+**Veredito:** Todos os sistemas foram validados em ambiente real FiveM/QBox sem nenhum erro P0/P1. Teste estático: **1031 PASS / 0 FAIL**.

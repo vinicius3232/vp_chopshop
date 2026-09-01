@@ -139,11 +139,12 @@ Os **rótulos dos itens** no `ox_inventory` (`installation/ox_items_snippet.txt`
 
 ---
 
-### 5. Furto de Catalisador Automotivo (`Config.CatalyticTheft`)
+### 5. Furto de Catalisador & Rodas em Carros de Jogadores (`Config.CatalyticTheft` & `Config.Jackstand`)
 
-- **Como Funciona:** Mire com `[ALT]` no escapamento/chassi (`exhaust`, `exhaust_2`, `chassis`) de qualquer carro com uma serra no inventário.
+- **Roubo em Veículos de Outros Jogadores:** Jogadores podem levantar carros de outros cidadãos com o macaco ou cortar o catalisador de qualquer veículo de jogador estacionado na rua.
+- **Proteção Anti-Auto-Farm (`BlockOwnVehicle = true`):** Para evitar que um jogador depene seu próprio carro pessoal para farmar materiais/dinheiro e reparar na garagem, o servidor identifica o `citizenid` da propriedade e bloqueia o roubo do próprio veículo.
 - **Risco Policial:** 40% de chance de acionar o alarme do veículo e chamar a polícia pelo ruído da serra.
-- **Fluxo Duplo à Escolha:**
+- **Fluxo Duplo do Catalisador à Escolha:**
   1. **Bancada (`chopshop_bench`):** Desmanchar o catalisador nos braços para extrair metais raros (`copper`, `metalscrap`, `steel`, `car_parts`).
   2. **NPC Receptador (Fence):** Vender o catalisador diretamente para o Fence e receber dinheiro vivo instantâneo (\$1.200 a \$2.200).
 

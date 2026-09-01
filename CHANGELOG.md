@@ -2,9 +2,9 @@
 
 ---
 
-## [1.16.0] — 2026-08-31 — Physical Interaction Minigames, Workshop Carrying, Damage Scaling & Catalytic Converter Theft
+## [1.16.0] — 2026-09-01 — Physical Interaction Minigames, Workshop Carrying, Damage Scaling & Catalytic Converter Theft
 
-Validação completa em runtime FiveM / QBox. Harness de teste estático: **1026 asserts / 0 fail** (`lua tools/run_spec.lua .`).
+Validação completa em runtime FiveM / QBox. Harness de teste estático: **1031 asserts / 0 fail** (`lua tools/run_spec.lua .`).
 
 ### Added / Gameplay Features
 - **Physical Minigames Stack (UX-A → UX-F):**
@@ -21,8 +21,10 @@ Validação completa em runtime FiveM / QBox. Harness de teste estático: **1026
   - Integridade do motor influencia diretamente a quantidade de `car_parts` entregues. Peças perdidas são convertidas em sucata de metal (`metalscrap`).
   - Motores fundidos / destruídos ($< 150$ HP) bloqueiam o reaproveitamento como peças mecânicas funcionais.
   - Pneus furados / estourados durante perseguições não podem ser furtados como pneus intactos.
-- **Catalytic Converter Theft & Dual Flow (Street & Workshop):**
-  - Alvo `ox_target` no escapamento/chassi (`exhaust`, `exhaust_2`, `chassis`) de qualquer veículo parado.
+- **Catalytic Converter & Wheel Theft on Player Vehicles:**
+  - Alvo `ox_target` no escapamento/chassi (`exhaust`, `exhaust_2`, `chassis`) de qualquer veículo parado na rua.
+  - Permite desmanchar rodas e furtar catalisadores de **veículos pertencentes a outros jogadores**.
+  - **Proteção Anti-Auto-Farm (`BlockOwnVehicle`):** `BridgeIsPlayerVehicleOwner` bloqueia o jogador de depenar ou roubar peças do seu próprio carro pessoal para dupe/farm.
   - 40% de chance de disparo de alarme e alerta policial devido ao ruído da serra.
   - Carregamento físico do escapamento/catalisador (`prop_car_exhaust_01`).
   - Escolha do jogador: desmanchar na bancada para extrair metais raros (`copper`, `metalscrap`, `car_parts`) ou vender diretamente ao NPC Fence por dinheiro limpo.
