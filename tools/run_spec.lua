@@ -10,7 +10,12 @@
 local _print = print
 local SPEC = { pass = 0, fail = 0 }
 function print(...)
-    local line = table.concat({ ... }, '\t')
+    local strArgs = {}
+    local n = select('#', ...)
+    for i = 1, n do
+        strArgs[i] = tostring(select(i, ...))
+    end
+    local line = table.concat(strArgs, '\t')
     if line:find('%] PASS  ') then SPEC.pass = SPEC.pass + 1
     elseif line:find('%] FAIL  ') then SPEC.fail = SPEC.fail + 1 end
     return _print(...)
@@ -24,7 +29,37 @@ function GetPlayerName(src) return src and ('player_'..tostring(src)) or nil end
 function GetConvarInt(_, _) return 1 end             -- ativa os self-tests
 function GetConvar(_, _) return '1' end              -- expõe ChopSession._test
 local _t0 = os.clock()
-function GetGameTimer() return math.floor((os.clock() - _t0) * 1000) end
+_G._CUSTOM_TIMER = nil
+function GetGameTimer()
+    if _G._CUSTOM_TIMER then return _G._CUSTOM_TIMER end
+    return math.floor((os.clock() - _t0) * 1000)
+end
+if not _G.json then
+    _G.json = {
+        encode = function(v)
+            if type(v) == 'table' then
+                local parts = {}
+                for k, val in pairs(v) do
+                    local valStr
+                    if type(val) == 'table' then
+                        valStr = _G.json.encode(val)
+                    elseif type(val) == 'string' then
+                        valStr = '"' .. val .. '"'
+                    else
+                        valStr = tostring(val)
+                    end
+                    parts[#parts + 1] = ('"%s":%s'):format(tostring(k), valStr)
+                end
+                return '{' .. table.concat(parts, ',') .. '}'
+            end
+            return tostring(v)
+        end,
+        decode = function(s)
+            if type(s) == 'table' then return s end
+            return {}
+        end,
+    }
+end
 function SetTimeout(_, _) end          -- [PR-D] retries de deleção não rodam no static test
 -- Mundo falso p/ os specs que tocam natives CRUS (server/chop.lua não usa o seam
 -- EntityAPI). base_state_spec aponta o EntityAPI da ChopSession p/ a MESMA tabela.
@@ -61,7 +96,24 @@ end
 function VPChopConsumeTool(_, _) _G._TOOL_CONSUMED = (_G._TOOL_CONSUMED or 0) + 1; return true end
 function ServerPlayerIsReady(src) return src ~= nil and GetPlayerName(src) ~= nil end
 function ServerChopPlayerKey(src) return 'qbx:player_' .. tostring(src or 1) end
-_G.lib = { callback = { register = function() end } }         -- action_session.lua registra callbacks
+_G.CapturedCallbacks = {}
+_G.lib = {
+    callback = {
+        register = function(name, fn) _G.CapturedCallbacks[name] = fn end,
+        await = function(name, ...)
+            if _G.CapturedCallbacks[name] then return _G.CapturedCallbacks[name](...) end
+        end,
+    }
+}
+_G.GetClockHours = function() return 12 end
+_G.VPChopGetProgression = function(src) return { tier = 4, xp = 1000 } end
+_G.VPChopHeatGetLabel = function(plate) return 'frio' end
+_G.MySQL = _G.MySQL or {
+    single = { await = function(q, p) return nil end },
+    query = { await = function(q, p) return { affectedRows = 1 } end },
+    insert = { await = function(q, p) return 1 end },
+    update = { await = function(q, p) return 1 end },
+}
 -- [PR-G] stubs p/ server/advanced_chop.lua (commit helpers + kind specs advanced)
 _G.ServerWelders = {}
 function GetPlayers() return {} end
@@ -185,6 +237,29 @@ _G.Config = {
             car_parts  = { amount = 1, chance = 1.0 },
         },
     },
+    Fence = {
+        RotationMinutes = 45,
+        Locations = {
+            { coords = { x = 0, y = 0, z = 0, w = 0 }, scenario = 'WORLD_HUMAN_CLIPBOARD', label = 'TestLoc' },
+        },
+        BasePrices = {
+            metalscrap = 80,
+            copper = 150,
+            steel = 100,
+            rubber = 120,
+            car_parts = 400,
+            chopshop_tyre = 400,
+            stolen_plate = 250,
+        },
+        XpPerDelivery = 20,
+        XpOrderBonus = 80,
+        TrustXpPerLevel = { [1] = 100, [2] = 300, [3] = 600, [4] = 1000 },
+        WholeCarBasePayout = 8000,
+        NightBonus = { Enable = false },
+    },
+    Progression = {
+        FencePriceMult = { [1] = 1.0, [2] = 1.15, [3] = 1.30, [4] = 1.50 },
+    },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
 if not _G.vector3 then
@@ -203,6 +278,11 @@ if not _G.vector3 then
     }
     function vector3(x, y, z)
         return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, v3meta)
+    end
+end
+if not _G.vector4 then
+    function vector4(x, y, z, w)
+        return { x = x or 0, y = y or 0, z = z or 0, w = w or 0 }
     end
 end
 function RegisterNUICallback(_, _) end
@@ -268,6 +348,7 @@ dofile(base .. '/server/advanced_chop.lua')           -- [PR-G] provê VPChopAdv
 dofile(base .. '/server/action/base_tyre.lua')        -- [PR-F] registra kind/executor 'tyre' (spec sobrescreve o executor)
 dofile(base .. '/server/action/advanced_chop.lua')    -- [PR-G] registra kinds/executores adv_*
 dofile(base .. '/bridge/vp_gangs.lua')                -- [INT-01A] provê VPChopGangs* (ponte vp_chopshop→vp_gangs)
+dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
 -- no-op) — nunca rodar. Só os corpos dos specs, registrados a partir daqui.

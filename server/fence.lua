@@ -467,6 +467,10 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
         end
     end
 
+    if #soldItems == 0 or realTotal <= 0 then
+        return { ok = false, err = 'nothing_sold' }
+    end
+
     -- [FIX C-1] Pagar apenas pelo que foi realmente removido (evita pagar totalValue
     -- quando algum RemoveItem falha silenciosamente entre o dry-run e a remoção real).
     local paid = BridgeAddCash(src, realTotal, 'fence_sale')
