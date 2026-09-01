@@ -753,6 +753,7 @@ dofile(base .. '/server/broker/market_sim_spec.lua')         -- [v1.17 BROKER-1]
 dofile(base .. '/server/broker/fence_integration_spec.lua')     -- [v1.17 BROKER-2]
 dofile(base .. '/server/broker/contracts_spec.lua')         -- [v1.17 BROKER-3]
 dofile(base .. '/server/broker/workshop_spec.lua')          -- [v1.17 BROKER-4]
+dofile(base .. '/server/broker/npc_context_spec.lua')       -- [v1.17 BROKER-5]
 
 local anyFail = false
 for i = specStart, #threads do

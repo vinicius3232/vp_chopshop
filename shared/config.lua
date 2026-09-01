@@ -1224,6 +1224,10 @@ Config.Broker = {
     Enable = true,
     Debug = false, -- Logs de auditoria do mercado (default off em produção)
 
+    NPC = {
+        Alias = 'O Intermediário',
+    },
+
     Market = {
         DemandFloor = 0.40,      -- Demanda mínima (40% de saturação máxima)
         DemandCeiling = 1.30,    -- Demanda máxima (130% em alta procura)

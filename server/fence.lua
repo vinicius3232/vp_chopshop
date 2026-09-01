@@ -1325,6 +1325,70 @@ lib.callback.register('vp_chopshop:fence:fulfillOrder', function(src, orderId)
     return { ok=true, total=total }
 end)
 
+-- ─── [v1.17 BROKER-5] Broker NPC Context & Discovery Callbacks ────────────────
+
+-- Obter contexto fresco e autoritativo do Broker NPC
+lib.callback.register('vp_chopshop:broker:getNpcContext', function(src)
+    if not IsValidSource(src) then return { ok = false, err = 'invalid_source' } end
+    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+
+    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
+    if not loc or not loc.coords then
+        return { ok = false, err = 'no_fence' }
+    end
+    if not ValidatePlayerNearCoords(src, loc.coords) and not (ValidatePlayerNearPoint and ValidatePlayerNearPoint(src, loc.coords, 6.0)) then
+        return { ok = false, err = 'distance' }
+    end
+
+    local trust = VPChopFenceGetTrust(src) or 0
+    local tData = TrustCache[src] or { trust_xp = 0 }
+    local prog = (_G.VPChopGetProgression and _G.VPChopGetProgression(src)) or { tier = 1, xp = 0, nextXp = nil, totalChops = 0 }
+
+    local isBrokerEnabled = (Config.Broker and Config.Broker.Enable ~= false)
+    local isContractsEnabled = isBrokerEnabled and (Config.Broker and Config.Broker.Contracts and Config.Broker.Contracts.Enable ~= false)
+    local minContractTrust = (Config.Broker and Config.Broker.Contracts and Config.Broker.Contracts.MinTrust) or 1
+    local isShopEnabled = (Config.NPC and Config.NPC.Shop and Config.NPC.Shop.Enable == true)
+
+    local contractsReady = isContractsEnabled
+        and BrokerContracts ~= nil
+        and type(BrokerContracts.IsReady) == 'function'
+        and BrokerContracts.IsReady() == true
+    local serverNow = (BrokerContracts and BrokerContracts.GetNow and BrokerContracts.GetNow()) or os.time()
+
+    return {
+        ok = true,
+        serverNow = serverNow,
+        broker = {
+            alias = (Config.Broker and Config.Broker.NPC and Config.Broker.NPC.Alias) or 'O Intermediário',
+            locationLabel = loc.label or 'Unknown',
+        },
+        trust = {
+            level = trust,
+            xp = tData.trust_xp or 0,
+        },
+        progression = {
+            tier = prog.tier or 1,
+            xp = prog.xp or 0,
+            nextXp = prog.nextXp,
+            totalChops = prog.totalChops or 0,
+        },
+        capabilities = {
+            introduce   = (trust == 0),
+            sellPart    = (trust >= 1),
+            sellItems   = (trust >= 1),
+            sellTyres   = (trust >= 1),
+            hotJob      = (trust >= 2),
+            buyBench    = (trust >= 2 and isShopEnabled),
+            status      = (trust >= 2),
+            contracts   = (trust >= minContractTrust and contractsReady == true),
+            legacyOrder = (trust >= 3),
+            deliverCar  = (trust >= 4),
+        },
+        brokerEnabled  = isBrokerEnabled,
+        contractsReady = contractsReady,
+    }
+end)
+
 -- ─── [v1.17 BROKER-3] Contratos & Janelas de Alta Demanda Callbacks ───────────
 
 -- Obter contratos disponíveis (globais + pessoais do jogador)
@@ -1349,7 +1413,8 @@ lib.callback.register('vp_chopshop:broker:getContracts', function(src)
 
     local playerKey = ServerChopPlayerKey(src)
     local contracts = BrokerContracts.GetAvailable(playerKey, trust)
-    return { ok = true, contracts = contracts }
+    local serverNow = (BrokerContracts and BrokerContracts.GetNow and BrokerContracts.GetNow()) or os.time()
+    return { ok = true, contracts = contracts, serverNow = serverNow }
 end)
 
 -- Aceitar contrato pessoal (AVAILABLE -> ACCEPTED)
