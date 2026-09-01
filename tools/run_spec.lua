@@ -24,7 +24,21 @@ end
 local threads = {}
 function CreateThread(fn) threads[#threads+1] = fn end
 function Wait(_) end
-function AddEventHandler() end
+local _eventHandlers = {}
+_G.AddEventHandler = function(name, fn)
+    if not _eventHandlers[name] then _eventHandlers[name] = {} end
+    table.insert(_eventHandlers[name], fn)
+end
+AddEventHandler = _G.AddEventHandler
+
+_G.TriggerEvent = function(name, ...)
+    if _eventHandlers[name] then
+        for _, fn in ipairs(_eventHandlers[name]) do
+            fn(...)
+        end
+    end
+end
+TriggerEvent = _G.TriggerEvent
 function GetPlayerName(src) return src and ('player_'..tostring(src)) or nil end
 function GetNumPlayerIdentifiers(src) return 1 end
 function GetPlayerIdentifier(src, i) return 'license:test_' .. tostring(src) end
@@ -107,7 +121,17 @@ function GetEntityModel(h)
     return FAKE_VEH[n] and FAKE_VEH[n].model or 0
 end
 function GetVehicleNumberPlateText(_) return 'PLATE' end
-function GetVehicleClass(_) return 0 end
+function GetVehicleClass(h)
+    if h == nil or h == 0 then return 0 end
+    local n = (h or 0) - 70000
+    if FAKE_VEH[n] and FAKE_VEH[n].vehicleClass ~= nil then
+        return FAKE_VEH[n].vehicleClass
+    end
+    return 0
+end
+function GetVehicleClassFromName(model)
+    return 0
+end
 function Entity(h)
     local n = (h or 0) - 70000
     local v = FAKE_VEH[n] or {}
@@ -184,9 +208,17 @@ _G.VPChopDBReady = true   -- [PR-D] default do harness: DB pronto (specs sobresc
 function SetEntityAsMissionEntity(_, _, _) end
 function DeleteEntity(h) local n = (h or 0) - 70000; FAKE_VEH[n] = nil end
 _G.VPChopEvt = setmetatable({}, { __index = function(_, k) return 'vpevt:' .. k end })
-_G._TRIGGERED = {}
-function TriggerEvent(evt, ...) _G._TRIGGERED[#_G._TRIGGERED + 1] = { evt = evt, args = { ... } } end
 function LogSuspicious(_, _, _) end
+_G._TRIGGERED = {}
+function TriggerEvent(evt, ...)
+    _G._TRIGGERED[#_G._TRIGGERED + 1] = { evt = evt, args = { ... } }
+    if _eventHandlers and _eventHandlers[evt] then
+        for _, fn in ipairs(_eventHandlers[evt]) do
+            fn(...)
+        end
+    end
+end
+_G.TriggerEvent = TriggerEvent
 _G.Config = {
     Debug = false,
     VehicleNearLiftRadius = 5.0,
@@ -300,6 +332,12 @@ _G.Config = {
             EndHour = 6,
             Multiplier = 1.3,
         },
+        OrderTemplates = {
+            { items = { metalscrap = 20, copper = 8, rubber = 5 }, mult = 1.4, hours = 6 },
+            { items = { car_parts = 5, steel = 15 }, mult = 1.5, hours = 8 },
+            { items = { aluminum = 20, glass = 3 }, mult = 1.35, hours = 4 },
+            { items = { copper = 12, plastic = 15, rubber = 8 }, mult = 1.45, hours = 5 },
+        },
     },
     Progression = {
         FencePriceMult = { [1] = 1.0, [2] = 1.0, [3] = 1.0, [4] = 1.10 },
@@ -393,6 +431,69 @@ _G.Config = {
                 glass   = true,
             },
         },
+        Contracts = {
+            Enable = true,
+            MinTrust = 3,
+            GlobalSlots = 3,
+            PersonalSlots = 3,
+            GlobalTTL = 7200,
+            PersonalTTL = 3600,
+            RewardMultMin = 1.05,
+            RewardMultMax = 1.80,
+            BonusCashMax = 15000,
+            HighValueTargets = {
+                adv_engine          = true,
+                catalytic_converter = true,
+            },
+            VehicleClasses = {
+                [0]  = 'compacts',
+                [1]  = 'sedans',
+                [2]  = 'suvs',
+                [3]  = 'coupes',
+                [4]  = 'muscle',
+                [5]  = 'sports_classics',
+                [6]  = 'sports',
+                [7]  = 'super',
+                [8]  = 'motorcycles',
+                [9]  = 'offroad',
+                [10] = 'industrial',
+                [11] = 'utility',
+                [12] = 'vans',
+                [13] = 'cycles',
+                [14] = 'boats',
+                [15] = 'helicopters',
+                [16] = 'planes',
+                [17] = 'service',
+                [18] = 'emergency',
+                [19] = 'military',
+                [20] = 'commercial',
+                [21] = 'trains',
+                [22] = 'open_wheel',
+            },
+            Pools = {
+                part_type = {
+                    { key = 'adv_engine', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+                    { key = 'catalytic_converter', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 1800 },
+                    { key = 'body_panel', minTrust = 1, minQty = 2, maxQty = 6, mult = 1.15, bonus = 1000 },
+                },
+                model = {
+                    { key = 'sultan', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.35, bonus = 3000 },
+                    { key = 'bison', minTrust = 1, minQty = 1, maxQty = 2, mult = 1.20, bonus = 2000 },
+                    { key = 'baller', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.25, bonus = 2200 },
+                    { key = 'banshee', minTrust = 3, minQty = 1, maxQty = 1, mult = 1.40, bonus = 4000 },
+                },
+                class = {
+                    { key = 'sports', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.30, bonus = 3000 },
+                    { key = 'suvs', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 2000 },
+                    { key = 'muscle', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+                    { key = 'coupes', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.15, bonus = 1800 },
+                },
+                high_value = {
+                    { key = 'adv_engine', minTrust = 3, minQty = 1, maxQty = 2, mult = 1.50, bonus = 5000 },
+                    { key = 'catalytic_converter', minTrust = 3, minQty = 2, maxQty = 3, mult = 1.45, bonus = 4500 },
+                },
+            },
+        },
     },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
@@ -484,6 +585,7 @@ dofile(base .. '/server/action/base_tyre.lua')        -- [PR-F] registra kind/ex
 dofile(base .. '/server/action/advanced_chop.lua')    -- [PR-G] registra kinds/executores adv_*
 dofile(base .. '/bridge/vp_gangs.lua')                -- [INT-01A] provê VPChopGangs* (ponte vp_chopshop→vp_gangs)
 dofile(base .. '/server/broker/market.lua')              -- [v1.17 BROKER-1] provê BrokerMarket
+dofile(base .. '/server/broker/contracts.lua')           -- [v1.17 BROKER-3] provê BrokerContracts
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
@@ -507,6 +609,7 @@ dofile(base .. '/client/minigame/minigame_spec.lua')         -- [UX-A Interactio
 dofile(base .. '/server/session/fence_payment_spec.lua')     -- [v1.16-FENCE-PAY-1]
 dofile(base .. '/server/broker/market_sim_spec.lua')         -- [v1.17 BROKER-1]
 dofile(base .. '/server/broker/fence_integration_spec.lua')     -- [v1.17 BROKER-2]
+dofile(base .. '/server/broker/contracts_spec.lua')         -- [v1.17 BROKER-3]
 
 local anyFail = false
 for i = specStart, #threads do

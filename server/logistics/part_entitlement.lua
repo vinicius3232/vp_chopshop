@@ -87,9 +87,36 @@ function PartEntitlement.CaptureVehicleProvenance(veh)
     end
 
     local model = GetEntityModel(veh)
+    local numModel = tonumber(model) or 0
+
+    local classNum = nil
+    if rawget(_G, 'GetVehicleClass') then
+        local ok, vc = pcall(GetVehicleClass, veh)
+        if ok and type(vc) == 'number' and vc >= 0 then
+            classNum = vc
+        end
+    end
+
+    if not classNum and rawget(_G, 'GetVehicleClassFromName') and numModel ~= 0 then
+        local ok, vc = pcall(GetVehicleClassFromName, numModel)
+        if ok and type(vc) == 'number' and vc >= 0 then
+            classNum = vc
+        end
+    end
+
+    local className = nil
+    if classNum ~= nil then
+        local classMap = Config.Broker and Config.Broker.Contracts and Config.Broker.Contracts.VehicleClasses
+        if classMap and classMap[classNum] then
+            className = classMap[classNum]
+        end
+    end
+
     return {
-        realPlate = canonicalRealPlate,
-        model     = tonumber(model) or 0,
+        realPlate    = canonicalRealPlate,
+        model        = numModel,
+        vehicleClass = classNum,
+        className    = className,
     }
 end
 
@@ -128,8 +155,10 @@ function PartEntitlement.Issue(sessionId, src, partKey, sourceNetId, opts)
         sourceNetId    = tonumber(sourceNetId) or 0,
         origin         = (opts and opts.origin) or 'advanced',
         provenance     = (opts and opts.provenance and {
-            realPlate = opts.provenance.realPlate,
-            model     = opts.provenance.model,
+            realPlate    = opts.provenance.realPlate,
+            model        = opts.provenance.model,
+            vehicleClass = opts.provenance.vehicleClass,
+            className    = opts.provenance.className,
         }) or nil,
         state          = 'ISSUED',
         createdAt      = now,
@@ -160,8 +189,10 @@ function PartEntitlement.Get(id)
         sourceNetId    = e.sourceNetId,
         origin         = e.origin,
         provenance     = e.provenance and {
-            realPlate = e.provenance.realPlate,
-            model     = e.provenance.model,
+            realPlate    = e.provenance.realPlate,
+            model        = e.provenance.model,
+            vehicleClass = e.provenance.vehicleClass,
+            className    = e.provenance.className,
         } or nil,
         state          = e.state,
         createdAt      = e.createdAt,
@@ -236,8 +267,10 @@ function PartEntitlement.Consume(id, src, actionName, expectedPartKey)
         sourceNetId = e.sourceNetId,
         sessionId   = e.sessionId,
         provenance  = e.provenance and {
-            realPlate = e.provenance.realPlate,
-            model     = e.provenance.model,
+            realPlate    = e.provenance.realPlate,
+            model        = e.provenance.model,
+            vehicleClass = e.provenance.vehicleClass,
+            className    = e.provenance.className,
         } or nil,
         entitlement = PartEntitlement.Get(id),
     }

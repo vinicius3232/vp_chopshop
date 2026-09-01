@@ -141,6 +141,31 @@ CREATE TABLE IF NOT EXISTS `vp_chop_broker_market` (
   PRIMARY KEY (`commodity`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── [v1.17 BROKER-3] Contratos & Janelas de Alta Demanda (Broker Contracts) ──
+-- for_identifier: NULL = Janela Global Pública; VARCHAR(60) = Contrato Pessoal
+-- contract_type: 'part_type' | 'model' | 'class' | 'high_value'
+-- target_key: 'adv_engine', 'sultan', 'suvs', 'catalytic_converter'
+-- state: 'AVAILABLE' | 'ACCEPTED' | 'COMPLETED' | 'EXPIRED'
+
+CREATE TABLE IF NOT EXISTS `vp_chop_broker_contracts` (
+  `id`             INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+  `for_identifier` VARCHAR(60)       NULL DEFAULT NULL,
+  `contract_type`  VARCHAR(30)       NOT NULL DEFAULT 'part_type',
+  `target_key`     VARCHAR(50)       NOT NULL,
+  `quantity`       SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+  `remaining`      SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+  `reward_mult`    DECIMAL(4, 2)     NOT NULL DEFAULT 1.00,
+  `bonus_cash`     INT UNSIGNED      NOT NULL DEFAULT 0,
+  `min_trust`      TINYINT UNSIGNED  NOT NULL DEFAULT 1,
+  `created_at`     TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at`     TIMESTAMP         NOT NULL,
+  `fulfilled_at`   TIMESTAMP         NULL DEFAULT NULL,
+  `state`          VARCHAR(20)       NOT NULL DEFAULT 'AVAILABLE',
+  PRIMARY KEY (`id`),
+  INDEX `idx_contracts_lookup` (`for_identifier`, `state`, `expires_at`),
+  INDEX `idx_contracts_global` (`for_identifier`, `state`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- [F2 persist] MIGRAÇÃO de bases vindas da v1.9.0 (que usavam INDEX idx_fake_real não-único).
 -- Rode APENAS se você já tinha a tabela antes desta versão. O db.lua faz isto automaticamente
 -- no boot (idempotente); este bloco é o equivalente manual:
