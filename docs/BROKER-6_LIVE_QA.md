@@ -46,8 +46,8 @@
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-A07:** `Config.Broker.Workshop.Provider = 'none'` padrão não derruba o resource.
-  - **Expected:** WorkshopBridge entra em modo degradado seguro (IsReady=false) sem travar boot.
+- [ ] **QA-A07:** `Config.Broker.Workshop.Provider = 'none'` padrão.
+  - **Expected:** Resource inicia normalmente; `WorkshopBridge.IsReady()` pode ser `true` se journal/schema estiverem saudáveis; `IsAvailable()` reporta `false`; handoff externo retorna `workshop_unavailable`; zero polling externo; Broker/Contracts/Bench/core permanecem 100% funcionais.
   - **Observed:**
   - **Evidence:**
 
@@ -144,12 +144,12 @@
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-C06:** Preço cotado na interface é idêntico ao valor creditado na conta do jogador.
-  - **Expected:** Zero desvio entre cotação client-side e liquidação server-side.
+- [ ] **QA-C06:** Cotação dinâmica e liquidação server-side.
+  - **Expected:** UI apresenta "Preço variável de mercado" para commodities dinâmicas; callback de venda retorna `res.payout`/`realTotal` autoritativo; dinheiro creditado é exatamente o valor retornado pelo servidor respeitando os bounds do `BrokerMarket` (`PriceFloor` a `PriceCeiling`).
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-C07:** Venda em volume de uma commodity reduz seu `demand_index` (pressão de mercado).
+- [ ] **QA-C07:** Venda em volume de uma commodity reduz seu `demand_index` (pressão de mercado via `RecordSalesBatch`).
   - **Expected:** Próxima cotação reflete preço menor dentro dos limites de piso (`PriceFloor`).
   - **Observed:**
   - **Evidence:**
@@ -159,8 +159,8 @@
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-C09:** Jogador com Trust 0 tenta forçar venda via evento.
-  - **Expected:** Rejeitado pelo servidor com `err_trust_gate`.
+- [ ] **QA-C09:** Jogador com Trust 0 tenta forçar venda de itens.
+  - **Expected:** Servidor retorna `ok = false` com erro `no_trust`; zero itens removidos e zero cash pago.
   - **Observed:**
   - **Evidence:**
 
@@ -174,7 +174,7 @@
 ## QA-D — PHYSICAL PART EXCLUSIVITY & TERMINAL DESTINATIONS
 
 - [ ] **QA-D01:** Retirar uma porta ou capô de um veículo no desmanche avançado.
-  - **Expected:** Peça anexada aos braços do jogador com `PartEntitlement` válido.
+  - **Expected:** Peça anexada aos braços do jogador com `PartEntitlement` em estado `ISSUED`.
   - **Observed:**
   - **Evidence:**
 
@@ -189,7 +189,7 @@
   - **Evidence:**
 
 - [ ] **QA-D04:** Vender a peça carregada no Broker NPC.
-  - **Expected:** `PartEntitlement` marcado como `CONSUMED`, prop removido, dinheiro pago.
+  - **Expected:** `PartEntitlement` transiciona para `CONSUMED`, prop removido, dinheiro pago.
   - **Observed:**
   - **Evidence:**
 
@@ -199,7 +199,7 @@
   - **Evidence:**
 
 - [ ] **QA-D06:** Retirar nova peça e processar na bancada (`chopshop_bench`).
-  - **Expected:** Peça consumida, sucatas geradas no inventário.
+  - **Expected:** Peça transiciona para `CONSUMED`, sucatas geradas no inventário.
   - **Observed:**
   - **Evidence:**
 
@@ -243,7 +243,7 @@
   - **Evidence:**
 
 - [ ] **QA-E06:** Carregar peça compatível nos braços e clicar no contrato aceito.
-  - **Expected:** Dispara `fulfillContract`, remove a peça dos braços e paga recompensa com multiplicador.
+  - **Expected:** Dispara `fulfillContract`, consome a peça (`CONSUMED`), remove o prop dos braços e paga recompensa com multiplicador.
   - **Observed:**
   - **Evidence:**
 
@@ -253,7 +253,7 @@
   - **Evidence:**
 
 - [ ] **QA-E08:** Tentar entregar peça errada ou incompatível.
-  - **Expected:** Rejeição com `err_wrong_part`, zero payout, peça permanece nos braços.
+  - **Expected:** Rejeição com `err_wrong_part`, zero payout, quota intacta e peça permanece nos braços.
   - **Observed:**
   - **Evidence:**
 
@@ -263,7 +263,7 @@
   - **Evidence:**
 
 - [ ] **QA-E10:** Entregar a última peça necessária para concluir o contrato (`remaining == 0`).
-  - **Expected:** Payout base + `bonus_cash` creditado exatamente uma vez; contrato finalizado (`FULFILLED`).
+  - **Expected:** `remaining = 0`, `state = 'COMPLETED'`, `fulfilled_at` preenchido no banco; `bonus_cash` creditado exatamente uma vez.
   - **Observed:**
   - **Evidence:**
 
@@ -315,13 +315,23 @@
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-G04:** Replay no mesmo veículo ou veículo com placa falsa.
-  - **Expected:** Verificação contra `carcass_ledger` impede re-entrega.
+- [ ] **QA-G04:** Veículo com placa falsa.
+  - **Expected:** Identidade econômica resolve a placa real subjacente; placa falsa não permite replay nem bypass de regras/ledger.
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-G05:** Tentativa com `netId` reciclado.
-  - **Expected:** Servidor valida `vsid` e não apaga veículo não relacionado.
+- [ ] **QA-G05:** Tentativa de replay do mesmo veículo já entregue.
+  - **Expected:** Verificação contra `carcass_ledger` impede re-entrega e segundo pagamento.
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-G06:** Falha na deleção da entidade veicular pós-pagamento.
+  - **Expected:** `cleanup_pending` registrado no ledger; retry de limpeza posterior sem segundo payout.
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-G07:** Tentativa com `netId` reciclado.
+  - **Expected:** Servidor valida `vsid` e modelo estrito, impedindo deletar veículo novo não relacionado.
   - **Observed:**
   - **Evidence:**
 
@@ -331,7 +341,7 @@
 
 ### Modalidade H0 — Standalone Default (`Config.Broker.Workshop.Provider = 'none'`)
 - [ ] **QA-H01:** Broker, Mercado, Contratos e Desmanche 100% funcionais sem provider externo.
-  - **Expected:** Zero polling, zero crashes, zero mensagens de erro no console.
+  - **Expected:** Zero polling externo, zero crashes, zero mensagens de erro no console.
   - **Observed:**
   - **Evidence:**
 
@@ -425,21 +435,36 @@
   - **Observed:**
   - **Evidence:**
 
+- [ ] **QA-I05:** Cumprimento de Contrato vs Reserva de Workshop na mesma `PartEntitlement`.
+  - **Expected:** Exatamente UM domínio ganha a posse; o outro falha (`external_reserved` / `already_consumed`); zero duplo pagamento.
+  - **Observed:**
+  - **Evidence:**
+
 ---
 
-## QA-J — PAYMENT FAILURE & REPLAY RESISTANCE
+## QA-J — PAYMENT FAILURE MATRIX
 
-- [ ] **QA-J01:** Falha de pagamento do framework no Broker.
-  - **Expected:** Transação aborta fail-closed, peça não é consumida ou é restaurada com segurança.
+- [ ] **QA-J01:** Falha de pagamento no Broker (peça física `PartEntitlement`).
+  - **Expected:** `BridgeAddCash` falha; entitlement permanece `CONSUMED` com `terminalConsumed = true`; zero payout; zero retry econômico; zero registro de pressão de venda (`RecordSalesBatch`).
   - **Observed:**
   - **Evidence:**
 
 - [ ] **QA-J02:** Falha de pagamento no cumprimento de contrato.
-  - **Expected:** Quota não é decrementada indevidamente sem pagamento comprovado.
+  - **Expected:** Entitlement permanece `CONSUMED`; quota permanece consumida; zero cash entregue; zero Trust XP ou evento concedido; retry não paga novamente.
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-J03:** Replay de evento de pagamento.
+- [ ] **QA-J03:** Falha de pagamento na Encomenda Especial Legada (`fulfillOrder`).
+  - **Expected:** Terminalização não permite replay de payout; zero XP ou eventos indevidos.
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-J04:** Falha de pagamento na venda de pneus.
+  - **Expected:** Zero double payout; entitlement/storage segue semântica fail-closed homologada; nenhuma venda repetida cria dinheiro.
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-J05:** Replay de qualquer operação financeira.
   - **Expected:** Zero criação indevida de dinheiro ou duplicidade de crédito.
   - **Observed:**
   - **Evidence:**
@@ -473,7 +498,7 @@
   - **Evidence:**
 
 - [ ] **QA-L02:** Resmon ocioso longe do Broker.
-  - **Expected:** $0.00$ ms (zero loops ativos desnecessários).
+  - **Expected:** Ocioso próximo de zero ($\le 0.01$ ms quando mensurável).
   - **Observed:**
   - **Evidence:**
 
@@ -482,8 +507,8 @@
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-L04:** Zero polling periódico desnecessário no banco de dados.
-  - **Expected:** Consultas executadas estritamente on-demand via callbacks.
+- [ ] **QA-L04:** Atividade de banco de dados e loops.
+  - **Expected:** Zero DB query per-frame; zero polling por jogador sem necessidade; zero tight loops; flush periódico de baixa frequência do `BrokerMarket` permitido; reconciliação de baixa frequência do `Workshop` permitida apenas enquanto houver pendências; `Provider = 'none'` não gera polling externo.
   - **Observed:**
   - **Evidence:**
 
@@ -494,9 +519,18 @@
 
 ---
 
-## Decisão de Aprovação Live QA
+## Decisão de Aprovação & Rastreabilidade de Live QA
 
 - **Resultado Global:** `[ ] APROVADO PARA RELEASE` / `[ ] REJEITADO (BLOQUEADORES ENCONTRADOS)`
 - **Auditor / QA Lead:** 
 - **Data:** 
-- **SHA Testado:** 
+- **SHA DO CÓDIGO TESTADO:** 
+- **BASE SHA:** 
+- **SERVER ARTIFACT/BUILD:** 
+- **DB MIGRATION START STATE:** 
+- **QBOX VERSION:** 
+- **OX_LIB VERSION:** 
+- **OX_INVENTORY VERSION:** 
+- **OXMYSQL VERSION:** 
+- **PROVIDER WORKSHOP:** `none` / `custom`
+- **NÚMERO DE CLIENTES:** `1` / `2+`

@@ -445,8 +445,7 @@ local function run()
         return 1.00
     end
     local warmId, _ = PE.Issue('session_warm', 1, 'door_dside_f', 10, { origin = 'advanced', provenance = { realPlate = 'WARM_PLATE', model = 100 } })
-    local curH = (os.date and tonumber(os.date('%H'))) or nil
-    local qWarm = BM.QuoteSale('body_panel', 1, { trustLevel = 2, progressionTier = 1, heatMultiplier = 0.90, hour = curH, jitter = 0.0 })
+    local qWarm = BM.QuoteSale('body_panel', 1, { trustLevel = 2, progressionTier = 1, heatMultiplier = 0.90, jitter = 0.0 })
     local resWarm = sellCarriedPartCb(1, warmId)
 
     check('B2-23 Provenance realPlate aplica multiplicador de Heat policial (warm 0.90)', resWarm.ok == true and resWarm.payout == qWarm.total and resWarm.payout == 621)
