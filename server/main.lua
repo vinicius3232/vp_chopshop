@@ -966,6 +966,8 @@ RegisterCommand('chopclear', function(src, args)
         end
     end
 
+    TriggerClientEvent('vp_chopshop:client:clearWorldProps', -1, filter)
+
     local msg = ('[vp_chopshop] Limpeza concluída: %d bancada(s) e %d soldadora(s) removidas.'):format(benchesRemoved, weldersRemoved)
     if src == 0 then
         print(msg)

@@ -1,10 +1,11 @@
 -- [FIX L-4] Forward-declarations obrigatórias: o handler onResourceStop (abaixo) é uma closure
 -- que só pode capturar upvalues JÁ EM SCOPE no momento da sua definição (Lua 5.4).
 -- Sem estas declarações, o handler acederia às versões globais (_G.xxx = nil).
-local AdvChopState   = {}
-local JackstandData  = {}
-local destroyToolProp           -- função definida mais abaixo; atribuída antes do 1.º uso
-local _toolProp      = nil      -- prop handle; partilhado com spawnToolProp / destroyToolProp
+local AdvChopState    = {}
+local JackstandData   = {}
+local GroundTyreProps = {}
+local destroyToolProp            -- função definida mais abaixo; atribuída antes do 1.º uso
+local _toolProp       = nil      -- prop handle; partilhado com spawnToolProp / destroyToolProp
 
 local function applyWorld(payload)
     if type(payload) ~= 'table' then return end
@@ -56,6 +57,34 @@ RegisterNetEvent('vp_chopshop:removeWelder', function(id)
     VPChopRemoveWelder(id)
 end)
 
+RegisterNetEvent('vp_chopshop:client:clearWorldProps', function(filter)
+    for prop in pairs(GroundTyreProps or {}) do
+        if DoesEntityExist(prop) then
+            pcall(exports.ox_target.removeLocalEntity, exports.ox_target, prop)
+            DeleteEntity(prop)
+        end
+    end
+    GroundTyreProps = {}
+
+    -- Varre e remove props de pneus no chão ao redor do jogador
+    if filter == 'all' or filter == 'tyres' or filter == 'pneu' or filter == 'pneus' then
+        local pCoords = GetEntityCoords(PlayerPedId())
+        local wheelHash = GetHashKey('prop_wheel_01')
+        local handle, obj = FindFirstObject()
+        local success = true
+        while success do
+            if DoesEntityExist(obj) and GetEntityModel(obj) == wheelHash then
+                if #(GetEntityCoords(obj) - pCoords) < 120.0 then
+                    pcall(exports.ox_target.removeLocalEntity, exports.ox_target, obj)
+                    DeleteEntity(obj)
+                end
+            end
+            success, obj = FindNextObject(handle)
+        end
+        EndFindObject(handle)
+    end
+end)
+
 RegisterNetEvent('vp_chopshop:client:ambushWarn', function(kind)
     local k = tostring(kind or '')
     local msg = L('notify_ambush_' .. k)
@@ -88,6 +117,14 @@ AddEventHandler('onResourceStop', function(res)
     for id in pairs(WelderEntities or {}) do
         VPChopRemoveWelder(id)
     end
+    for prop in pairs(GroundTyreProps or {}) do
+        if DoesEntityExist(prop) then
+            pcall(exports.ox_target.removeLocalEntity, exports.ox_target, prop)
+            DeleteEntity(prop)
+        end
+    end
+    GroundTyreProps = {}
+
     -- [FIX W-07] Props de jackstand (imp_prop_axel_stand_01a) criados em JackstandData
     -- precisam ser deletados explicitamente — caso contrário ficam como entidades orphan
     -- no mundo mesmo após o resource parar.
@@ -126,6 +163,24 @@ CreateThread(function()
     if wOk and world then
         applyWorld(world)
     end
+
+    -- [UX-F] Re-registrar ox_target em pneus deixados no chão após restart
+    local pCoords = GetEntityCoords(PlayerPedId())
+    local wheelHash = GetHashKey('prop_wheel_01')
+    local handle, obj = FindFirstObject()
+    local success = true
+    while success do
+        if DoesEntityExist(obj) and GetEntityModel(obj) == wheelHash then
+            if #(GetEntityCoords(obj) - pCoords) < 80.0 then
+                GroundTyreProps[obj] = true
+                if registerGroundTyreTarget then
+                    registerGroundTyreTarget(obj, nil)
+                end
+            end
+        end
+        success, obj = FindNextObject(handle)
+    end
+    EndFindObject(handle)
 end)
 
 -- ============================================================
@@ -473,6 +528,7 @@ end
 local function registerGroundTyreTarget(groundProp, groundEntitlementId)
     if not groundProp or not DoesEntityExist(groundProp) then return end
 
+    GroundTyreProps[groundProp] = groundEntitlementId or true
     local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
     local targetName = 'vp_ground_tyre_' .. tostring(groundProp)
 
@@ -487,6 +543,7 @@ local function registerGroundTyreTarget(groundProp, groundEntitlementId)
             end,
             onSelect    = function()
                 if VPChopCarryingPart then return end
+                GroundTyreProps[groundProp] = nil
                 exports.ox_target:removeLocalEntity(groundProp)
                 FreezeEntityPosition(groundProp, false)
 
@@ -532,6 +589,7 @@ local function registerGroundTyreTarget(groundProp, groundEntitlementId)
                     VPChopNotify(VPChopTyreLoadErr(res and res.err), 'error')
                     return
                 end
+                GroundTyreProps[groundProp] = nil
                 exports.ox_target:removeLocalEntity(groundProp)
                 DeleteEntity(groundProp)
                 VPChopNotify(L('tyre_stored_fmt', res.count, res.max or max), 'success')

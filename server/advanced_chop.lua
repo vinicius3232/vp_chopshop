@@ -191,6 +191,20 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_carcass', 4)
+
+    -- [UX-E Terminal Chassis Destruction]
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if veh and veh ~= 0 and DoesEntityExist(veh) then
+        if type(BridgeDeleteWorldVehicle) == 'function' then
+            BridgeDeleteWorldVehicle(veh)
+        else
+            DeleteEntity(veh)
+        end
+    end
+    if type(ChopSession) == 'table' and type(ChopSession.Complete) == 'function' then
+        ChopSession.Complete(sessionId)
+    end
+
     return { ok = true }
 end
 
