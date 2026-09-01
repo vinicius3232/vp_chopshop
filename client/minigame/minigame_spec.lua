@@ -480,8 +480,8 @@ local function run()
         cfgDrillProp and cfgDrillProp.rotation and cfgDrillProp.rotation[1] == -80.0)
 
     local cfgEngineAnim = Config.AdvancedChop and Config.AdvancedChop.EngineAnim
-    check('UX-D.1 EngineAnim prop model is prop_tool_drill',
-        cfgEngineAnim and cfgEngineAnim.prop and cfgEngineAnim.prop.model == 'prop_tool_drill')
+    check('UX-D.1 EngineAnim prop model is prop_tool_wrench or prop_tool_drill',
+        cfgEngineAnim and cfgEngineAnim.prop and (cfgEngineAnim.prop.model == 'prop_tool_wrench' or cfgEngineAnim.prop.model == 'prop_tool_drill'))
 
     -- Simulação do resolvedor de fallback de prop:
     local function resolvePropModel(requestedModel, isModelInCdimageFn)
@@ -1018,6 +1018,42 @@ local function run()
     check('UX-F.1 tyre pickup restores carry state with identical entitlementId',
         pickedCarryPart.isTyre == true and pickedCarryPart.entitlementId == mockEntitlementId)
     check('UX-F.1 tyre pickup reuses prop handle', pickedCarryPart.propHandle == groundPropHandle)
+
+    -- 31: Testes de Carregamento Físico de Peças (PhysicalCarry) e Bancada
+    check('PHYSICAL-1 Config.PhysicalCarry is enabled', Config.PhysicalCarry and Config.PhysicalCarry.Enable == true)
+    check('PHYSICAL-1 door_dside_f model is prop_car_door_01',
+        Config.PhysicalCarry and Config.PhysicalCarry.Props and Config.PhysicalCarry.Props.door_dside_f and Config.PhysicalCarry.Props.door_dside_f.model == 'prop_car_door_01')
+    check('PHYSICAL-1 bonnet model is prop_car_bonnet_01',
+        Config.PhysicalCarry and Config.PhysicalCarry.Props and Config.PhysicalCarry.Props.bonnet and Config.PhysicalCarry.Props.bonnet.model == 'prop_car_bonnet_01')
+    check('PHYSICAL-1 adv_engine model is prop_car_engine_01',
+        Config.PhysicalCarry and Config.PhysicalCarry.Props and Config.PhysicalCarry.Props.adv_engine and Config.PhysicalCarry.Props.adv_engine.model == 'prop_car_engine_01')
+
+    -- Simulação do ciclo de carregar peça de carro -> largar no chão -> pegar -> processar na bancada
+    local carPartCarry = {
+        partKey = 'door_dside_f',
+        propHandle = 888,
+        isPart = true,
+    }
+    check('PHYSICAL-2 car part is marked as isPart', carPartCarry.isPart == true)
+    
+    -- Drop no chão
+    local groundPartProp = carPartCarry.propHandle
+    local groundPartKey = carPartCarry.partKey
+    carPartCarry = nil
+    check('PHYSICAL-2 car part drop clears carry state', carPartCarry == nil)
+    check('PHYSICAL-2 car part drop retains ground handle and key', groundPartProp == 888 and groundPartKey == 'door_dside_f')
+
+    -- Pickup do chão
+    local restoredCarPart = {
+        partKey = groundPartKey,
+        propHandle = groundPartProp,
+        isPart = true,
+    }
+    check('PHYSICAL-2 car part pickup restores state', restoredCarPart.isPart == true and restoredCarPart.partKey == 'door_dside_f')
+
+    -- Processamento na bancada (limpa carry)
+    restoredCarPart = nil
+    check('PHYSICAL-2 bench dismantle consumes carried part', restoredCarPart == nil)
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end

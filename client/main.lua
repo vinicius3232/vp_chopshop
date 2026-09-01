@@ -525,6 +525,141 @@ local function attachWheelPropToPed(prop)
     return true
 end
 
+local function attachCarPartToPed(prop, partKey)
+    if not prop or not DoesEntityExist(prop) then return false end
+    local ped = PlayerPedId()
+    local bone = GetPedBoneIndex(ped, 4089)
+    local pCfg = (Config.PhysicalCarry and Config.PhysicalCarry.Props and Config.PhysicalCarry.Props[partKey])
+        or { offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } }
+    local off = pCfg.offset or { 0.10, 0.18, 0.15 }
+    local rot = pCfg.rotation or { 0.0, -20.0, 90.0 }
+
+    AttachEntityToEntity(prop, ped, bone,
+        off[1], off[2], off[3],
+        rot[1], rot[2], rot[3],
+        true, false, false, false, 2, true)
+
+    RequestAnimDict('anim@heists@box_carry@')
+    local t0 = GetGameTimer()
+    while not HasAnimDictLoaded('anim@heists@box_carry@') and (GetGameTimer() - t0 < 2000) do
+        Wait(50)
+    end
+    if HasAnimDictLoaded('anim@heists@box_carry@') then
+        TaskPlayAnim(ped, 'anim@heists@box_carry@', 'idle', 5.0, 1.0, -1, 49, 0.0, false, false, false)
+    end
+    return true
+end
+
+local function registerGroundPartTarget(groundProp, partKey)
+    if not groundProp or not DoesEntityExist(groundProp) then return end
+
+    local targetName = 'vp_ground_part_' .. tostring(groundProp)
+    exports.ox_target:addLocalEntity(groundProp, {
+        {
+            name        = targetName .. '_pick',
+            label       = L('part_pickup'),
+            icon        = 'fa-solid fa-hand',
+            distance    = 2.0,
+            canInteract = function()
+                return not VPChopCarryingPart
+            end,
+            onSelect    = function()
+                if VPChopCarryingPart then return end
+                exports.ox_target:removeLocalEntity(groundProp)
+                FreezeEntityPosition(groundProp, false)
+
+                local ped = PlayerPedId()
+                RequestAnimDict('anim@mp_snowball')
+                local t0 = GetGameTimer()
+                while not HasAnimDictLoaded('anim@mp_snowball') and (GetGameTimer() - t0 < 1000) do
+                    Wait(20)
+                end
+                if HasAnimDictLoaded('anim@mp_snowball') then
+                    TaskPlayAnim(ped, 'anim@mp_snowball', 'pickup_snowball', 4.0, -4.0, 600, 0, 0.0, false, false, false)
+                    Wait(500)
+                end
+
+                attachCarPartToPed(groundProp, partKey)
+                VPChopCarryingPart = {
+                    partKey    = partKey,
+                    propHandle = groundProp,
+                    isPart     = true,
+                }
+                lib.showTextUI(L('carry_part_textui'), {
+                    position = 'left-center',
+                    icon     = 'boxes-stacked',
+                })
+            end,
+        },
+    })
+end
+
+local function placeCarPartOnGround()
+    if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
+
+    local handProp = VPChopCarryingPart.propHandle
+    local partKey  = VPChopCarryingPart.partKey
+
+    VPChopCarryingPart.propHandle = nil
+    VPChopDropCarryPart()
+
+    if not handProp or not DoesEntityExist(handProp) then return end
+
+    DetachEntity(handProp, false, false)
+
+    local ped  = PlayerPedId()
+    local fwd  = GetEntityForwardVector(ped)
+    local px, py, pz = table.unpack(GetEntityCoords(ped))
+    local dropX = px + (fwd.x * 0.85)
+    local dropY = py + (fwd.y * 0.85)
+    local found, gz = GetGroundZFor_3dCoord(dropX, dropY, pz + 2.0, false)
+    local finalZ = (found and (gz + 0.15)) or (pz - 0.85)
+
+    SetEntityCoordsNoOffset(handProp, dropX, dropY, finalZ, false, false, false)
+    SetEntityRotation(handProp, 0.0, 0.0, GetEntityHeading(ped), 2, true)
+    if PlaceObjectOnGroundProperly then
+        pcall(PlaceObjectOnGroundProperly, handProp)
+    end
+    FreezeEntityPosition(handProp, true)
+
+    registerGroundPartTarget(handProp, partKey)
+    VPChopNotify(L('part_dropped'), 'inform')
+end
+
+local function spawnCarriedPartInHands(partKey, veh)
+    if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then return nil end
+    local pCfg = Config.PhysicalCarry.Props and Config.PhysicalCarry.Props[partKey]
+    if not pCfg or not pCfg.model then return nil end
+
+    local modelHash = GetHashKey(pCfg.model)
+    RequestModel(modelHash)
+    local deadline = GetGameTimer() + 4000
+    while not HasModelLoaded(modelHash) do
+        if GetGameTimer() > deadline then return nil end
+        Wait(50)
+    end
+
+    local ped  = PlayerPedId()
+    local pos  = GetEntityCoords(ped)
+    local prop = CreateObject(modelHash, pos.x, pos.y, pos.z, true, true, true)
+    SetEntityAsMissionEntity(prop, true, true)
+    SetModelAsNoLongerNeeded(modelHash)
+    if not prop or prop == 0 then return nil end
+
+    attachCarPartToPed(prop, partKey)
+    VPChopCarryingPart = {
+        partKey    = partKey,
+        propHandle = prop,
+        isPart     = true,
+        veh        = veh,
+    }
+    lib.showTextUI(L('carry_part_textui'), {
+        position = 'left-center',
+        icon     = 'boxes-stacked',
+    })
+    return prop
+end
+
 local function registerGroundTyreTarget(groundProp, groundEntitlementId)
     if not groundProp or not DoesEntityExist(groundProp) then return end
 
@@ -1660,6 +1795,9 @@ local function doAdvAction(veh, netId, tCfg, opts)
                 JackstandData[veh] = nil
             end
             exports.ox_target:removeLocalEntity(veh)
+        else
+            -- [PHYSICAL CARRY] Spawna a peça física na mão do jogador
+            spawnCarriedPartInHands(opts.action, veh)
         end
         VPChopNotify(L(opts.notifyOk), 'success')
     end)
@@ -2244,19 +2382,27 @@ RegisterCommand('-vp_tyre_options', function() end, false)
 RegisterCommand('soltarpneu', placeTyreHandPropOnGround, false)
 RegisterCommand('droptyre', placeTyreHandPropOnGround, false)
 
--- Loop de escuta de controles enquanto transporta o pneu (100% responsivo)
+-- Loop de escuta de controles enquanto transporta o pneu ou peça de carro (100% responsivo)
 CreateThread(function()
     while true do
-        if VPChopCarryingPart and VPChopCarryingPart.isTyre then
-            -- 47 = INPUT_DETONATE (G a pé)
-            if IsControlJustPressed(0, 47) or IsDisabledControlJustPressed(0, 47) then
-                openTyreOptionsMenu()
-            -- 38 = INPUT_PICKUP / INPUT_CONTEXT (E a pé) -> solta direto no chão
-            elseif IsControlJustPressed(0, 38) or IsDisabledControlJustPressed(0, 38) then
-                placeTyreHandPropOnGround()
-            -- 73 = INPUT_VEH_DUCK (X a pé) -> solta no chão
-            elseif IsControlJustPressed(0, 73) or IsDisabledControlJustPressed(0, 73) then
-                placeTyreHandPropOnGround()
+        if VPChopCarryingPart then
+            if VPChopCarryingPart.isTyre then
+                -- 47 = INPUT_DETONATE (G a pé)
+                if IsControlJustPressed(0, 47) or IsDisabledControlJustPressed(0, 47) then
+                    openTyreOptionsMenu()
+                -- 38 = INPUT_PICKUP / INPUT_CONTEXT (E a pé) -> solta direto no chão
+                elseif IsControlJustPressed(0, 38) or IsDisabledControlJustPressed(0, 38) then
+                    placeTyreHandPropOnGround()
+                -- 73 = INPUT_VEH_DUCK (X a pé) -> solta no chão
+                elseif IsControlJustPressed(0, 73) or IsDisabledControlJustPressed(0, 73) then
+                    placeTyreHandPropOnGround()
+                end
+            elseif VPChopCarryingPart.isPart then
+                -- 38 = INPUT_PICKUP / INPUT_CONTEXT (E a pé) -> solta a peça no chão
+                if IsControlJustPressed(0, 38) or IsDisabledControlJustPressed(0, 38) or
+                   IsControlJustPressed(0, 73) or IsDisabledControlJustPressed(0, 73) then
+                    placeCarPartOnGround()
+                end
             end
             Wait(0)
         else

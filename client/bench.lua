@@ -75,6 +75,30 @@ local function craftOnBench(benchId, recipeIndex, recipe)
     end
 end
 
+local function doProcessCarriedPartOnBench(benchId)
+    if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
+    local partKey = VPChopCarryingPart.partKey
+
+    local ok = lib.progressBar({
+        duration = 3500,
+        label = L('bench_processing_part'),
+        useWhileDead = false,
+        canCancel = true,
+        disable = { move = true, car = true, combat = true },
+        anim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+    })
+    if not ok then return end
+
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchProcessPart', false, benchId, partKey)
+    if not cbOk or not res or not res.ok then
+        VPChopNotify(L('notify_generic_error'), 'error')
+        return
+    end
+
+    VPChopDropCarryPart()
+    VPChopNotify(L('bench_part_processed'), 'success')
+end
+
 ---@param bench { id: integer, x: number, y: number, z: number, heading: number }
 function VPChopUpsertBench(bench)
     clearBench(bench.id)
@@ -96,6 +120,22 @@ function VPChopUpsertBench(bench)
     SetModelAsNoLongerNeeded(model)
 
     local options = {}
+
+    -- [PHYSICAL CARRY] Desmanchar peça que o jogador está carregando nos braços
+    options[#options + 1] = {
+        name = ('vp_chop_bench_process_part_%s'):format(bench.id),
+        label = L('bench_process_part'),
+        icon = 'fa-solid fa-recycle',
+        distance = Config.InteractDistance,
+        canInteract = function()
+            if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
+            return VPChopCarryingPart and VPChopCarryingPart.isPart == true
+        end,
+        onSelect = function()
+            doProcessCarriedPartOnBench(bench.id)
+        end,
+    }
+
     for index, recipe in ipairs(Config.BenchRecipes) do
         local idx = index
         options[#options + 1] = {

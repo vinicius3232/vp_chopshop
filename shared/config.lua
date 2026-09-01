@@ -830,7 +830,7 @@ Config.AdvancedChop = {
         clip = 'fixing_a_player',
         flag = 1,
         prop = {
-            model    = 'prop_tool_drill',
+            model    = 'prop_tool_wrench',
             offset   = { 0.12, 0.04, -0.02 },
             rotation = { -80.0, 0.0, 0.0 },
         },
@@ -847,6 +847,29 @@ Config.AdvancedChop = {
             offset   = { 0.08, 0.03, 0.0 },
             rotation = { 0, 0, 0 },
         },
+    },
+}
+
+--- Carregamento físico de peças retiradas (portas, capô, porta-malas, motor) e processamento na bancada.
+Config.PhysicalCarry = {
+    Enable = true,
+
+    --- Mapeamento de props e offsets ao carregar a peça nos braços (bone 4089 / 28422)
+    Props = {
+        door_dside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_pside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_dside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_pside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        bonnet       = { model = 'prop_car_bonnet_01', offset = { 0.12, 0.18, 0.10 }, rotation = { 0.0, 10.0, 0.0 } },
+        boot         = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        adv_engine   = { model = 'prop_car_engine_01', offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+    },
+
+    --- Animação enquanto carrega a peça pesada
+    CarryAnim = {
+        dict = 'anim@heists@box_carry@',
+        clip = 'idle',
+        flag = 49,
     },
 }
 

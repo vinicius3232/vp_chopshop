@@ -504,9 +504,38 @@ lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipe
     return { ok = true }
 end)
 
--- [GAMEPLAY unificação] Callback 'vp_chopshop:deliverPart' REMOVIDO.
--- A recompensa da Fase 1 agora é imediata (ver callback 'vp_chopshop:chopPart' acima),
--- igual às fases avançadas. Não há mais "entrega de peça na bancada" — a bancada só faz craft.
+--- [PHYSICAL CARRY] Processamento de peça física carregada na bancada de trabalho
+lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, partKey)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    benchId = tonumber(benchId)
+    local bench = benchId and benchById(benchId)
+    if not bench then return { ok = false, err = 'bench' } end
+    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
+    if not partKey or type(partKey) ~= 'string' then return { ok = false, err = 'part' } end
+
+    if partKey == 'adv_engine' then
+        local baseParts = (Config.AdvancedChop and Config.AdvancedChop.EngineReward and Config.AdvancedChop.EngineReward.amount) or 5
+        VPChopAddStolenCarParts(source, 0, baseParts)
+        InvAdd(source, 'metalscrap', 4)
+        InvAdd(source, 'steel', 3)
+    elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
+        for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
+            local chance = tonumber(cfg.chance) or 1.0
+            if math.random() <= chance then
+                local amt = math.random(1, cfg.amount or 1)
+                InvAdd(source, itemName, amt)
+            end
+        end
+        VPChopAddStolenCarParts(source, 0, 1)
+    else
+        VPChopAddStolenCarParts(source, 0, 1)
+        InvAdd(source, 'metalscrap', 3)
+        InvAdd(source, 'steel', 2)
+        InvAdd(source, 'aluminum', 2)
+    end
+
+    return { ok = true }
+end)
 
 --- [v1.15 PR-D hardening] Retries locais de deleção de mundo. Cada tentativa REVALIDA:
 ---   1. sessão continua COMPLETED (tombstone);

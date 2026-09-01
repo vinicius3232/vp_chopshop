@@ -152,6 +152,19 @@ _G.Config = {
         bonnet   = { steel  = { amount = 3, chance = 1.0 } },
         boot     = { steel  = { amount = 3, chance = 1.0 } },
     },
+    PhysicalCarry = {
+        Enable = true,
+        Props = {
+            door_dside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+            door_pside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+            door_dside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+            door_pside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+            bonnet       = { model = 'prop_car_bonnet_01', offset = { 0.12, 0.18, 0.10 }, rotation = { 0.0, 10.0, 0.0 } },
+            boot         = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+            adv_engine   = { model = 'prop_car_engine_01', offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+        },
+        CarryAnim = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 49 },
+    },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
 if not _G.vector3 then

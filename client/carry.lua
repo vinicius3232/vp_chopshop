@@ -11,14 +11,14 @@ VPChopCarryingPart = nil
 --- Se era um pneu do macaco, limpa animação carry e esconde TextUI.
 function VPChopDropCarryPart()
     if not VPChopCarryingPart then return end
-    local wasTyre = VPChopCarryingPart.isTyre
-    local prop    = VPChopCarryingPart.propHandle
+    local wasCarrying = VPChopCarryingPart.isTyre or VPChopCarryingPart.isPart
+    local prop        = VPChopCarryingPart.propHandle
     if prop and DoesEntityExist(prop) then
         DetachEntity(prop, true, true)
         DeleteEntity(prop)
     end
     VPChopCarryingPart = nil
-    if wasTyre then
+    if wasCarrying then
         ClearPedTasksImmediately(PlayerPedId())
         lib.hideTextUI()
     end
