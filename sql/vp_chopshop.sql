@@ -127,6 +127,20 @@ CREATE TABLE IF NOT EXISTS `vp_chop_legit_serials` (
   PRIMARY KEY (`serial`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── [v1.17 BROKER] Snapshot de Mercado Dinâmico (Dynamic Broker Market) ──────
+-- commodity: PK, nome técnico ('catalytic_converter', 'adv_engine', 'tyre', etc.)
+-- demand_index: índice de demanda atual (0.4000 a 1.3000, equilíbrio = 1.0000)
+-- recent_volume: volume acumulado de unidades vendidas
+-- last_recovery: timestamp da última atualização/recuperação temporal
+
+CREATE TABLE IF NOT EXISTS `vp_chop_broker_market` (
+  `commodity`     VARCHAR(64)          NOT NULL,
+  `demand_index`  DECIMAL(5, 4)        NOT NULL DEFAULT 1.0000,
+  `recent_volume` INT UNSIGNED         NOT NULL DEFAULT 0,
+  `last_recovery` TIMESTAMP            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`commodity`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- [F2 persist] MIGRAÇÃO de bases vindas da v1.9.0 (que usavam INDEX idx_fake_real não-único).
 -- Rode APENAS se você já tinha a tabela antes desta versão. O db.lua faz isto automaticamente
 -- no boot (idempotente); este bloco é o equivalente manual:

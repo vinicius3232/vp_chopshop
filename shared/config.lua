@@ -1215,3 +1215,69 @@ Config.TyreMarks = {
         [22] = 'Animal/Outro',
     },
 }
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- [v1.17] CHOP BROKER & DYNAMIC MARKET ENGINE
+-- ─────────────────────────────────────────────────────────────────────────────
+
+Config.Broker = {
+    Enable = true,
+    Debug = false, -- Logs de auditoria do mercado (default off em produção)
+
+    Market = {
+        DemandFloor = 0.40,      -- Demanda mínima (40% de saturação máxima)
+        DemandCeiling = 1.30,    -- Demanda máxima (130% em alta procura)
+        PriceFloor = 0.40,       -- Floor multiplicador sobre basePrice para transações elegíveis
+        PriceCeiling = 2.50,     -- Teto absoluto multiplicador sobre basePrice
+        Jitter = 0.03,           -- Jitter de negociação (+/- 3%)
+        FlushIntervalSec = 300,  -- Intervalo de flush do mercado para DB (5 min)
+    },
+
+    Commodities = {
+        catalytic_converter = {
+            basePrice = 1600,
+            salePressure = 0.04,     -- 4% queda de demanda por unidade
+            recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
+        },
+        adv_engine = {
+            basePrice = 2800,
+            salePressure = 0.05,     -- 5% queda de demanda por unidade
+            recoveryPerHour = 0.12,  -- 12% recuperação por hora rumo a 1.0
+        },
+        tyre = {
+            basePrice = 450,
+            salePressure = 0.015,    -- 1.5% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+        stolen_plate = {
+            basePrice = 1200,
+            salePressure = 0.03,     -- 3% queda de demanda por unidade
+            recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
+        },
+        metalscrap = {
+            basePrice = 120,
+            salePressure = 0.002,    -- 0.2% queda de demanda por unidade
+            recoveryPerHour = 0.25,  -- 25% recuperação por hora rumo a 1.0
+        },
+        steel = {
+            basePrice = 180,
+            salePressure = 0.003,    -- 0.3% queda de demanda por unidade
+            recoveryPerHour = 0.25,  -- 25% recuperação por hora rumo a 1.0
+        },
+        aluminum = {
+            basePrice = 200,
+            salePressure = 0.004,    -- 0.4% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+        copper = {
+            basePrice = 300,
+            salePressure = 0.005,    -- 0.5% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+        car_parts = {
+            basePrice = 350,
+            salePressure = 0.004,    -- 0.4% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+    },
+}
