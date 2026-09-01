@@ -1,20 +1,21 @@
 # BROKER SECURITY MODEL & FAILURE MATRIX — vp_chopshop v1.17
 
-**Data:** 2026-09-01 (Revisão BROKER-4.2)  
+**Data:** 2026-09-01 (Revisão BROKER-5)  
 **Autor:** Principal Security Engineer  
-**Status:** ESPECIFICAÇÃO DE SEGURANÇA & MATRIZ DE FALHAS (VALIDADO COM PERSISTENT JOURNAL, STRICT STABLE IDENTITY, SCHEMA PROBE E HARNESS DE TESTES COMPLETO: 1478 PASS / 0 FAIL)
+**Status:** ESPECIFICAÇÃO DE SEGURANÇA & MATRIZ DE FALHAS (VALIDADO COM PERSISTENT JOURNAL, STRICT STABLE IDENTITY, SCHEMA PROBE, CONTEXT UI SERVER-AUTH E HARNESS DE TESTES COMPLETO: 1518 PASS / 0 FAIL)
 
 ---
 
 ## 1. Princípios de Segurança do Broker & Mercado
 
-1. **Trust-No-Client:** O client envia exclusivamente identificadores de intenção (`contractId`, `entitlementId`). O servidor resolve autoritativamente a entidade, posse, integridade, demanda, multiplicadores e pagamentos.
+1. **Trust-No-Client:** O client envia exclusivamente identificadores de intenção (`contractId`, `entitlementId`). O servidor resolve autoritativamente a entidade, posse, integridade, demanda, multiplicadores e pagamentos. O client nunca define capacidades, preços, cooldowns ou níveis de confiança.
 2. **At-Most-Once Terminal Disposition:** Cada peça física ou entitlement possui exatamente uma destinação econômica terminal (venda NPC, contrato, oficina ou bancada).
 3. **Fail-Closed Economics:** Em qualquer falha de rede, timeout, queda de banco de dados ou indisponibilidade de adapter externo, o sistema prioriza a integridade econômica, abortando operações sem conceder valores não lastreados.
 4. **Persistent Transaction Journaling:** Nenhuma transação externa com potencial impacto financeiro depende exclusivamente de memória RAM. O estado `COMMITTING` e `COMMITTED` são comprovados no banco antes de requisições de pagamento ou liquidações locais.
-5. **Classificação de Certeza:**  
+5. **Fresh Server Context on Every Open:** O menu de contexto do Broker consulta sempre o contexto mais recente do servidor (`vp_chopshop:broker:getNpcContext`), recalculando capabilities server-side sem confiar em caches client-side desatualizados.
+6. **Classificação de Certeza:**  
    > **DECLARAÇÃO DE CONFORMIDADE:**  
-   > Os protocolos de segurança descritos neste documento foram **IMPLEMENTADOS E COMPROVADOS EM TESTES AUTOMATIZADOS** com 1478 asserts aprovados e zero regressões.
+   > Os protocolos de segurança descritos neste documento foram **IMPLEMENTADOS E COMPROVADOS EM TESTES AUTOMATIZADOS** com 1518 asserts aprovados e zero regressões.
 
 ---
 
@@ -85,3 +86,12 @@ Durante a auditoria arquitetural, foram isolados 2 achados que pertencem à rele
 - `WORKSHOP-05`: Replay de requisição `CommitPurchase` é rigorosamente idempotente.
 - `WORKSHOP-06`: Simulação de reboot durante `COMMITTING` recupera status no boot sweeper sem ressuscitar o entitlement.
 - `WORKSHOP-07`: Handoff de `stolen_plate` preserva integralmente metadados e valida identidade do invocador server-side.
+
+### 5.3. Testes de Context UI, Persona & Sanitização (`NPC-CTX-01` .. `08`, `NPC-FLAG-01` .. `03`, `NPC-LOCALE-01`)
+- `NPC-CTX-01`: Validação de source e PlayerReady $\to$ fail-closed com `invalid_source` e `player`.
+- `NPC-CTX-02`: Validação de proximidade real ao Fence $\to$ `distance` ou `no_fence`.
+- `NPC-CTX-03` .. `07`: Gates estritos de capacidades por Trust level (0: introduce; 1: sell; 2: hotJob/status/buyBench; 3: legacyOrder/contracts; 4: deliverCar).
+- `NPC-CTX-08`: Fresh Server Context $\to$ reaberturas sucessivas buscam sempre o Trust atualizado no banco, sem confiar em cache local.
+- `NPC-FLAG-01` .. `03`: Respeito estrito às feature flags (`Config.NPC.Shop.Enable`, `Config.Broker.Contracts.Enable`, `Config.Broker.Enable`).
+- `NPC-LOCALE-01`: Paridade total das 46 novas chaves de tradução entre `pt`, `en`, `es`, `fr`, `tr`.
+- `NPC-NO-ECONOMY-DRIFT-01`: Verificação de canaries econômicas (bounds, pools, base prices inalterados).
