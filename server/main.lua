@@ -852,7 +852,6 @@ RegisterCommand('choptest', function(src, args)
         return
     end
 
-    local inv = exports.ox_inventory
     local kit = {
         { item = Config.Items.placeBench,  qty = 1 },
         { item = Config.Items.placeWelder, qty = 1 },
@@ -867,12 +866,8 @@ RegisterCommand('choptest', function(src, args)
 
     local given, failed = {}, {}
     for _, entry in ipairs(kit) do
-        local result = inv:AddItem(target, entry.item, entry.qty)
-        if Config.Debug then
-            print(('[vp_chopshop] choptest AddItem(%s, %s, %d) → %s'):format(
-                target, entry.item, entry.qty, tostring(result)))
-        end
-        if result and result ~= false then
+        local ok = InvAdd(target, entry.item, entry.qty)
+        if ok then
             given[#given + 1] = entry.item .. ' x' .. entry.qty
         else
             failed[#failed + 1] = entry.item
