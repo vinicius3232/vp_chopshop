@@ -660,6 +660,20 @@ end)
 local _catalyticThefts    = {} -- [src] = { token, netId, startedAt, minDurationMs, expiresAt }
 local _catalyticCompleted = {} -- [token] = { entitlementId, completedAt }
 
+local CATALYTIC_REPLAY_TTL_MS = 120000 -- 120s TTL para resultado de replay
+
+CreateThread(function()
+    while true do
+        Wait(60000)
+        local now = GetGameTimer()
+        for tok, entry in pairs(_catalyticCompleted) do
+            if (now - entry.completedAt) > CATALYTIC_REPLAY_TTL_MS then
+                _catalyticCompleted[tok] = nil
+            end
+        end
+    end
+end)
+
 AddEventHandler('playerDropped', function()
     local src = source
     _catalyticThefts[src] = nil
@@ -708,15 +722,21 @@ lib.callback.register('vp_chopshop:catalytic:start', function(source, netId)
     return { ok = true, token = token, durationMs = minDurationMs }
 end)
 
---- [v1.16 SEC-1.1 / SEC-1.2 CAT-ACTION] Conclusão do furto de catalisador (Replay Idempotente + Token Identity)
+--- [v1.16 SEC-1.1 / SEC-1.2 / SEC-1.3 CAT-ACTION] Conclusão do furto de catalisador (Replay Idempotente + TTL + Token Identity)
 lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, token)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
     if type(token) ~= 'string' or token == '' then return { ok = false, err = 'invalid' } end
 
-    -- [v1.16 SEC-1.2] Replay idempotente com retenção de resultado
+    local now = GetGameTimer()
+
+    -- [v1.16 SEC-1.2 / SEC-1.3] Replay idempotente com retenção de resultado e TTL (120s)
     local prev = _catalyticCompleted[token]
     if prev then
-        return { ok = true, replay = true, entitlementId = prev.entitlementId, partKey = 'catalytic_converter' }
+        if (now - prev.completedAt) <= CATALYTIC_REPLAY_TTL_MS then
+            return { ok = true, replay = true, entitlementId = prev.entitlementId, partKey = 'catalytic_converter' }
+        else
+            _catalyticCompleted[token] = nil
+        end
     end
 
     local theft = _catalyticThefts[source]
@@ -727,7 +747,6 @@ lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, 
         return { ok = false, err = 'invalid' }
     end
 
-    local now = GetGameTimer()
     if now < (theft.startedAt + theft.minDurationMs - 250) then
         if PartEntitlement and PartEntitlement.LogSuspicious then
             PartEntitlement.LogSuspicious(source, 'catalytic_theft_too_fast', ('elapsed=%d min=%d'):format(now - theft.startedAt, theft.minDurationMs))
@@ -808,7 +827,18 @@ lib.callback.register('vp_chopshop:fence:sellCatalytic', function(source, entitl
     local maxPay = tonumber(cfg.max) or 2200
     local payout = math.random(minPay, maxPay)
 
-    BridgeAddMoney(source, 'cash', payout)
+    -- [v1.16 SEC-1.3] Paga via API canônica BridgeAddCash e valida retorno booleano
+    local paid = BridgeAddCash(source, payout, 'chopshop_fence_catalytic')
+    if not paid then
+        local playerKey = (type(ServerChopPlayerKey) == 'function' and ServerChopPlayerKey(source)) or tostring(source)
+        print(('[vp_chopshop][fence] CRITICAL: BridgeAddCash failed post-consume for src %d (playerKey: %s, entitlement: %s, payout: %d)'):format(
+            source, playerKey, tostring(entitlementId), payout
+        ))
+        -- Fail-closed post-consume: o entitlement já foi consumido para impedir dupes.
+        -- Não tenta pagar novamente e não restaura o entitlement.
+        return { ok = false, err = 'payment_failed' }
+    end
+
     return { ok = true, payout = payout }
 end)
 

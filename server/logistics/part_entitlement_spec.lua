@@ -227,15 +227,45 @@ local function run()
     check('CAT-REUSE-01 veiculo B recebe entitlement NOVO', legitVehBCall.ok == true and legitVehBCall.entitlementId ~= legitCatCall.entitlementId)
     check('CAT-REUSE-01 novo entitlement está no estado ISSUED', PartEntitlement.State(legitVehBCall.entitlementId) == 'ISSUED')
 
+    -- ─── CAT-TTL-01 .. 02: Catalytic Replay TTL (120s) ───────────────────────
+    local function mockCatReplayCheck(token, currentOffset)
+        local entry = mockCatCompleted[token]
+        if not entry then return nil end
+        if (currentOffset or 0) > 120.0 then
+            mockCatCompleted[token] = nil
+            return nil
+        end
+        return { ok = true, replay = true, entitlementId = entry.entitlementId }
+    end
+
+    local withinTtl = mockCatReplayCheck(startTh.token, 60.0) -- 60s pós-complete
+    check('CAT-TTL-01 replay dentro de 120s retorna replay=true', withinTtl ~= nil and withinTtl.replay == true)
+
+    local afterTtl = mockCatReplayCheck(startTh.token, 125.0) -- 125s pós-complete
+    check('CAT-TTL-02 replay após 120s expira e limpa da memória', afterTtl == nil and mockCatCompleted[startTh.token] == nil)
+
     -- ─── ENT-15 .. ENT-19: Fence Catalytic Hardening ──────────────────────────
     local idEngine, _ = PartEntitlement.Issue('session_fence_test', 1, 'adv_engine', 10)
     local idCat, _    = PartEntitlement.Issue('session_fence_cat', 1, 'catalytic_converter', 10)
     local idCatOther, _ = PartEntitlement.Issue('session_fence_cat_other', 2, 'catalytic_converter', 10)
+    local idCatPayFail, _ = PartEntitlement.Issue('session_fence_pay_fail', 1, 'catalytic_converter', 10)
 
-    local function mockFenceSellCatalytic(src, entId)
+    -- [v1.16 SEC-1.3] Canary da API de Pagamento da Bridge
+    check('CANARY-BRIDGE-01 BridgeAddCash existe e é uma função', type(BridgeAddCash) == 'function')
+    check('CANARY-BRIDGE-01 BridgeAddMoney inexistente (não utilizada)', rawget(_G, 'BridgeAddMoney') == nil)
+
+    local function mockFenceSellCatalytic(src, entId, simulateCashFail)
         local cRes = PartEntitlement.Consume(entId, src, 'fence_sell_catalytic', 'catalytic_converter')
         if not cRes.ok then return { ok = false, err = cRes.err, payout = 0 } end
         local payout = 1500
+        if simulateCashFail then
+            -- Simula falha no BridgeAddCash
+            return { ok = false, err = 'payment_failed', payout = 0 }
+        end
+        local okCash = BridgeAddCash(src, payout, 'chopshop_fence_catalytic')
+        if not okCash then
+            return { ok = false, err = 'payment_failed', payout = 0 }
+        end
         return { ok = true, payout = payout }
     end
 
@@ -254,7 +284,12 @@ local function run()
     local sellOtherPlayer = mockFenceSellCatalytic(1, idCatOther)
     check('ENT-18 sellCatalytic com entitlement de outro player -> zero payout', sellOtherPlayer.ok == false and sellOtherPlayer.payout == 0 and sellOtherPlayer.err == 'owner_mismatch')
 
-    check('ENT-20 forged direct callback não gera item/dinheiro', sellEngineRes.ok == false and sellFakeRes.ok == false and sellLegit2.ok == false and sellOtherPlayer.ok == false)
+    -- [v1.16 SEC-1.3] Payout failure handling: falha de BridgeAddCash não duplica nem restaura entitlement
+    local sellPayFailRes = mockFenceSellCatalytic(1, idCatPayFail, true)
+    check('PAY-FAIL-01 falha no BridgeAddCash retorna payment_failed', sellPayFailRes.ok == false and sellPayFailRes.err == 'payment_failed')
+    check('PAY-FAIL-01 entitlement permanece CONSUMED após falha de pagamento (ZERO double payout)', PartEntitlement.State(idCatPayFail) == 'CONSUMED')
+
+    check('ENT-20 forged direct callback não gera item/dinheiro', sellEngineRes.ok == false and sellFakeRes.ok == false and sellLegit2.ok == false and sellOtherPlayer.ok == false and sellPayFailRes.ok == false)
 
     -- ─── OWN-01 .. OWN-04: CitizenID Normalization & Exact Ownership ──────────
     local norm1 = BridgeNormalizeCitizenId('qbx:ABC12345')

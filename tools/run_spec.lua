@@ -255,6 +255,7 @@ dofile(base .. '/server/session/adv_gate.lua')        -- provê VPChopAdvRequire
 dofile(base .. '/server/session/base_state.lua')      -- provê VPChopBaseState
 dofile(base .. '/server/session/advanced_state.lua')  -- provê VPChopAdvancedState
 dofile(base .. '/server/session/discard_state.lua')   -- [PR-D] provê VPChopDiscardState
+dofile(base .. '/bridge/server_framework.lua')        -- provê BridgeAddCash / IsValidSource etc.
 dofile(base .. '/bridge/server_vehicle.lua')          -- [PR-D] provê BridgeResolveVehiclePersistence / BridgeDeleteWorldVehicle
 dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreEntitlement
 dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
