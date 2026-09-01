@@ -467,11 +467,15 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
         end
     end
 
-    if #soldItems == 0 then return { ok=false, err='nothing_sold' } end
-
     -- [FIX C-1] Pagar apenas pelo que foi realmente removido (evita pagar totalValue
     -- quando algum RemoveItem falha silenciosamente entre o dry-run e a remoção real).
-    BridgeAddCash(src, realTotal, 'fence_sale')
+    local paid = BridgeAddCash(src, realTotal, 'fence_sale')
+    if not paid then
+        local key = ServerChopPlayerKey(src)
+        print(('[vp_chopshop][fence:sellItems] CRITICAL: falha no BridgeAddCash — playerKey=%s, amount=$%d, soldItems=%s, operation=fence_sale'):format(
+            tostring(key), realTotal, json.encode(soldItems)))
+        return { ok = false, err = 'payment_failed' }
+    end
 
     -- XP de trust
     addTrustXp(src, (Config.Fence and Config.Fence.XpPerDelivery) or 20)
@@ -950,7 +954,12 @@ lib.callback.register('vp_chopshop:fence:fulfillOrder', function(src, orderId)
         return { ok=false, err='no_order' }
     end
 
-    BridgeAddCash(src, total, 'fence_order')
+    local paid = BridgeAddCash(src, total, 'fence_order')
+    if not paid then
+        print(('[vp_chopshop][fence:fulfillOrder] CRITICAL: falha no BridgeAddCash — playerKey=%s, orderId=%s, amount=$%d, operation=fence_order'):format(
+            tostring(key), tostring(orderId), total))
+        return { ok = false, err = 'payment_failed' }
+    end
 
     addTrustXp(src, (Config.Fence and Config.Fence.XpOrderBonus) or 80)
     TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, data.items, total, 'order')

@@ -287,6 +287,7 @@ dofile(base .. '/shared/registry/registry_spec.lua')          -- [SPIKE PR-I]
 dofile(base .. '/bridge/vp_gangs_spec.lua')                   -- [INT-01A]
 dofile(base .. '/server/partserial_spec.lua')                 -- [UX-0 QA findings]
 dofile(base .. '/client/minigame/minigame_spec.lua')         -- [UX-A Interaction Core]
+dofile(base .. '/server/session/fence_payment_spec.lua')     -- [v1.16-FENCE-PAY-1]
 
 local anyFail = false
 for i = specStart, #threads do
