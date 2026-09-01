@@ -1911,17 +1911,19 @@ local function doStealCatalytic(veh)
         VPChopCheckAlarmAndDispatch(veh, tCfg)
     end
 
+    local animCfg = (Config.CatalyticTheft and Config.CatalyticTheft.Anim) or {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+    }
+
     local ok = lib.progressBar({
         duration = math.floor(((Config.CatalyticTheft and Config.CatalyticTheft.ProgressMs) or 7000) * ((tCfg and tCfg.speedMult) or 1.0)),
         label = L('catalytic_progress'),
         useWhileDead = false,
         canCancel = true,
         disable = { move = true, car = true, combat = true },
-        anim = {
-            dict = 'amb@world_human_mechanic_idle@male@base',
-            clip = 'base',
-            flag = 1,
-        },
+        anim = animCfg,
     })
     destroyToolProp()
     JackstandBusy = false

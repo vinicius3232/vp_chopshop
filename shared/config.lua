@@ -887,6 +887,13 @@ Config.CatalyticTheft = {
     --- Tempo de corte do escapamento em milissegundos
     ProgressMs = 7000,
 
+    --- Animação de corte com serra
+    Anim = {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+    },
+
     --- Recompensa em dinheiro ao vender o catalisador diretamente no Fence (Receptador)
     Payout = { min = 1200, max = 2200 },
 
