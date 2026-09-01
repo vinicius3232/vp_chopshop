@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-01
 **Branch de trabalho:** `feat/v1.17-broker-5-npc-context-ui` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `e2cbcdb`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1518 PASS / 0 FAIL / 1518 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1540 PASS / 0 FAIL / 1540 asserts**
 
 ---
 

@@ -287,6 +287,25 @@ end
 
 -- ─── Broker Context UI (v1.17 BROKER-5) ──────────────────────────────────────
 
+-- Helper testável e puro para particionamento de contratos
+function VPChopPartitionContracts(contractsList)
+    local globals = {}
+    local personals = {}
+    for _, c in ipairs(contractsList or {}) do
+        if c.isGlobal == true then
+            globals[#globals + 1] = c
+        else
+            personals[#personals + 1] = c
+        end
+    end
+    return globals, personals
+end
+
+-- Helper testável para cálculo de countdown de contrato
+function VPChopContractRemainingSeconds(expiresAt, serverNow)
+    return math.max(0, (expiresAt or 0) - (serverNow or 0))
+end
+
 local function fetchBrokerContext()
     local ok, res = pcall(lib.callback.await, 'vp_chopshop:broker:getNpcContext', false)
     if not ok or not res or not res.ok then
@@ -333,7 +352,7 @@ function openBrokerMainMenu()
             icon        = 'fa-solid fa-user-secret',
             metadata    = {
                 { label = L('fence_status_profile'), value = L('tier_label_' .. (ctx.progression and ctx.progression.tier or 1)) },
-                { label = 'Local', value = (ctx.broker and ctx.broker.locationLabel) or 'Los Santos' },
+                { label = L('broker_profile_location_label'), value = (ctx.broker and ctx.broker.locationLabel) or L('broker_default_location') },
             },
         }
 
@@ -462,7 +481,7 @@ function openBrokerSellMenu(ctx)
     if cap.sellTyres then
         options[#options + 1] = {
             title       = L('fence_target_sell_tyres'),
-            description = 'Truck / Inventário',
+            description = L('broker_menu_sell_tyres_desc'),
             icon        = 'fa-solid fa-circle-dot',
             onSelect    = function()
                 sellTyres()
@@ -471,7 +490,7 @@ function openBrokerSellMenu(ctx)
     end
 
     options[#options + 1] = {
-        title    = 'Voltar',
+        title    = L('broker_menu_back'),
         icon     = 'fa-solid fa-arrow-left',
         onSelect = function()
             openBrokerMainMenu()
@@ -494,10 +513,8 @@ function openBrokerContractsMenu()
         return
     end
 
-    local contracts = res.contracts or {}
-    local globals = contracts.global or {}
-    local personals = contracts.personal or {}
-    local serverNow = os.time()
+    local globals, personals = VPChopPartitionContracts(res.contracts)
+    local serverNow = res.serverNow or os.time()
 
     local options = {}
 
@@ -515,21 +532,21 @@ function openBrokerContractsMenu()
         }
     else
         for _, c in ipairs(globals) do
-            local remSec = math.max(0, (c.expiresAt or 0) - serverNow)
+            local remSec = VPChopContractRemainingSeconds(c.expiresAt, serverNow)
             local mins = math.floor(remSec / 60)
             local targetName = L('part_' .. tostring(c.targetKey))
             if targetName == 'part_' .. tostring(c.targetKey) then targetName = tostring(c.targetKey) end
 
             local meta = {
-                { label = 'Restante', value = string.format('%d / %d', c.remaining or 0, c.quantity or 0) },
-                { label = 'Recompensa', value = string.format('%.2fx', c.rewardMult or 1.0) .. (c.bonusCash and c.bonusCash > 0 and (' +$' .. c.bonusCash) or '') },
-                { label = 'Tempo', value = mins .. ' min' },
+                { label = L('broker_contract_remaining_label'), value = string.format('%d / %d', c.remaining or 0, c.quantity or 0) },
+                { label = L('broker_contract_reward_label'), value = string.format('%.2fx', c.rewardMult or 1.0) .. (c.bonusCash and c.bonusCash > 0 and (' +$' .. c.bonusCash) or '') },
+                { label = L('broker_contract_time_label'), value = L('broker_contract_mins_fmt', mins) },
             }
 
             local canFulfill = VPChopCarryingPart and VPChopCarryingPart.entitlementId
             options[#options + 1] = {
                 title       = targetName,
-                description = string.format('Tipo: %s | Qtd: %d/%d', c.contractType or 'part', c.remaining or 0, c.quantity or 0),
+                description = L('broker_contract_desc_fmt', c.contractType or 'part', c.remaining or 0, c.quantity or 0),
                 icon        = 'fa-solid fa-fire',
                 metadata    = meta,
                 onSelect    = function()
@@ -549,7 +566,7 @@ function openBrokerContractsMenu()
                         end
                         openBrokerContractsMenu()
                     else
-                        lib.notify({ description = 'Carregue uma peça compatível para entregar nesta alta procura.', type = 'inform' })
+                        lib.notify({ description = L('broker_contract_prompt_carry_global'), type = 'inform' })
                     end
                 end,
             }
@@ -570,24 +587,24 @@ function openBrokerContractsMenu()
         }
     else
         for _, c in ipairs(personals) do
-            local remSec = math.max(0, (c.expiresAt or 0) - serverNow)
+            local remSec = VPChopContractRemainingSeconds(c.expiresAt, serverNow)
             local mins = math.floor(remSec / 60)
             local targetName = L('part_' .. tostring(c.targetKey))
             if targetName == 'part_' .. tostring(c.targetKey) then targetName = tostring(c.targetKey) end
 
             local isAccepted = (c.state == 'ACCEPTED')
-            local stateBadge = isAccepted and (' [' .. L('broker_contract_accepted_badge') .. ']') or ' [Disponível]'
+            local stateBadge = isAccepted and (' [' .. L('broker_contract_accepted_badge') .. ']') or (' [' .. L('broker_contract_available_badge') .. ']')
 
             local meta = {
-                { label = 'Status', value = isAccepted and 'Em Andamento' or 'Aguardando Aceite' },
-                { label = 'Restante', value = string.format('%d / %d', c.remaining or 0, c.quantity or 0) },
-                { label = 'Multiplicador', value = string.format('%.2fx', c.rewardMult or 1.0) .. (c.bonusCash and c.bonusCash > 0 and (' +$' .. c.bonusCash) or '') },
-                { label = 'Tempo', value = mins .. ' min' },
+                { label = L('broker_contract_status_label'), value = isAccepted and L('broker_contract_in_progress') or L('broker_contract_waiting_accept') },
+                { label = L('broker_contract_remaining_label'), value = string.format('%d / %d', c.remaining or 0, c.quantity or 0) },
+                { label = L('broker_contract_mult_label'), value = string.format('%.2fx', c.rewardMult or 1.0) .. (c.bonusCash and c.bonusCash > 0 and (' +$' .. c.bonusCash) or '') },
+                { label = L('broker_contract_time_label'), value = L('broker_contract_mins_fmt', mins) },
             }
 
             options[#options + 1] = {
                 title       = targetName .. stateBadge,
-                description = isAccepted and 'Clique para entregar peça carregada' or 'Clique para aceitar o contrato',
+                description = isAccepted and L('broker_contract_click_fulfill') or L('broker_contract_click_accept'),
                 icon        = isAccepted and 'fa-solid fa-circle-check' or 'fa-solid fa-handshake-simple',
                 metadata    = meta,
                 onSelect    = function()
@@ -618,7 +635,7 @@ function openBrokerContractsMenu()
                             end
                             openBrokerContractsMenu()
                         else
-                            lib.notify({ description = 'Carregue uma peça compatível nos braços para entregar.', type = 'inform' })
+                            lib.notify({ description = L('broker_contract_prompt_carry_personal'), type = 'inform' })
                         end
                     end
                 end,
@@ -627,7 +644,7 @@ function openBrokerContractsMenu()
     end
 
     options[#options + 1] = {
-        title    = 'Voltar',
+        title    = L('broker_menu_back'),
         icon     = 'fa-solid fa-arrow-left',
         onSelect = function()
             openBrokerMainMenu()
@@ -656,14 +673,14 @@ function openBrokerProfileMenu(ctx)
                 title    = L('fence_status_profile'),
                 readOnly = true,
                 metadata = {
-                    { label = 'Reputação / Trust', value = L('fence_trust_level_' .. tostring(tLvl)) .. ' (Nível ' .. tLvl .. '/4)' },
+                    { label = L('broker_profile_trust_label'), value = L('fence_trust_level_' .. tostring(tLvl)) .. ' (' .. L('broker_profile_level_fmt', tLvl, 4) .. ')' },
                     { label = L('fence_tier_label'), value = L('tier_label_' .. (prog.tier or 1)) },
-                    { label = L('fence_xp_label'),   value = (prog.xp or 0) .. (prog.nextXp and ' / ' .. prog.nextXp or ' (máx)') },
+                    { label = L('fence_xp_label'),   value = (prog.xp or 0) .. (prog.nextXp and (' / ' .. prog.nextXp) or (' (' .. L('broker_profile_max_label') .. ')')) },
                     { label = L('fence_chops_label'),value = tostring(prog.totalChops or 0) },
                 },
             },
             {
-                title    = 'Voltar',
+                title    = L('broker_menu_back'),
                 icon     = 'fa-solid fa-arrow-left',
                 onSelect = function()
                     openBrokerMainMenu()
@@ -682,7 +699,7 @@ function openBrokerLegacyOrderMenu(ctx)
         options = {
             {
                 title       = L('fence_target_order'),
-                description = 'Ver detalhes dos itens solicitados e prazo',
+                description = L('broker_menu_order_view_desc'),
                 icon        = 'fa-solid fa-clipboard-list',
                 onSelect    = function()
                     showOrder()
@@ -690,14 +707,14 @@ function openBrokerLegacyOrderMenu(ctx)
             },
             {
                 title       = L('fence_target_fulfill'),
-                description = 'Entregar itens do inventário para concluir a encomenda',
+                description = L('broker_menu_order_fulfill_desc'),
                 icon        = 'fa-solid fa-box-open',
                 onSelect    = function()
                     fulfillOrder()
                 end,
             },
             {
-                title    = 'Voltar',
+                title    = L('broker_menu_back'),
                 icon     = 'fa-solid fa-arrow-left',
                 onSelect = function()
                     openBrokerMainMenu()

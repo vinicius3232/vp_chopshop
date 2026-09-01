@@ -1349,9 +1349,15 @@ lib.callback.register('vp_chopshop:broker:getNpcContext', function(src)
     local minContractTrust = (Config.Broker and Config.Broker.Contracts and Config.Broker.Contracts.MinTrust) or 1
     local isShopEnabled = (Config.NPC and Config.NPC.Shop and Config.NPC.Shop.Enable == true)
 
+    local contractsReady = isContractsEnabled
+        and BrokerContracts ~= nil
+        and type(BrokerContracts.IsReady) == 'function'
+        and BrokerContracts.IsReady() == true
+    local serverNow = (BrokerContracts and BrokerContracts.GetNow and BrokerContracts.GetNow()) or os.time()
+
     return {
         ok = true,
-        serverNow = os.time(),
+        serverNow = serverNow,
         broker = {
             alias = (Config.Broker and Config.Broker.NPC and Config.Broker.NPC.Alias) or 'O Intermediário',
             locationLabel = loc.label or 'Unknown',
@@ -1374,12 +1380,12 @@ lib.callback.register('vp_chopshop:broker:getNpcContext', function(src)
             hotJob      = (trust >= 2),
             buyBench    = (trust >= 2 and isShopEnabled),
             status      = (trust >= 2),
-            contracts   = (trust >= minContractTrust and isContractsEnabled),
+            contracts   = (trust >= minContractTrust and contractsReady == true),
             legacyOrder = (trust >= 3),
             deliverCar  = (trust >= 4),
         },
         brokerEnabled  = isBrokerEnabled,
-        contractsReady = isContractsEnabled and (BrokerContracts and BrokerContracts.IsReady() == true or false),
+        contractsReady = contractsReady,
     }
 end)
 
@@ -1407,7 +1413,8 @@ lib.callback.register('vp_chopshop:broker:getContracts', function(src)
 
     local playerKey = ServerChopPlayerKey(src)
     local contracts = BrokerContracts.GetAvailable(playerKey, trust)
-    return { ok = true, contracts = contracts }
+    local serverNow = (BrokerContracts and BrokerContracts.GetNow and BrokerContracts.GetNow()) or os.time()
+    return { ok = true, contracts = contracts, serverNow = serverNow }
 end)
 
 -- Aceitar contrato pessoal (AVAILABLE -> ACCEPTED)

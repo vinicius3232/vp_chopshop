@@ -189,51 +189,233 @@ local function run()
         Config.Broker.Enable = oldBrokerEnable
     end
 
-    -- ─── NPC-CONTRACT-01..03: Contratos Autorizados & Estados ───────────────
+    -- ─── NPC-READY-01..03: BrokerContracts Readiness Gate ───────────────────
     do
-        local mockGlobalContract = {
-            id = 'c_global_1',
-            isGlobal = true,
-            contractType = 'part',
-            targetKey = 'adv_engine',
-            quantity = 2,
-            remaining = 1,
-            rewardMult = 1.35,
-            bonusCash = 2500,
-            expiresAt = os.time() + 3600,
-            state = 'AVAILABLE',
-        }
-        local mockPersonalAvailable = {
-            id = 'c_pers_avail_1',
-            isGlobal = false,
-            contractType = 'part',
-            targetKey = 'catalytic_converter',
-            quantity = 3,
-            remaining = 3,
-            rewardMult = 1.25,
-            bonusCash = 1800,
-            expiresAt = os.time() + 1800,
-            state = 'AVAILABLE',
-        }
-        local mockPersonalAccepted = {
-            id = 'c_pers_acc_1',
-            isGlobal = false,
-            contractType = 'part',
-            targetKey = 'body_panel',
-            quantity = 4,
-            remaining = 2,
-            rewardMult = 1.15,
-            bonusCash = 1000,
-            expiresAt = os.time() + 1200,
-            state = 'ACCEPTED',
-        }
+        mockTrustLevel = 4
+        local origIsReady = BrokerContracts and BrokerContracts.IsReady
 
-        check('NPC-CONTRACT-01 Contrato global possui isGlobal=true para display sem botão Accept', mockGlobalContract.isGlobal == true)
-        check('NPC-CONTRACT-02 Contrato pessoal disponível possui state AVAILABLE para ação de Accept', mockPersonalAvailable.state == 'AVAILABLE' and mockPersonalAvailable.isGlobal == false)
-        check('NPC-CONTRACT-03 Contrato pessoal aceito possui state ACCEPTED para fluxo de entrega direta', mockPersonalAccepted.state == 'ACCEPTED')
+        -- NPC-READY-01: BrokerContracts.IsReady() == false -> capability false
+        BrokerContracts.IsReady = function() return false end
+        local resNotReady = getContextCb(testSrc)
+        check('NPC-READY-01 BrokerContracts.IsReady=false resulta em contractsReady=false', resNotReady.contractsReady == false)
+        check('NPC-READY-01 BrokerContracts.IsReady=false resulta em capabilities.contracts=false mesmo com Trust 4', resNotReady.capabilities.contracts == false)
+
+        -- NPC-READY-02: BrokerContracts.IsReady() == true + Trust >= MinTrust -> capability true
+        BrokerContracts.IsReady = function() return true end
+        mockTrustLevel = 3
+        local resReady = getContextCb(testSrc)
+        check('NPC-READY-02 BrokerContracts.IsReady=true + Trust 3 resulta em contractsReady=true', resReady.contractsReady == true)
+        check('NPC-READY-02 BrokerContracts.IsReady=true + Trust 3 resulta em capabilities.contracts=true', resReady.capabilities.contracts == true)
+
+        -- NPC-READY-03: BrokerContracts.IsReady() == true + Trust < MinTrust -> capability false
+        mockTrustLevel = 0
+        local resLowTrust = getContextCb(testSrc)
+        check('NPC-READY-03 BrokerContracts.IsReady=true mas Trust 0 resulta em capabilities.contracts=false', resLowTrust.capabilities.contracts == false)
+
+        BrokerContracts.IsReady = origIsReady
+        mockTrustLevel = 3
     end
 
-    -- ─── NPC-LOCALE-01: Paridade Completa de Idiomas ────────────────────────
+    -- ─── NPC-CONTRACT-SHAPE-01 & NPC-CONTRACT-SPLIT-01: Partition Real Array ─
+    do
+        dofile('shared/locale.lua')
+        _G.RegisterNetEvent = _G.RegisterNetEvent or function(...) end
+        -- Carregar client/fence.lua para testar as funções puras de UI e particionamento
+        dofile('client/fence.lua')
+
+        check('NPC-CONTRACT-SHAPE-01 VPChopPartitionContracts existe como função pura', type(VPChopPartitionContracts) == 'function')
+
+        -- Array flat retornado pelo getContracts / BrokerContracts.GetAvailable
+        local mixedFlatContracts = {
+            {
+                id = 'c_global_1',
+                isGlobal = true,
+                contractType = 'part',
+                targetKey = 'adv_engine',
+                quantity = 3,
+                remaining = 2,
+                rewardMult = 1.30,
+                bonusCash = 2000,
+                expiresAt = 1700003600,
+                state = 'AVAILABLE',
+            },
+            {
+                id = 'c_pers_avail_1',
+                isGlobal = false,
+                contractType = 'part',
+                targetKey = 'catalytic_converter',
+                quantity = 2,
+                remaining = 2,
+                rewardMult = 1.25,
+                bonusCash = 1500,
+                expiresAt = 1700001800,
+                state = 'AVAILABLE',
+            },
+            {
+                id = 'c_pers_acc_1',
+                isGlobal = false,
+                contractType = 'part',
+                targetKey = 'body_panel',
+                quantity = 4,
+                remaining = 1,
+                rewardMult = 1.15,
+                bonusCash = 800,
+                expiresAt = 1700001200,
+                state = 'ACCEPTED',
+            },
+        }
+
+        local globals, personals = VPChopPartitionContracts(mixedFlatContracts)
+        check('NPC-CONTRACT-SPLIT-01 Array flat particionado: exatamente 1 global encontrado', #globals == 1)
+        check('NPC-CONTRACT-SPLIT-01 Array flat particionado: exatamente 2 pessoais encontrados', #personals == 2)
+        check('NPC-CONTRACT-SPLIT-01 Global ID correto no slot global', globals[1].id == 'c_global_1')
+        check('NPC-CONTRACT-SPLIT-01 Pessoal 1 tem state AVAILABLE', personals[1].state == 'AVAILABLE')
+        check('NPC-CONTRACT-SPLIT-01 Pessoal 2 tem state ACCEPTED', personals[2].state == 'ACCEPTED')
+
+        -- Prova anti-regressão: se alguém passar tabela com estrutura legada { global = {}, personal = {} }, globals fica vazio
+        local legacyDict = { global = { { id = 'g1' } }, personal = { { id = 'p1' } } }
+        local gEmpty, pEmpty = VPChopPartitionContracts(legacyDict)
+        check('NPC-CONTRACT-SPLIT-01 Prova anti-bug: dicionário legado particiona 0 itens (não é array)', #gEmpty == 0 and #pEmpty == 0)
+    end
+
+    -- ─── NPC-COUNTDOWN-01: Server Time Countdown Calculation ────────────────
+    do
+        local serverNow = 1000
+        local expiresAt = 1060
+        local remSec = VPChopContractRemainingSeconds(expiresAt, serverNow)
+        check('NPC-COUNTDOWN-01 expiresAt=1060 e serverNow=1000 resulta exatamente em 60 segundos', remSec == 60)
+
+        local expiredRem = VPChopContractRemainingSeconds(900, serverNow)
+        check('NPC-COUNTDOWN-01 Contrato expirado (900 < 1000) retorna math.max(0) = 0 segundos', expiredRem == 0)
+    end
+
+    -- ─── NPC-CONTRACT-ACTIONS & CARRY LIFECYCLE ──────────────────────────────
+    do
+        local droppedCarry = false
+        local registeredContexts = {}
+        local showedContext = nil
+
+        _G.VPChopDropCarryPart = function() droppedCarry = true end
+        _G.lib = _G.lib or {}
+        _G.lib.notify = function(n) end
+        _G.lib.registerContext = function(ctx) registeredContexts[ctx.id] = ctx end
+        _G.lib.showContext = function(id) showedContext = id end
+
+        -- Mock getContracts callback para openBrokerContractsMenu
+        local getContractsMockData = {
+            ok = true,
+            serverNow = 1700000000,
+            contracts = {
+                {
+                    id = 'c_global_1',
+                    isGlobal = true,
+                    contractType = 'part',
+                    targetKey = 'adv_engine',
+                    quantity = 2,
+                    remaining = 1,
+                    rewardMult = 1.35,
+                    bonusCash = 2500,
+                    expiresAt = 1700003600,
+                    state = 'AVAILABLE',
+                },
+                {
+                    id = 'c_pers_avail_1',
+                    isGlobal = false,
+                    contractType = 'part',
+                    targetKey = 'catalytic_converter',
+                    quantity = 3,
+                    remaining = 3,
+                    rewardMult = 1.25,
+                    bonusCash = 1800,
+                    expiresAt = 1700001800,
+                    state = 'AVAILABLE',
+                },
+                {
+                    id = 'c_pers_acc_1',
+                    isGlobal = false,
+                    contractType = 'part',
+                    targetKey = 'body_panel',
+                    quantity = 4,
+                    remaining = 2,
+                    rewardMult = 1.15,
+                    bonusCash = 1000,
+                    expiresAt = 1700001200,
+                    state = 'ACCEPTED',
+                }
+            }
+        }
+
+        local acceptCalled = {}
+        local fulfillCalled = {}
+        local callbackHandlers = {
+            ['vp_chopshop:broker:getContracts'] = function() return getContractsMockData end,
+            ['vp_chopshop:broker:acceptContract'] = function(contractId)
+                table.insert(acceptCalled, contractId)
+                return { ok = true }
+            end,
+            ['vp_chopshop:broker:fulfillContract'] = function(contractId, entId)
+                table.insert(fulfillCalled, { contractId = contractId, entitlementId = entId })
+                return { ok = true, payout = 1500, bonus = 200 }
+            end
+        }
+
+        _G.lib.callback.await = function(name, _, ...)
+            if callbackHandlers[name] then
+                return callbackHandlers[name](...)
+            end
+            return nil
+        end
+
+        -- Abrir menu de contratos
+        openBrokerContractsMenu()
+        local menu = registeredContexts['vp_broker_contracts']
+        check('NPC-CONTRACT-VIEW-01 Menu vp_broker_contracts registrado com sucesso', menu ~= nil and type(menu.options) == 'table')
+
+        -- Opções geradas: Header Global (1), Global Item (2), Header Personal (3), Personal Avail (4), Personal Acc (5), Voltar (6)
+        local optGlobal = menu.options[2]
+        local optPersonalAvail = menu.options[4]
+        local optPersonalAcc = menu.options[5]
+
+        -- NPC-CONTRACT-GLOBAL-01: Global não oferece Accept
+        check('NPC-CONTRACT-GLOBAL-01 Global listing não contém [Disponível] nem Accept no título', not optGlobal.title:find('Aguardando') and not optGlobal.title:find('Aceitar'))
+
+        -- NPC-CONTRACT-PERSONAL-01: Personal AVAILABLE oferece Aceitar
+        check('NPC-CONTRACT-PERSONAL-01 Personal AVAILABLE exibe descrição de aceitar', optPersonalAvail.description == L('broker_contract_click_accept'))
+
+        -- NPC-CONTRACT-PERSONAL-02: Personal ACCEPTED exibe descrição de entrega
+        check('NPC-CONTRACT-PERSONAL-02 Personal ACCEPTED exibe descrição de entrega', optPersonalAcc.description == L('broker_contract_click_fulfill'))
+
+        -- NPC-CONTRACT-PERSONAL-01 / REFRESH-01: Executar onSelect em AVAILABLE dispara acceptContract
+        acceptCalled = {}
+        optPersonalAvail.onSelect()
+        check('NPC-CONTRACT-REFRESH-01 Aceite de contrato invoca callback vp_chopshop:broker:acceptContract com contractId', #acceptCalled == 1 and acceptCalled[1] == 'c_pers_avail_1')
+
+        -- NPC-CONTRACT-ARGS-01 & NPC-CARRY-01: Fulfill com peça carregada envia SOMENTE (contractId, entitlementId) e limpa carry
+        _G.VPChopCarryingPart = { entitlementId = 'pe:test_42', partKey = 'body_panel' }
+        droppedCarry = false
+        fulfillCalled = {}
+        optPersonalAcc.onSelect()
+        check('NPC-CONTRACT-ARGS-01 Fulfill transmite estritamente contractId e entitlementId', #fulfillCalled == 1 and fulfillCalled[1].contractId == 'c_pers_acc_1' and fulfillCalled[1].entitlementId == 'pe:test_42')
+        check('NPC-CARRY-01 Fulfill com sucesso limpa carry prop imediatamente', droppedCarry == true)
+
+        -- NPC-CARRY-02: Fulfill com terminalConsumed=true limpa carry prop mesmo com ok=false
+        callbackHandlers['vp_chopshop:broker:fulfillContract'] = function()
+            return { ok = false, err = 'payment_failed', terminalConsumed = true }
+        end
+        droppedCarry = false
+        optPersonalAcc.onSelect()
+        check('NPC-CARRY-02 Fulfill falho com terminalConsumed=true limpa carry prop (fail-closed)', droppedCarry == true)
+
+        -- NPC-CARRY-03: Fulfill com erro não-terminal mantém a peça nos braços do jogador
+        callbackHandlers['vp_chopshop:broker:fulfillContract'] = function()
+            return { ok = false, err = 'contract_busy' }
+        end
+        droppedCarry = false
+        optPersonalAcc.onSelect()
+        check('NPC-CARRY-03 Fulfill com erro não-terminal retém a peça carregada (droppedCarry=false)', droppedCarry == false)
+    end
+
+    -- ─── NPC-LOCALE-01: Paridade Completa de Idiomas (69 Chaves) ─────────────
     do
         dofile('shared/locale.lua')
         local requiredKeys = {
@@ -266,6 +448,29 @@ local function run()
             'broker_contract_no_contracts',
             'broker_contract_accepted_notify',
             'broker_contract_fulfilled_notify',
+            'broker_menu_back',
+            'broker_menu_sell_tyres_desc',
+            'broker_contract_remaining_label',
+            'broker_contract_reward_label',
+            'broker_contract_time_label',
+            'broker_contract_mult_label',
+            'broker_contract_status_label',
+            'broker_contract_available_badge',
+            'broker_contract_in_progress',
+            'broker_contract_waiting_accept',
+            'broker_contract_desc_fmt',
+            'broker_contract_mins_fmt',
+            'broker_contract_click_fulfill',
+            'broker_contract_click_accept',
+            'broker_contract_prompt_carry_global',
+            'broker_contract_prompt_carry_personal',
+            'broker_profile_trust_label',
+            'broker_profile_level_fmt',
+            'broker_profile_max_label',
+            'broker_profile_location_label',
+            'broker_default_location',
+            'broker_menu_order_view_desc',
+            'broker_menu_order_fulfill_desc',
             'err_no_fence',
             'err_no_trust',
             'err_trust_gate',
@@ -297,7 +502,47 @@ local function run()
             end
         end
         Config.Locale = 'pt'
-        check('NPC-LOCALE-01 Todas as novas chaves de tradução presentes em pt, en, es, fr, tr', allLocalesPresent == true)
+        check('NPC-LOCALE-01 Todas as 69 chaves de tradução presentes em pt, en, es, fr, tr', allLocalesPresent == true)
+    end
+
+    -- ─── NPC-LOCALE-NO-HARDCODE-01: Zero Hardcoded Strings in Client Broker UI 
+    do
+        local file = io.open('client/fence.lua', 'r')
+        local content = file and file:read('*a') or ''
+        if file then file:close() end
+
+        -- Extrair o bloco Broker UI
+        local brokerBlock = content:match('%-%- ─── Broker Context UI.-%-%- ─── Menus de interação')
+        check('NPC-LOCALE-NO-HARDCODE-01 Bloco Broker Context UI isolado em client/fence.lua', brokerBlock ~= nil and #brokerBlock > 200)
+
+        local forbiddenPatterns = {
+            "'Voltar'",
+            '"Voltar"',
+            "'Truck / Inventário'",
+            '"Truck / Inventário"',
+            "'Restante'",
+            "'Recompensa'",
+            "'Tempo'",
+            "'Em Andamento'",
+            "'Aguardando Aceite'",
+            "'Multiplicador'",
+            "'Clique para entregar peça carregada'",
+            "'Clique para aceitar o contrato'",
+            "'Carregue uma peça compatível nos braços para entregar.'",
+            "'Carregue uma peça compatível para entregar nesta alta procura.'",
+            "'Reputação / Trust'",
+            "'Ver detalhes dos itens solicitados e prazo'",
+            "'Entregar itens do inventário para concluir a encomenda'",
+        }
+
+        local foundHardcode = false
+        for _, pat in ipairs(forbiddenPatterns) do
+            if brokerBlock:find(pat, 1, true) then
+                foundHardcode = true
+                print(('[broker_npc/spec] Found forbidden hardcoded string in client/fence.lua: %s'):format(pat))
+            end
+        end
+        check('NPC-LOCALE-NO-HARDCODE-01 Zero textos em português hardcoded encontrados no Broker UI', foundHardcode == false)
     end
 
     -- ─── NPC-NO-ECONOMY-DRIFT-01: Preservação das Canaries Econômicas ────────
