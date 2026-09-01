@@ -3,7 +3,7 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de trabalho:** `feat/v1.17-broker-5-npc-context-ui` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `e2cbcdb`)
+**Branch de trabalho:** `feat/v1.17-broker-6-release-gate` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `5d508b1`)
 **`main`:** `v1.14.3`
 **Harness:** `lua tools/run_spec.lua .` → **1540 PASS / 0 FAIL / 1540 asserts**
 
@@ -26,8 +26,8 @@ BROKER-1.2 — Final Parity & Fail-Closed Boot Engine ✅ HOMOLOGADO & MERGED (P
 BROKER-2.1 — Fence Integration & Dynamic Payouts   ✅ HOMOLOGADO & MERGED (PR #43)
 BROKER-3.2 — Contracts & High-Demand Lists         ✅ HOMOLOGADO & MERGED (PR #44)
 BROKER-4.2 — Final SAGA Consistency & Migration    ✅ HOMOLOGADO & MERGED (PR #45, merge SHA e2cbcdb)
-BROKER-5   — NPC Ambient Speech & Context UI        🚧 PR #46 (feat/v1.17-broker-5-npc-context-ui)
-BROKER-6   — Live QA & Final Release Gate           ⏸
+BROKER-5.1 — NPC Context UI & Readiness Hardening   ✅ HOMOLOGADO & MERGED (PR #46, merge SHA 5d508b1)
+BROKER-6   — Live QA, Integration Audit & Release Gate 🚧 EM VALIDAÇÃO (feat/v1.17-broker-6-release-gate)
 ─────────────────────────────────────────────────────────────────────────
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)
