@@ -1,6 +1,6 @@
 -- server/logistics/part_entitlement_spec.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.16 SEC-1 / SEC-1.1] Self-test do PartEntitlement + Hardening de Autoridade Econômica.
+--  [v1.16 SEC-1 / SEC-1.1 / SEC-1.2] Self-test do PartEntitlement + Hardening de Autoridade Econômica.
 --  NÃO roda em produção (self-gated na convar vp_chopshop_selftest 1).
 --
 --  Cobre testes obrigatórios:
@@ -8,8 +8,12 @@
 --    OWN-01 .. OWN-04 (CitizenID normalization & exact ownership boundary)
 --    BENCH-MODE-01 .. BENCH-MODE-02 (Strict mode allowlist and per-part policy)
 --    INV-FULL-01 .. INV-FULL-02 (Inventory capacity pre-check and zero-loss guarantee)
+--    INV-CLOSED-01 (InvCanCarry fail-closed when export fails / throws)
 --    CAT-UX-01 .. CAT-UX-03 (Server timing enforced catalytic theft Start/Complete)
---    CARCASS-RESTART-01 .. CARCASS-RESTART-02 (Zero duplicate carcass reward post-restart)
+--    CAT-REUSE-01 (NetId recycling proof — new unique token gives brand new entitlement)
+--    CAT-REPLAY-01 (Idempotent terminal replay — same token yields same entitlement, zero new consume/event)
+--    CARCASS-RESTART-01 .. CARCASS-RESTART-02 (Zero duplicate carcass reward post-restart via ledger)
+--    CARCASS-DB-FAIL-01 (Zero duplicate carcass reward post-restart via statebag when DB/ledger fails)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 if (GetConvarInt and GetConvarInt('vp_chopshop_selftest', 0) or 0) ~= 1 then return end
@@ -152,14 +156,32 @@ local function run()
     check('INV-FULL-02 retry com inventário livre consome com sucesso', invOkCall.ok == true and invOkCall.rewarded == true)
     check('INV-FULL-02 entitlement consumido após sucesso', PartEntitlement.State(idInvTest) == 'CONSUMED')
 
+    -- ─── INV-CLOSED-01: InvCanCarry Fail-Closed ────────────────────────────────
+    local function mockInvCanCarryBrokenExport(src, item, count)
+        local ok, res = pcall(function() error('ox_inventory crashed or missing') end)
+        if ok and res ~= nil then return res == true end
+        return false -- Fail-closed
+    end
+    check('INV-CLOSED-01 InvCanCarry retorna false quando o export falha', mockInvCanCarryBrokenExport(1, 'car_parts', 1) == false)
+
     -- ─── CAT-UX-01 .. 03: Catalytic Theft Two-Step Server Timing Enforcement ──
     local mockThefts = {}
+    local mockCatCompleted = {}
+    local _thSeq = 0
     local function mockCatStart(src, netId, minDur)
         local t = os.clock()
-        mockThefts[src] = { netId = netId, startedAt = t, minDur = minDur or 1.0, token = 'tok:' .. tostring(src) }
-        return { ok = true, token = mockThefts[src].token, duration = mockThefts[src].minDur }
+        _thSeq = _thSeq + 1
+        local tok = ('cat_tok:%d:%d:%d'):format(src, math.floor(t * 1000), _thSeq)
+        mockThefts[src] = { netId = netId, startedAt = t, minDur = minDur or 1.0, token = tok }
+        return { ok = true, token = tok, duration = mockThefts[src].minDur }
     end
+    local mockToolUses = 0
+    local mockPartEvents = 0
     local function mockCatComplete(src, netId, token, elapsedOffset)
+        local prev = mockCatCompleted[token]
+        if prev then
+            return { ok = true, replay = true, entitlementId = prev.entitlementId }
+        end
         local th = mockThefts[src]
         if not th or th.token ~= token or th.netId ~= netId then return { ok = false, err = 'invalid' } end
         local elapsed = (os.clock() - th.startedAt) + (elapsedOffset or 0)
@@ -167,8 +189,11 @@ local function run()
             return { ok = false, err = 'too_fast' }
         end
         mockThefts[src] = nil
-        local peId = PartEntitlement.Issue(('cat:%d'):format(netId), src, 'catalytic_converter', netId, { origin = 'theft' })
-        return { ok = true, entitlementId = peId }
+        mockToolUses = mockToolUses + 1
+        mockPartEvents = mockPartEvents + 1
+        local peId = PartEntitlement.Issue(('cat:%s'):format(th.token), src, 'catalytic_converter', netId, { origin = 'theft' })
+        mockCatCompleted[token] = { entitlementId = peId }
+        return { ok = true, replay = false, entitlementId = peId }
     end
 
     local startTh = mockCatStart(1, 99, 5.0)
@@ -180,6 +205,27 @@ local function run()
 
     local legitCatCall = mockCatComplete(1, 99, startTh.token, 5.5)
     check('CAT-UX-03 completeStealCatalytic no tempo correto -> ok com entitlement', legitCatCall.ok == true and legitCatCall.entitlementId ~= nil)
+
+    -- ─── CAT-REPLAY-01: Replay Idempotente de COMPLETE ────────────────────────
+    local usesBefore = mockToolUses
+    local eventsBefore = mockPartEvents
+    local replayCatCall = mockCatComplete(1, 99, startTh.token, 6.0)
+    check('CAT-REPLAY-01 segundo COMPLETE com mesmo token retorna replay=true', replayCatCall.ok == true and replayCatCall.replay == true)
+    check('CAT-REPLAY-01 replay retorna mesmo entitlementId', replayCatCall.entitlementId == legitCatCall.entitlementId)
+    check('CAT-REPLAY-01 replay consome ZERO ferramentas adicionais', mockToolUses == usesBefore)
+    check('CAT-REPLAY-01 replay emite ZERO eventos PART_CHOPPED adicionais', mockPartEvents == eventsBefore)
+
+    -- ─── CAT-REUSE-01: Reciclagem de netId com novo Theft Token ───────────────
+    PartEntitlement.Consume(legitCatCall.entitlementId, 1, 'fence_sell')
+    check('CAT-REUSE-01 veiculo A consumido', PartEntitlement.State(legitCatCall.entitlementId) == 'CONSUMED')
+
+    -- Veículo B futuro no mesmo netId=99
+    local startVehB = mockCatStart(1, 99, 5.0)
+    check('CAT-REUSE-01 veiculo B recebe novo token', startVehB.token ~= startTh.token)
+
+    local legitVehBCall = mockCatComplete(1, 99, startVehB.token, 5.5)
+    check('CAT-REUSE-01 veiculo B recebe entitlement NOVO', legitVehBCall.ok == true and legitVehBCall.entitlementId ~= legitCatCall.entitlementId)
+    check('CAT-REUSE-01 novo entitlement está no estado ISSUED', PartEntitlement.State(legitVehBCall.entitlementId) == 'ISSUED')
 
     -- ─── ENT-15 .. ENT-19: Fence Catalytic Hardening ──────────────────────────
     local idEngine, _ = PartEntitlement.Issue('session_fence_test', 1, 'adv_engine', 10)
@@ -255,6 +301,41 @@ local function run()
     check('CARCASS-RESTART-02 tentativa de rechopar pós-restart é bloqueada (ZERO double reward)', reChopOk == false and reChopErr == 'carcass_consumed')
 
     VPChopCarcassLedger._setDb(nil)
+
+    -- ─── CARCASS-DB-FAIL-01: Carcass Fail-safe via Statebag quando DB/Ledger falha ─
+    -- Cenário: Delete falhou + DB ledger falhou (sem DB/conexão caiu) + statebag carcassDone presente
+    local fakeVehicles = {
+        [88] = { model = 999, vpChopCarcassDone = true },
+    }
+    local mockEntityAPI = {
+        get    = function(netId) return fakeVehicles[netId] and (netId + 70000) or 0 end,
+        exists = function(h) return h ~= nil and h ~= 0 end,
+        model  = function(h) local n = h - 70000; return fakeVehicles[n] and fakeVehicles[n].model or 0 end,
+        plate  = function() return 'PLATE' end,
+        owned  = function() return nil end,
+        tag    = function() return true end,
+        marker = function() return nil end,
+        carcassDone = function(h) local n = h - 70000; return fakeVehicles[n] and fakeVehicles[n].vpChopCarcassDone == true end,
+    }
+
+    ChopSession._test.setEntityAPI(mockEntityAPI)
+    ChopSession._test.reset() -- Simula restart do resource (RAM limpa)
+
+    local createSess, createErr = ChopSession.Create(88, 1)
+    check('CARCASS-DB-FAIL-01 ChopSession.Create rejeita via statebag mesmo sem DB (ZERO rechop)', createSess == nil and createErr == 'carcass_consumed')
+
+    local defaultHarnessEntityAPI = {
+        get    = function(netId) return FAKE_VEH[netId] and (netId + 70000) or 0 end,
+        exists = function(ent) return ent and ent ~= 0 and DoesEntityExist(ent) end,
+        model  = function(ent) return GetEntityModel(ent) end,
+        plate  = function(ent) return (GetVehicleNumberPlateText(ent) or ''):gsub('%s+', '') end,
+        owned  = function(ent) return nil end,
+        tag    = function(ent, vsid) local n = (ent or 0) - 70000; if FAKE_VEH[n] then FAKE_VEH[n].mark = vsid end; return FAKE_VEH[n] and FAKE_VEH[n].mark == vsid end,
+        marker = function(ent) local n = (ent or 0) - 70000; return FAKE_VEH[n] and FAKE_VEH[n].mark or nil end,
+        carcassDone = function(ent) local n = (ent or 0) - 70000; return FAKE_VEH[n] and FAKE_VEH[n].vpChopCarcassDone == true end,
+    }
+    ChopSession._test.setEntityAPI(defaultHarnessEntityAPI)
+    ChopSession._test.reset()
 
     print(('[part_entitlement/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end

@@ -25,17 +25,19 @@ function InvAdd(src, item, count)
     return result ~= nil and result ~= false
 end
 
---- [v1.16 SEC-1.1] Pré-validação de capacidade de inventário antes de consumir o entitlement.
+--- [v1.16 SEC-1.2] Pré-validação de capacidade de inventário fail-closed (ox_inventory obrigatório).
 ---@param src number
 ---@param item string
 ---@param count integer
+---@param metadata? table
 ---@return boolean
-function InvCanCarry(src, item, count)
+function InvCanCarry(src, item, count, metadata)
     if not src or src <= 0 then return false end
-    if count < 1 then return true end
-    if exports.ox_inventory and exports.ox_inventory.CanCarryItem then
-        local ok, can = pcall(exports.ox_inventory.CanCarryItem, exports.ox_inventory, src, item, count)
+    if (count or 0) < 1 then return true end
+    if exports and exports.ox_inventory and exports.ox_inventory.CanCarryItem then
+        local ok, can = pcall(exports.ox_inventory.CanCarryItem, exports.ox_inventory, src, item, count, metadata)
         if ok and can ~= nil then return can == true end
     end
-    return true
+    -- Fail-closed: se o export de ox_inventory não responder ou lançar erro, retorna false
+    return false
 end
