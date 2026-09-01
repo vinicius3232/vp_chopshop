@@ -1,6 +1,6 @@
 -- bridge/workshop.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.17 BROKER-4.1] WORKSHOP BRIDGE & PERSISTENT SAGA JOURNAL
+--  [v1.17 BROKER-4.2] WORKSHOP BRIDGE & PERSISTENT SAGA JOURNAL
 --
 --  Integração modular com sistemas externos de oficina via SAGA distribuída:
 --  1) Provider default = 'none' (zero dependência externa de resource).
@@ -11,6 +11,8 @@
 --  6) Background reconciliation & quarantine fail-closed.
 --  7) Handoff seguro de stolen_plate com metadados server-authoritative.
 --  8) Registro de provedores externo via export seguro com validação de contrato.
+--  9) Canonical Commodities derivation directly from Config.Broker.Commodities.
+--  10) Schema probe & migration readiness fail-closed.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 WorkshopBridge = {}
@@ -40,16 +42,17 @@ local VALID_STATES = {
     COMMITTED = true, FINALIZED = true, RECONCILING = true,
     QUARANTINE = true, ABORTED = true,
 }
-local VALID_COMMODITIES = {
-    door_dside_f = true, door_pside_f = true,
-    door_dside_r = true, door_pside_r = true,
-    bonnet = true, boot = true,
-    adv_engine = true, catalytic_converter = true,
-    tyre = true, carcass = true,
-}
 local VALID_URGENCY = {
     low = true, normal = true, high = true, critical = true,
 }
+
+local function isCanonicalCommodity(commKey)
+    if type(commKey) ~= 'string' or commKey == '' then return false end
+    if Config and Config.Broker and Config.Broker.Commodities and Config.Broker.Commodities[commKey] then
+        return true
+    end
+    return false
+end
 
 local function dbg(...)
     if Config and Config.Broker and Config.Broker.Workshop and Config.Broker.Workshop.Debug then
@@ -99,11 +102,28 @@ local function validateJournalRow(row)
     if type(row) ~= 'table' then return false, 'invalid_row' end
     if type(row.txn_id) ~= 'string' or row.txn_id == '' then return false, 'invalid_txn_id' end
     if type(row.provider) ~= 'string' or row.provider == '' then return false, 'invalid_provider' end
-    if not VALID_ASSET_KINDS[row.asset_kind] then return false, 'invalid_asset_kind' end
+    if not row.asset_kind or not VALID_ASSET_KINDS[row.asset_kind] then return false, 'invalid_asset_kind' end
     if type(row.stable_part_id) ~= 'string' or row.stable_part_id == '' then return false, 'invalid_stable_id' end
     if not VALID_STATES[row.state] then return false, 'invalid_state' end
     if type(row.price) ~= 'number' or row.price ~= row.price or row.price <= 0 then return false, 'invalid_price' end
     return true
+end
+
+local function decodeAndValidatePartJournalMetadata(row)
+    if not row or type(row) ~= 'table' then return nil, 'invalid_row' end
+    if not row.metadata or row.metadata == '' then return nil, 'missing_metadata' end
+    local meta = nil
+    local ok = pcall(function() meta = json.decode(row.metadata) end)
+    if not ok or not meta or type(meta) ~= 'table' then
+        return nil, 'corrupt_metadata'
+    end
+    if meta.stablePartIdentity ~= row.stable_part_id then
+        return nil, 'stable_identity_mismatch'
+    end
+    if meta.partKey and row.part_key and meta.partKey ~= row.part_key then
+        return nil, 'part_key_mismatch'
+    end
+    return meta
 end
 
 local function validateAndSanitizeSignal(rawSignal)
@@ -114,7 +134,7 @@ local function validateAndSanitizeSignal(rawSignal)
     }
     if type(rawSignal.activeDemand) == 'table' then
         for k, v in pairs(rawSignal.activeDemand) do
-            if VALID_COMMODITIES[k] and type(v) == 'number' and v == v and v ~= math.huge and v ~= -math.huge then
+            if isCanonicalCommodity(k) and type(v) == 'number' and v == v and v ~= math.huge and v ~= -math.huge then
                 if v >= 0.1 and v <= 5.0 then
                     clean.activeDemand[k] = v
                 end
@@ -218,9 +238,33 @@ end
 
 -- ─── Centralized Post-Commit Finalization Helper ──────────────────────────────
 
+local function ensureJournalCommitted(txnId)
+    if not txnId or txnId == '' then return false end
+
+    -- A) Tentar transição condicional
+    local qUpd = execQuery("UPDATE vp_chop_workshop_journal SET state = 'COMMITTED' WHERE txn_id = ? AND state IN ('COMMITTING', 'RECONCILING', 'QUARANTINE')", { txnId })
+    if qUpd and (qUpd.affectedRows or 0) == 1 then
+        return true
+    end
+
+    -- B) Se affectedRows == 0, consultar se já está COMMITTED
+    local qSel = execQuery("SELECT state FROM vp_chop_workshop_journal WHERE txn_id = ?", { txnId })
+    if qSel and type(qSel) == 'table' and #qSel > 0 and qSel[1] and qSel[1].state == 'COMMITTED' then
+        return true
+    end
+
+    return false
+end
+
 local function finalizeCommittedTransaction(providerName, txnId, stablePartId, entitlementId, isStolenPlate)
-    -- 1. Assegurar persistência do estado COMMITTED no Journal
-    execQuery("UPDATE vp_chop_workshop_journal SET state = 'COMMITTED' WHERE txn_id = ? AND state IN ('COMMITTING', 'RECONCILING', 'QUARANTINE')", { txnId })
+    -- 1. Assegurar e comprovar durabilidade do estado COMMITTED antes do consumo local
+    local okCommitted = ensureJournalCommitted(txnId)
+    if not okCommitted then
+        _workshopIntegrityLocked = true
+        print(('[vp_chopshop][WorkshopBridge] CRITICAL: ensureJournalCommitted failed for paid txn %s (stable %s)'):format(
+            tostring(txnId), tostring(stablePartId)))
+        return false, 'journal_commit_unconfirmed'
+    end
 
     -- 2. Finalizar localmente no PartEntitlement com strict stable identity
     if not isStolenPlate and stablePartId and stablePartId ~= '' then
@@ -835,14 +879,16 @@ function WorkshopBridge.BootstrapRecovery()
         return false, 'no_db'
     end
 
-    local rows = execQuery([[
+    local rows, qErr = execQuery([[
         SELECT txn_id, provider, player_key, asset_kind, entitlement_id,
                stable_part_id, part_key, price, state, reconcile_count, metadata
         FROM vp_chop_workshop_journal
         WHERE state IN ('PREPARED', 'RESERVED', 'COMMITTING', 'COMMITTED', 'RECONCILING', 'QUARANTINE')
     ]])
 
-    if not rows or type(rows) ~= 'table' then return true end
+    if not rows or type(rows) ~= 'table' then
+        return false, qErr or 'journal_read_failed'
+    end
 
     dbg('Bootstrap recovery processando', #rows, 'transações pendentes')
 
@@ -857,16 +903,13 @@ function WorkshopBridge.BootstrapRecovery()
 
         local isStolenPlate = (row.asset_kind == 'stolen_plate')
         local prov = _providers[row.provider]
-        local meta = nil
-        if row.metadata and row.metadata ~= '' then
-            pcall(function() meta = json.decode(row.metadata) end)
-        end
-
         local currentEntId = row.entitlement_id
+
         if not isStolenPlate then
-            if not meta or type(meta) ~= 'table' or meta.stablePartIdentity ~= row.stable_part_id or (meta.partKey and meta.partKey ~= row.part_key) then
-                print(('[vp_chopshop][WorkshopBridge] CRITICAL: Invalid/mismatched metadata for part txn %s (stable %s) -> QUARANTINE'):format(
-                    tostring(row.txn_id), tostring(row.stable_part_id)))
+            local meta, metaErr = decodeAndValidatePartJournalMetadata(row)
+            if not meta then
+                print(('[vp_chopshop][WorkshopBridge] CRITICAL: Invalid metadata (%s) for part txn %s (stable %s) -> QUARANTINE'):format(
+                    tostring(metaErr), tostring(row.txn_id), tostring(row.stable_part_id)))
                 execQuery("UPDATE vp_chop_workshop_journal SET state = 'QUARANTINE' WHERE txn_id = ?", { row.txn_id })
                 goto continue_recovery_row
             end
@@ -954,13 +997,17 @@ function WorkshopBridge.ReconcilePending()
                 local isStolenPlate = (row.asset_kind == 'stolen_plate')
                 local nextCount = (row.reconcile_count or 0) + 1
                 local prov = _providers[row.provider]
-                local meta = nil
-                if row.metadata and row.metadata ~= '' then
-                    pcall(function() meta = json.decode(row.metadata) end)
-                end
-
                 local currentEntId = row.entitlement_id
-                if not isStolenPlate and meta and type(meta) == 'table' and meta.stablePartIdentity == row.stable_part_id then
+
+                if not isStolenPlate then
+                    local meta, metaErr = decodeAndValidatePartJournalMetadata(row)
+                    if not meta then
+                        print(('[vp_chopshop][WorkshopBridge] CRITICAL: Invalid metadata (%s) in Reconcile for part txn %s -> QUARANTINE'):format(
+                            tostring(metaErr), tostring(row.txn_id)))
+                        execQuery("UPDATE vp_chop_workshop_journal SET state = 'QUARANTINE' WHERE txn_id = ?", { row.txn_id })
+                        goto next_reconcile_row
+                    end
+
                     if not PartEntitlement.GetByStableId(row.stable_part_id) then
                         local restoredId = PartEntitlement.RestoreExternalSnapshot(meta, row.txn_id)
                         if restoredId and restoredId ~= currentEntId then
@@ -1021,7 +1068,25 @@ function WorkshopBridge.ReconcilePending()
     _reconcileRunning = false
 end
 
--- ─── Inicialização ─────────────────────────────────────────────────────────────
+-- ─── Inicialização & Schema Probe ──────────────────────────────────────────────
+
+local function probeJournalSchema()
+    if not _db or not _db.query or type(_db.query.await) ~= 'function' then
+        return false, 'no_db'
+    end
+    local ok, res = pcall(function()
+        return _db.query.await([[
+            SELECT txn_id, provider, player_key, asset_kind, entitlement_id,
+                   stable_part_id, part_key, price, state, reconcile_count, metadata
+            FROM vp_chop_workshop_journal
+            LIMIT 0
+        ]])
+    end)
+    if not ok or res == nil then
+        return false, 'schema_probe_failed'
+    end
+    return true
+end
 
 function WorkshopBridge.Init(db, clockFn, rngFn)
     if clockFn then _clock = clockFn end
@@ -1032,14 +1097,32 @@ function WorkshopBridge.Init(db, clockFn, rngFn)
         _db = _G.MySQL
     end
 
-    _ready = (_db ~= nil and _db ~= false and type(_db) == 'table' and
-              type(_db.query) == 'table' and type(_db.query.await) == 'function' and
-              type(_db.insert) == 'table' and type(_db.insert.await) == 'function')
-    dbg('WorkshopBridge inicializado, ready =', _ready)
+    local hasDbApis = (_db ~= nil and _db ~= false and type(_db) == 'table' and
+                       type(_db.query) == 'table' and type(_db.query.await) == 'function' and
+                       type(_db.insert) == 'table' and type(_db.insert.await) == 'function')
 
-    if _ready then
-        WorkshopBridge.BootstrapRecovery()
+    if not hasDbApis then
+        _ready = false
+        return false, 'db_apis_missing'
     end
+
+    local okProbe, probeErr = probeJournalSchema()
+    if not okProbe then
+        _ready = false
+        print(('[vp_chopshop][WorkshopBridge] WARN: Workshop schema probe failed (%s), workshop domain degraded (IsReady=false)'):format(tostring(probeErr)))
+        return false, probeErr
+    end
+
+    local okRec, recErr = WorkshopBridge.BootstrapRecovery()
+    if not okRec then
+        _ready = false
+        print(('[vp_chopshop][WorkshopBridge] ERROR: Bootstrap recovery failed (%s), workshop domain degraded (IsReady=false)'):format(tostring(recErr)))
+        return false, recErr
+    end
+
+    _ready = true
+    dbg('WorkshopBridge inicializado com sucesso, ready = true')
+    return true
 end
 
 if AddEventHandler or _G.AddEventHandler then
@@ -1140,6 +1223,8 @@ if GetConvar('vp_chopshop_selftest', '0') == '1' then
         finalizeCommittedTransaction = finalizeCommittedTransaction,
         validateAndSanitizeSignal = validateAndSanitizeSignal,
         validateJournalRow = validateJournalRow,
+        ensureJournalCommitted = ensureJournalCommitted,
+        decodeAndValidatePartJournalMetadata = decodeAndValidatePartJournalMetadata,
     }
 end
 

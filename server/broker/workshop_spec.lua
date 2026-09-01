@@ -32,6 +32,9 @@ local function run()
                 if sql:find('CREATE TABLE') then return {} end
                 if sql:find('ALTER TABLE') then return {} end
                 if sql:find('SELECT') and sql:find('vp_chop_workshop_journal') then
+                    if sql:find('LIMIT 0') then
+                        return {}
+                    end
                     local rows = {}
                     if sql:find("WHERE state IN %('PREPARED'") then
                         for _, row in pairs(mockJournal) do
@@ -70,6 +73,7 @@ local function run()
                         newState = params[1]
                     end
                     local whereState = sql:match("AND state = ['\"](%w+)['\"]")
+                    local whereInCommit = sql:find("state IN %('COMMITTING', 'RECONCILING', 'QUARANTINE'%)")
                     local txnId = nil
                     for _, p in ipairs(params) do
                         if type(p) == 'string' and p:find('^ws:') then
@@ -80,6 +84,9 @@ local function run()
                     if txnId and mockJournal[txnId] then
                         local row = mockJournal[txnId]
                         if whereState and row.state ~= whereState then
+                            return { affectedRows = 0 }
+                        end
+                        if whereInCommit and (row.state ~= 'COMMITTING' and row.state ~= 'RECONCILING' and row.state ~= 'QUARANTINE') then
                             return { affectedRows = 0 }
                         end
                         if newState then row.state = newState end
@@ -221,11 +228,90 @@ local function run()
         check('WORKSHOP-01 Entitlement segue intacto ISSUED', PE.State(entId) == 'ISSUED')
     end
 
-    -- ─── WORKSHOP-02: GetMarketSignal com provider ativo ────────────────────
+    -- ─── WORKSHOP-02 & WORKSHOP-SIGNAL-01..05: Validação Canônica de Sinais ────
     do
         resetEnv()
+        -- 02: GetMarketSignal padrão
         local res = WB.GetMarketSignal({ commodity = 'adv_engine' })
         check('WORKSHOP-02 GetMarketSignal retorna sinal canônico validado e sanitizado', res.ok == true and res.signal ~= nil and res.signal.activeDemand.adv_engine == 1.35 and res.signal.urgency == 'high')
+
+        -- WORKSHOP-SIGNAL-01: body_panel aceito
+        local raw1 = { activeDemand = { body_panel = 1.20 }, urgency = 'normal' }
+        local clean1 = WB._test.validateAndSanitizeSignal(raw1)
+        check('WORKSHOP-SIGNAL-01 body_panel é aceito no activeDemand', clean1 ~= nil and clean1.activeDemand.body_panel == 1.20)
+
+        -- WORKSHOP-SIGNAL-02: stolen_plate, metalscrap, steel, aluminum, copper, car_parts aceitos
+        local raw2 = {
+            activeDemand = {
+                stolen_plate = 1.10,
+                metalscrap = 0.90,
+                steel = 1.05,
+                aluminum = 1.15,
+                copper = 1.25,
+                car_parts = 1.30,
+            },
+            urgency = 'high'
+        }
+        local clean2 = WB._test.validateAndSanitizeSignal(raw2)
+        check('WORKSHOP-SIGNAL-02 Commodities de materiais e car_parts são aceitas',
+            clean2 ~= nil and
+            clean2.activeDemand.stolen_plate == 1.10 and
+            clean2.activeDemand.metalscrap == 0.90 and
+            clean2.activeDemand.steel == 1.05 and
+            clean2.activeDemand.aluminum == 1.15 and
+            clean2.activeDemand.copper == 1.25 and
+            clean2.activeDemand.car_parts == 1.30
+        )
+
+        -- WORKSHOP-SIGNAL-03: door_dside_f / bonnet / boot não aparecem no output
+        local raw3 = {
+            activeDemand = {
+                door_dside_f = 1.30,
+                bonnet = 1.20,
+                boot = 1.10,
+                carcass = 2.00,
+                body_panel = 1.40,
+            },
+            urgency = 'low'
+        }
+        local clean3 = WB._test.validateAndSanitizeSignal(raw3)
+        check('WORKSHOP-SIGNAL-03 Raw parts (door, bonnet, boot, carcass) são descartadas do activeDemand',
+            clean3 ~= nil and
+            clean3.activeDemand.door_dside_f == nil and
+            clean3.activeDemand.bonnet == nil and
+            clean3.activeDemand.boot == nil and
+            clean3.activeDemand.carcass == nil and
+            clean3.activeDemand.body_panel == 1.40
+        )
+
+        -- WORKSHOP-SIGNAL-04: Commodity adicionada dinamicamente em Config.Broker.Commodities
+        Config.Broker.Commodities.custom_turbo = { basePrice = 5000 }
+        local raw4 = { activeDemand = { custom_turbo = 1.50 }, urgency = 'critical' }
+        local clean4 = WB._test.validateAndSanitizeSignal(raw4)
+        check('WORKSHOP-SIGNAL-04 Commodity dinâmica adicionada ao config é automaticamente aceita', clean4 ~= nil and clean4.activeDemand.custom_turbo == 1.50)
+        Config.Broker.Commodities.custom_turbo = nil
+
+        -- WORKSHOP-SIGNAL-05: NaN / Inf / out-of-range descartados
+        local raw5 = {
+            activeDemand = {
+                adv_engine = 0/0,
+                tyre = 1/0,
+                body_panel = -1/0,
+                catalytic_converter = 0.05, -- abaixo de 0.1
+                stolen_plate = 5.5,         -- acima de 5.0
+                copper = 2.0,               -- válido
+            }
+        }
+        local clean5 = WB._test.validateAndSanitizeSignal(raw5)
+        check('WORKSHOP-SIGNAL-05 Valores NaN, Inf e fora da faixa [0.1, 5.0] são descartados',
+            clean5 ~= nil and
+            clean5.activeDemand.adv_engine == nil and
+            clean5.activeDemand.tyre == nil and
+            clean5.activeDemand.body_panel == nil and
+            clean5.activeDemand.catalytic_converter == nil and
+            clean5.activeDemand.stolen_plate == nil and
+            clean5.activeDemand.copper == 2.0
+        )
     end
 
     -- ─── WORKSHOP-03: PreparePurchase rejeita -> Entitlement ISSUED ─────────
@@ -602,6 +688,41 @@ local function run()
         check('WORKSHOP-DB-03 WorkshopBridge entra em Integrity Locked', WB.IsIntegrityLocked() == true)
         mockDb.query.await = oldQuery
 
+        -- WORKSHOP-DB-03B: Provider pagou mas UPDATE COMMITTED falha e SELECT retorna COMMITTING
+        resetEnv()
+        local entDb3B, _ = PE.Issue('session_db3b', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'DB3B', model = 1234 } })
+        mockDb.query.await = function(sql, params)
+            if sql:find("SET state = 'COMMITTED'") then return { affectedRows = 0 } end
+            if sql:find("SELECT state FROM vp_chop_workshop_journal") then
+                return { { state = 'COMMITTING' } }
+            end
+            return oldQuery(sql, params)
+        end
+        local resDb3B = WB.HandoffPart(1, entDb3B)
+        check('WORKSHOP-DB-03B COMMITTED não comprovado ativa integridade locked', WB.IsIntegrityLocked() == true)
+        check('WORKSHOP-DB-03B Entitlement permanece RESERVED_EXTERNAL', PE.State(entDb3B) == 'RESERVED_EXTERNAL')
+        check('WORKSHOP-DB-03B Entitlement NÃO consumido', PE.State(entDb3B) ~= 'CONSUMED')
+        check('WORKSHOP-DB-03B Journal NÃO finalizado em FINALIZED', mockJournal[resDb3B.txnId] ~= nil and mockJournal[resDb3B.txnId].state ~= 'FINALIZED')
+        check('WORKSHOP-DB-03B Payout executado exatamente 1x e retorno degradado', resDb3B.ok == true and resDb3B.workshopDegraded == true and mockProvider.actualPayouts == 1)
+        mockDb.query.await = oldQuery
+
+        -- WORKSHOP-DB-03C: Journal já COMMITTED (affectedRows=0 mas SELECT state=COMMITTED)
+        resetEnv()
+        local entDb3C, _ = PE.Issue('session_db3c', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'DB3C', model = 1234 } })
+        local txn3C = 'ws:mock_workshop:db3c:1'
+        local data3C = PE.Get(entDb3C)
+        PE.ReserveForExternal(entDb3C, 1, txn3C)
+        mockJournal[txn3C] = {
+            txn_id = txn3C, provider = 'mock_workshop', player_key = 'qbx:player_1',
+            asset_kind = 'part_entitlement', entitlement_id = entDb3C, stable_part_id = data3C.stablePartIdentity,
+            part_key = 'adv_engine', price = 3000, state = 'COMMITTED', reconcile_count = 0,
+            metadata = json.encode(data3C),
+        }
+        local okFin3C = WB._test.finalizeCommittedTransaction('mock_workshop', txn3C, data3C.stablePartIdentity, entDb3C, false)
+        check('WORKSHOP-DB-03C Journal já COMMITTED finaliza com sucesso via ensureJournalCommitted', okFin3C == true)
+        check('WORKSHOP-DB-03C Entitlement consumido como CONSUMED', PE.State(entDb3C) == 'CONSUMED')
+        check('WORKSHOP-DB-03C Journal transicionado para FINALIZED', mockJournal[txn3C].state == 'FINALIZED')
+
         -- WORKSHOP-DB-04: Provider pagou mas UPDATE FINALIZED falha -> circuit breaker
         resetEnv()
         local entDb4, _ = PE.Issue('session_db4', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'DB04', model = 1234 } })
@@ -797,7 +918,7 @@ local function run()
         check('WORKSHOP-RECONCILE-ERROR-01 Reconciler recupera e executa 2a varredura limpa', mockJournal[txnRecErr].state == 'FINALIZED')
     end
 
-    -- ─── WORKSHOP-READY-01..02: Verificação de Readiness ────────────────────
+    -- ─── WORKSHOP-READY-01..02 & WORKSHOP-SCHEMA-01..03: Schema Readiness ──
     do
         resetEnv()
         local mockDbNoInsert = {
@@ -808,6 +929,94 @@ local function run()
 
         WB.Init(mockDb)
         check('WORKSHOP-READY-02 DB com query e insert válidos resulta em IsReady() == true', WB.IsReady() == true)
+
+        -- 01: db apis existem, mas schema probe lança erro -> IsReady() == false
+        local mockDbBrokenSchema = {
+            query = {
+                await = function(sql, params)
+                    if sql:find("FROM vp_chop_workshop_journal") and sql:find("LIMIT 0") then
+                        error("Table 'vp_chop_workshop_journal' doesn't exist")
+                    end
+                    return {}
+                end
+            },
+            insert = { await = function() return {} end }
+        }
+        WB.Init(mockDbBrokenSchema)
+        check('WORKSHOP-SCHEMA-01 Falha no probe de schema resulta em IsReady() == false', WB.IsReady() == false)
+
+        -- 02: Schema probe válido -> IsReady() == true
+        WB.Init(mockDb)
+        check('WORKSHOP-SCHEMA-02 Schema probe bem sucedido resulta em IsReady() == true', WB.IsReady() == true)
+
+        -- 03: Bootstrap journal SELECT falha -> BootstrapRecovery retorna false e Init is not ready
+        local mockDbSelectFail = {
+            query = {
+                await = function(sql, params)
+                    if sql:find("LIMIT 0") then return {} end
+                    if sql:find("WHERE state IN") then error("MySQL connection lost during boot read") end
+                    return {}
+                end
+            },
+            insert = { await = function() return {} end }
+        }
+        local okInit3, errInit3 = WB.Init(mockDbSelectFail)
+        check('WORKSHOP-SCHEMA-03 Falha de leitura no boot recovery resulta em Init not-ready', okInit3 == false and WB.IsReady() == false)
+    end
+
+    -- ─── WORKSHOP-MIGRATION-01: Legacy Row sem asset_kind ou stable_part_id ─
+    do
+        resetEnv()
+        local txnLegacy = 'ws:mock_workshop:legacy:1'
+        mockJournal[txnLegacy] = {
+            txn_id          = txnLegacy,
+            provider        = 'mock_workshop',
+            player_key      = 'qbx:player_1',
+            asset_kind      = nil, -- ausente / NULL
+            entitlement_id  = 'pe:legacy_1',
+            stable_part_id  = nil, -- ausente / NULL
+            part_key        = 'adv_engine',
+            price           = 3000,
+            state           = 'RECONCILING',
+            reconcile_count = 0,
+            metadata        = nil,
+        }
+        mockProvider.statusCalls = 0
+        WB.Init(mockDb, function() return virtualTime end, function() return 0.5 end)
+        check('WORKSHOP-MIGRATION-01 Legacy row sem stable_part_id é enviada para QUARANTINE', mockJournal[txnLegacy].state == 'QUARANTINE')
+        check('WORKSHOP-MIGRATION-01 Zero chamadas ao provider sobre a legacy row', mockProvider.statusCalls == 0)
+    end
+
+    -- ─── WORKSHOP-RECONCILE-META-01: Reconcile com metadata stable mismatch ─
+    do
+        resetEnv()
+        local entMeta1, _ = PE.Issue('session_meta1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'META1', model = 1234 } })
+        local dataMeta1 = PE.Get(entMeta1)
+        PE.ReserveForExternal(entMeta1, 1, 'ws:mock_workshop:meta_err:1')
+
+        local txnMetaErr = 'ws:mock_workshop:meta_err:1'
+        local corruptData = json.decode(json.encode(dataMeta1))
+        corruptData.stablePartIdentity = 'spi:mismatch:999'
+
+        mockJournal[txnMetaErr] = {
+            txn_id          = txnMetaErr,
+            provider        = 'mock_workshop',
+            player_key      = 'qbx:player_1',
+            asset_kind      = 'part_entitlement',
+            entitlement_id  = entMeta1,
+            stable_part_id  = dataMeta1.stablePartIdentity,
+            part_key        = 'adv_engine',
+            price           = 3000,
+            state           = 'RECONCILING',
+            reconcile_count = 1,
+            metadata        = json.encode(corruptData),
+        }
+
+        mockProvider.statusCalls = 0
+        WB.ReconcilePending()
+        check('WORKSHOP-RECONCILE-META-01 Metadata divergente em ReconcilePending isola para QUARANTINE', mockJournal[txnMetaErr].state == 'QUARANTINE')
+        check('WORKSHOP-RECONCILE-META-01 Provider status NÃO foi consultado sobre row com metadata inválida', mockProvider.statusCalls == 0)
+        check('WORKSHOP-RECONCILE-META-01 Peça runtime não foi alterada indevidamente', PE.State(entMeta1) == 'RESERVED_EXTERNAL')
     end
 
     -- ─── WORKSHOP-07 & PLATE-01..03: stolen_plate SAGA ──────────────────────

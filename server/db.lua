@@ -191,12 +191,32 @@ function VPChopDbInit()
                     INDEX `idx_workshop_player` (`player_key`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
-            -- Migração idempotente para tabelas criadas em rascunhos anteriores
+            -- Migração idempotente e não-destrutiva para tabelas criadas em rascunhos anteriores
             pcall(function()
-                MySQL.query.await('ALTER TABLE `vp_chop_workshop_journal` ADD COLUMN `asset_kind` VARCHAR(24) NOT NULL AFTER `player_key`')
-            end)
-            pcall(function()
-                MySQL.query.await('ALTER TABLE `vp_chop_workshop_journal` ADD COLUMN `stable_part_id` VARCHAR(128) NOT NULL AFTER `entitlement_id`')
+                local cols = MySQL.query.await([[
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'vp_chop_workshop_journal'
+                      AND TABLE_SCHEMA = DATABASE()
+                ]])
+                if cols and type(cols) == 'table' and #cols > 0 then
+                    local colMap = {}
+                    for _, c in ipairs(cols) do
+                        if c.COLUMN_NAME then colMap[c.COLUMN_NAME] = true end
+                    end
+                    if not colMap['asset_kind'] then
+                        MySQL.query.await([[
+                            ALTER TABLE `vp_chop_workshop_journal`
+                            ADD COLUMN `asset_kind` VARCHAR(24) NULL DEFAULT NULL AFTER `player_key`
+                        ]])
+                    end
+                    if not colMap['stable_part_id'] then
+                        MySQL.query.await([[
+                            ALTER TABLE `vp_chop_workshop_journal`
+                            ADD COLUMN `stable_part_id` VARCHAR(128) NULL DEFAULT NULL AFTER `entitlement_id`
+                        ]])
+                    end
+                end
             end)
             VPChopDBReady = true
             TriggerEvent('vp_chopshop:server:dbReady')
