@@ -92,6 +92,41 @@ local function setFenceBlip(coords, precise)
     EndTextCommandSetBlipName(FenceBlip)
 end
 
+-- ─── Venda Direta de Peça Carregada ──────────────────────────────────────────
+
+local physicalPartKeys = {
+    catalytic_converter = true,
+    adv_engine          = true,
+    bonnet              = true,
+    boot                = true,
+    door_dside_f        = true,
+    door_pside_f        = true,
+    door_dside_r        = true,
+    door_pside_r        = true,
+}
+
+local function sellCarriedPart()
+    if not VPChopCarryingPart or not physicalPartKeys[VPChopCarryingPart.partKey] then return end
+    local entId = VPChopCarryingPart.entitlementId
+    if not entId then
+        VPChopNotify(L('notify_generic_error'), 'error')
+        return
+    end
+
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellCarriedPart', false, entId)
+    if not cbOk or not res or not res.ok then
+        if res and res.terminalConsumed then
+            VPChopDropCarryPart()
+        end
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
+        return
+    end
+
+    VPChopDropCarryPart()
+    local payout = res.payout or 0
+    VPChopNotify(L('fence_part_sold_fmt', payout), 'success')
+end
+
 -- ─── Setup NPC ───────────────────────────────────────────────────────────────
 
 RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
@@ -154,32 +189,14 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
             }
         end
 
-local function sellCarriedCatalytic()
-    if not VPChopCarryingPart or VPChopCarryingPart.partKey ~= 'catalytic_converter' then return end
-    local entId = VPChopCarryingPart.entitlementId
-    if not entId then
-        VPChopNotify(L('notify_generic_error'), 'error')
-        return
-    end
-
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellCatalytic', false, entId)
-    if not cbOk or not res or not res.ok then
-        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
-        return
-    end
-
-    VPChopDropCarryPart()
-    VPChopNotify(L('fence_catalytic_sold_fmt', res.payout or 1500), 'success')
-end
-
         if trust >= 1 then
             options[#options+1] = {
-                name='vp_fence_sell_catalytic', label=L('fence_sell_catalytic_label'),
-                icon='fa-solid fa-fire-flame-curved', distance=2.5,
+                name='vp_fence_sell_part', label=L('fence_sell_part_label') or 'Vender peça carregada',
+                icon='fa-solid fa-hand-holding-dollar', distance=2.5,
                 canInteract=function()
-                    return VPChopCarryingPart and VPChopCarryingPart.partKey == 'catalytic_converter'
+                    return VPChopCarryingPart and physicalPartKeys[VPChopCarryingPart.partKey] == true
                 end,
-                onSelect=function() sellCarriedCatalytic() end,
+                onSelect=function() sellCarriedPart() end,
             }
             options[#options+1] = {
                 name='vp_fence_sell_items', label=L('fence_target_sell_items'),
@@ -337,10 +354,14 @@ end
 function openSellMenu()
     local sellable = {}
     local prices   = Config.Fence and Config.Fence.BasePrices or {}
+    local isBrokerEnabled = (Config.Broker and Config.Broker.Enable ~= false)
+    local itemMap  = (Config.Broker and Config.Broker.Integration and Config.Broker.Integration.ItemToCommodity) or {}
+
     for item, _ in pairs(prices) do
         local count = exports.ox_inventory:Search('count', item)
         if count and count > 0 then
-            sellable[#sellable+1] = { name=item, amount=count, unitPrice=prices[item] }
+            local isDynamic = isBrokerEnabled and (itemMap[item] ~= nil)
+            sellable[#sellable+1] = { name=item, amount=count, unitPrice=prices[item], isDynamic=isDynamic }
         end
     end
     if #sellable == 0 then
@@ -349,9 +370,10 @@ function openSellMenu()
     -- Montar context menu com todos os itens vendáveis
     local opts = {}
     for _, s in ipairs(sellable) do
+        local priceLabel = s.isDynamic and (L('fence_sell_price_dynamic') or 'Preço variável de mercado') or ('$'..s.unitPrice..' un.')
         opts[#opts+1] = {
             title    = s.name .. ' ×' .. s.amount,
-            metadata = {{ label=L('fence_sell_price_label'), value='$'..s.unitPrice..' un.' }},
+            metadata = {{ label=L('fence_sell_price_label'), value=priceLabel }},
             onSelect = function()
                 local ok, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellItems', false, {{name=s.name, amount=s.amount}})
                 if ok and res and res.ok then

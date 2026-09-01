@@ -171,8 +171,8 @@ local function run()
         jitter = 0.03,
     })
     check('MARKET-04 Max stack de bônus retorna ok=true', maxPriceRes.ok == true)
-    local ceilBound = math.floor(2800 * 2.50) -- $7000
-    check('MARKET-04 Preço unitário respeita ceiling hard (base $2800 * 2.50 = $7000)', maxPriceRes.unitPrice == ceilBound)
+    local ceilBound = math.floor(2500 * 2.50) -- $6250
+    check('MARKET-04 Preço unitário respeita ceiling hard (base $2500 * 2.50 = $6250)', maxPriceRes.unitPrice == ceilBound)
     check('MARKET-04 Flag hitCeiling é true', maxPriceRes.bounds.hitCeiling == true)
 
     -- ─── MARKET-05: Limites rígidos de demanda (DemandFloor e DemandCeiling) ──
@@ -217,7 +217,7 @@ local function run()
         heatMultiplier = 0.75,
         jitter = -0.50, -- tentativa de forçar jitter excessivo negativo
     })
-    check('MARKET-09 Jitter negativo extremo respeita floor ($180 * 0.40 = $72)', jitterFloorRes.unitPrice == 72)
+    check('MARKET-09 Jitter negativo extremo respeita floor ($100 * 0.40 = $40)', jitterFloorRes.unitPrice == 40)
 
     local jitterCeilRes = BM.ResolvePrice('steel', {
         demandOverride = 1.3000,
@@ -226,7 +226,81 @@ local function run()
         hour = 23,
         jitter = 0.50, -- tentativa de forçar jitter excessivo positivo
     })
-    check('MARKET-09 Jitter positivo extremo respeita ceiling ($180 * 2.50 = $450)', jitterCeilRes.unitPrice == 450)
+    check('MARKET-09 Jitter positivo extremo respeita ceiling ($100 * 2.50 = $250)', jitterCeilRes.unitPrice == 250)
+
+    -- ─── QUOTE-01..09: COTAÇÃO MARGINAL EM LOTE E RECORD SALES BATCH ─────────
+    resetMarket()
+    -- QUOTE-01: count=1 igual a ResolvePrice no mesmo context/jitter
+    local q1 = BM.QuoteSale('metalscrap', 1, { jitter = 0.0, trustLevel = 2 })
+    local r1 = BM.ResolvePrice('metalscrap', { jitter = 0.0, trustLevel = 2 })
+    check('QUOTE-01 count=1 igual a ResolvePrice no mesmo context/jitter', q1.ok == true and q1.total == r1.unitPrice and q1.unitPrices[1] == r1.unitPrice)
+
+    -- QUOTE-02: count>1 aplica diminishing marginal price
+    local q5 = BM.QuoteSale('adv_engine', 5, { jitter = 0.0 })
+    check('QUOTE-02 count>1 possui unitPrice marginal decrescente', q5.ok == true and q5.unitPrices[1] > q5.unitPrices[2] and q5.unitPrices[2] > q5.unitPrices[3])
+
+    -- QUOTE-03: prefixTotals monotônicos
+    local prefixMonotonic = true
+    for idx = 2, #q5.prefixTotals do
+        if q5.prefixTotals[idx] <= q5.prefixTotals[idx - 1] then
+            prefixMonotonic = false
+        end
+    end
+    check('QUOTE-03 prefixTotals estritamente monotônicos e crescentes', prefixMonotonic)
+
+    -- QUOTE-04: prefix[count] == total
+    check('QUOTE-04 prefixTotals[count] é exatamente igual a total', q5.prefixTotals[5] == q5.total)
+
+    -- QUOTE-05: QuoteSale NÃO altera sale pressure real
+    local demAfterQuote = BM.GetDemandIndex('adv_engine', virtualTime)
+    check('QUOTE-05 QuoteSale NÃO altera a demanda real in-memory', math.abs(demAfterQuote - 1.0000) < 0.0001)
+
+    -- QUOTE-06: RecordSalesBatch aplica exatamente o projected demand
+    local batchRes = BM.RecordSalesBatch({ { commodity = 'adv_engine', count = 5 } }, virtualTime)
+    local demAfterBatch = BM.GetDemandIndex('adv_engine', virtualTime)
+    check('QUOTE-06 RecordSalesBatch aplica exatamente o projected demand', batchRes.ok == true and math.abs(demAfterBatch - q5.demandAfterProjected) < 0.0001)
+
+    -- QUOTE-07: invalid batch causa zero mutation
+    resetMarket()
+    local badBatchRes = BM.RecordSalesBatch({
+        { commodity = 'metalscrap', count = 10 },
+        { commodity = 'invalid_comm_xyz', count = 5 },
+    }, virtualTime)
+    local scrapDemAfterBad = BM.GetDemandIndex('metalscrap', virtualTime)
+    check('QUOTE-07 Batch com item inválido falha atomicamente (invalid_batch)', badBatchRes.ok == false and badBatchRes.err == 'invalid_batch')
+    check('QUOTE-07 Batch inválido causou ZERO mutação no metalscrap (demanda segue 1.0000)', math.abs(scrapDemAfterBad - 1.0000) < 0.0001)
+
+    -- QUOTE-08: Floor respeitado por cada unidade
+    local qMassive = BM.QuoteSale('metalscrap', 1000, { jitter = 0.0 })
+    local allFloorRespected = true
+    local floorScrap = math.floor(80 * 0.40) -- $32
+    for _, up in ipairs(qMassive.unitPrices) do
+        if up < floorScrap then allFloorRespected = false end
+    end
+    check('QUOTE-08 Floor ($32) respeitado por cada uma das 1000 unidades cotadas', allFloorRespected and qMassive.unitPrices[1000] == floorScrap)
+
+    -- QUOTE-09: Ceiling respeitado por cada unidade
+    local qCeil = BM.QuoteSale('copper', 10, { demandOverride = 1.30, trustLevel = 4, progressionTier = 4, hour = 23, jitter = 0.03 })
+    local allCeilRespected = true
+    local ceilCopper = math.floor(150 * 2.50) -- $375
+    for _, up in ipairs(qCeil.unitPrices) do
+        if up > ceilCopper then allCeilRespected = false end
+    end
+    check('QUOTE-09 Ceiling ($375) respeitado por cada unidade sob multiplicadores máximos', allCeilRespected and qCeil.unitPrices[1] == ceilCopper)
+
+    -- ─── BATCH VS UNIT TRANSACTION SIMULATION ────────────────────────────────
+    resetMarket()
+    local unitTotalSum = 0
+    local unitTxJitter = 0.015
+    for u = 1, 100 do
+        local uQuote = BM.QuoteSale('metalscrap', 1, { jitter = unitTxJitter })
+        unitTotalSum = unitTotalSum + uQuote.total
+        BM.RecordSale('metalscrap', 1, virtualTime)
+    end
+
+    resetMarket()
+    local b100Quote = BM.QuoteSale('metalscrap', 100, { jitter = unitTxJitter })
+    check('SIM-BATCH-01 Venda em lote de 100 scrap tem valor idêntico a 100 vendas unitárias sequenciais', b100Quote.total == unitTotalSum)
 
     -- ─── MARKET-PERSIST: PERSISTÊNCIA ASSÍNCRONA, RETRY E SEAMS ──────────────
     resetMarket()

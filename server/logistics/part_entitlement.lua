@@ -47,6 +47,52 @@ local function normalizeKey(val)
     return string.upper(s:gsub('%s+', ''))
 end
 
+-- ─── Provenance Canônica ───────────────────────────────────────────────────────
+
+--- Captura de forma canônica, segura e server-authoritative a proveniência do veículo.
+---@param veh number Entity handle do veículo server-side
+---@return { realPlate: string, model: number }|nil provenance
+function PartEntitlement.CaptureVehicleProvenance(veh)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then
+        return nil
+    end
+
+    local rawPlate = GetVehicleNumberPlateText(veh)
+    if not rawPlate or type(rawPlate) ~= 'string' then
+        return nil
+    end
+
+    local cleanPlate = rawPlate:gsub('%s+', '')
+    if cleanPlate == '' then
+        return nil
+    end
+
+    local canonicalRealPlate = nil
+    if _G.VPChopMDT and type(_G.VPChopMDT.GetRealPlate) == 'function' then
+        local ok, res = pcall(function()
+            return _G.VPChopMDT.GetRealPlate(cleanPlate)
+        end)
+        if ok and type(res) == 'string' then
+            local cleanedRes = res:gsub('%s+', '')
+            if cleanedRes ~= '' then
+                canonicalRealPlate = cleanedRes
+            end
+        end
+    else
+        canonicalRealPlate = cleanPlate
+    end
+
+    if not canonicalRealPlate or canonicalRealPlate == '' then
+        return nil
+    end
+
+    local model = GetEntityModel(veh)
+    return {
+        realPlate = canonicalRealPlate,
+        model     = tonumber(model) or 0,
+    }
+end
+
 -- ─── Emissão ───────────────────────────────────────────────────────────────────
 
 --- Emite (ou devolve o existente) o entitlement de uma peça física removida.
@@ -81,6 +127,10 @@ function PartEntitlement.Issue(sessionId, src, partKey, sourceNetId, opts)
         sessionId      = sessionId,
         sourceNetId    = tonumber(sourceNetId) or 0,
         origin         = (opts and opts.origin) or 'advanced',
+        provenance     = (opts and opts.provenance and {
+            realPlate = opts.provenance.realPlate,
+            model     = opts.provenance.model,
+        }) or nil,
         state          = 'ISSUED',
         createdAt      = now,
         updatedAt      = now,
@@ -109,6 +159,10 @@ function PartEntitlement.Get(id)
         sessionId      = e.sessionId,
         sourceNetId    = e.sourceNetId,
         origin         = e.origin,
+        provenance     = e.provenance and {
+            realPlate = e.provenance.realPlate,
+            model     = e.provenance.model,
+        } or nil,
         state          = e.state,
         createdAt      = e.createdAt,
         updatedAt      = e.updatedAt,
@@ -160,7 +214,7 @@ end
 ---@param src number
 ---@param actionName string
 ---@param expectedPartKey? string
----@return { ok: boolean, err?: string, partKey?: string, sourceNetId?: number, sessionId?: string, entitlement?: table }
+---@return { ok: boolean, err?: string, partKey?: string, sourceNetId?: number, sessionId?: string, provenance?: table, entitlement?: table }
 function PartEntitlement.Consume(id, src, actionName, expectedPartKey)
     local okVal, valRes = PartEntitlement.Validate(id, src, expectedPartKey)
     if not okVal then
@@ -181,6 +235,10 @@ function PartEntitlement.Consume(id, src, actionName, expectedPartKey)
         partKey     = e.partKey,
         sourceNetId = e.sourceNetId,
         sessionId   = e.sessionId,
+        provenance  = e.provenance and {
+            realPlate = e.provenance.realPlate,
+            model     = e.provenance.model,
+        } or nil,
         entitlement = PartEntitlement.Get(id),
     }
 end

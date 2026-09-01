@@ -1240,44 +1240,78 @@ Config.Broker = {
             recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
         },
         adv_engine = {
-            basePrice = 2800,
+            basePrice = 2500,
             salePressure = 0.05,     -- 5% queda de demanda por unidade
             recoveryPerHour = 0.12,  -- 12% recuperação por hora rumo a 1.0
         },
         tyre = {
-            basePrice = 450,
+            basePrice = 400,
             salePressure = 0.015,    -- 1.5% queda de demanda por unidade
             recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
         },
         stolen_plate = {
-            basePrice = 1200,
+            basePrice = 250,
+            salePressure = 0.03,     -- 3% queda de demanda por unidade
+            recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
+        },
+        body_panel = {
+            basePrice = 600,
             salePressure = 0.03,     -- 3% queda de demanda por unidade
             recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
         },
         metalscrap = {
-            basePrice = 120,
+            basePrice = 80,
             salePressure = 0.002,    -- 0.2% queda de demanda por unidade
             recoveryPerHour = 0.25,  -- 25% recuperação por hora rumo a 1.0
         },
         steel = {
-            basePrice = 180,
+            basePrice = 100,
             salePressure = 0.003,    -- 0.3% queda de demanda por unidade
             recoveryPerHour = 0.25,  -- 25% recuperação por hora rumo a 1.0
         },
         aluminum = {
-            basePrice = 200,
+            basePrice = 130,
             salePressure = 0.004,    -- 0.4% queda de demanda por unidade
             recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
         },
         copper = {
-            basePrice = 300,
+            basePrice = 150,
             salePressure = 0.005,    -- 0.5% queda de demanda por unidade
             recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
         },
         car_parts = {
-            basePrice = 350,
+            basePrice = 400,
             salePressure = 0.004,    -- 0.4% queda de demanda por unidade
             recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+    },
+
+    Integration = {
+        ItemToCommodity = {
+            metalscrap    = 'metalscrap',
+            steel         = 'steel',
+            aluminum      = 'aluminum',
+            copper        = 'copper',
+            car_parts     = 'car_parts',
+            stolen_plate  = 'stolen_plate',
+            chopshop_tyre = 'tyre',
+        },
+
+        PhysicalPartToCommodity = {
+            catalytic_converter = 'catalytic_converter',
+            adv_engine          = 'adv_engine',
+            bonnet              = 'body_panel',
+            boot                = 'body_panel',
+            door_dside_f        = 'body_panel',
+            door_pside_f        = 'body_panel',
+            door_dside_r        = 'body_panel',
+            door_pside_r        = 'body_panel',
+        },
+
+        LegacyStaticItems = {
+            rubber  = true,
+            plastic = true,
+            glass   = true,
         },
     },
 }

@@ -96,6 +96,9 @@ local function run()
         },
         query = {
             await = function(query, params)
+                if query:find('vp_chop_broker_market') then
+                    return {}
+                end
                 if query:find('UPDATE vp_chop_fence_orders SET fulfilled_at') then
                     local orderId = params and params[1]
                     local row = mockDbOrders[orderId]
@@ -121,6 +124,10 @@ local function run()
         mockDbOrders = {}
         forceCashFail = false
         for i = #_G._TRIGGERED, 1, -1 do _G._TRIGGERED[i] = nil end
+        if _G.BrokerMarket then
+            _G.BrokerMarket.Init(nil, _G.MySQL, nil)
+            _G.BrokerMarket.SetIntegrityLock(false)
+        end
     end
 
     -- ─── FENCE-ZERO-01: dry-run encontra item, mas RemoveItem falha ───────────

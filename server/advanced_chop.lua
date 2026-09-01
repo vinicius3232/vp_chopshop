@@ -122,7 +122,9 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
 
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        peId = PartEntitlement.Issue(sessionId, src, partKey, netId, { origin = 'advanced' })
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        local prov = (PartEntitlement.CaptureVehicleProvenance and PartEntitlement.CaptureVehicleProvenance(veh)) or nil
+        peId = PartEntitlement.Issue(sessionId, src, partKey, netId, { origin = 'advanced', provenance = prov })
     end
 
     -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, a peça vai para os braços
@@ -210,7 +212,9 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
 
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        peId = PartEntitlement.Issue(sessionId, src, 'adv_engine', netId, { origin = 'advanced' })
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        local prov = (PartEntitlement.CaptureVehicleProvenance and PartEntitlement.CaptureVehicleProvenance(veh)) or nil
+        peId = PartEntitlement.Issue(sessionId, src, 'adv_engine', netId, { origin = 'advanced', provenance = prov })
     end
 
     -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, o bloco do motor vai para os braços

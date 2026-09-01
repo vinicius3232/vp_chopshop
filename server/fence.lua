@@ -406,6 +406,170 @@ end
 local _sellItemsRateLimit = {}  ---@type table<number, number>  src → expiry GetGameTimer
 local SELL_ITEMS_MIN_INTERVAL_MS = 3000
 
+-- ─── [v1.17 BROKER-2] Dynamic Broker Market Fence Integration ───────────────
+
+--- Venda direta de PartEntitlement físico (motor, catalisador, portas, capô, porta-malas)
+---@param src number
+---@param entitlementId string
+---@param expectedPartKey? string
+---@return table
+function VPChopFenceSellCarriedPart(src, entitlementId, expectedPartKey)
+    if not IsValidSource(src) then return { ok = false, err = 'invalid_source' } end
+    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(src, 'fenceSell', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
+    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
+    if loc and loc.coords and not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
+        return { ok = false, err = 'distance' }
+    end
+
+    -- Preflight de Trust ANTES de qualquer consumo
+    local trust = VPChopFenceGetTrust(src)
+    if trust < 1 then
+        return { ok = false, err = 'no_trust' }
+    end
+
+    if type(entitlementId) ~= 'string' or entitlementId == '' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(src, 'fence_invalid_entitlement_param', tostring(entitlementId))
+        end
+        return { ok = false, err = 'invalid' }
+    end
+
+    if not PartEntitlement or not PartEntitlement.Validate then
+        return { ok = false, err = 'internal' }
+    end
+
+    local okVal, entOrErr = PartEntitlement.Validate(entitlementId, src, expectedPartKey)
+    if not okVal then
+        if PartEntitlement.LogSuspicious and (entOrErr == 'owner_mismatch' or entOrErr == 'already_consumed' or entOrErr == 'invalid_type') then
+            PartEntitlement.LogSuspicious(src, entOrErr, ('fence_sell | entitlement: %s'):format(tostring(entitlementId)))
+        end
+        return { ok = false, err = entOrErr }
+    end
+
+    local partKey = entOrErr.partKey
+    local physicalMap = (Config.Broker and Config.Broker.Integration and Config.Broker.Integration.PhysicalPartToCommodity) or {
+        catalytic_converter = 'catalytic_converter',
+        adv_engine          = 'adv_engine',
+        bonnet              = 'body_panel',
+        boot                = 'body_panel',
+        door_dside_f        = 'body_panel',
+        door_pside_f        = 'body_panel',
+        door_dside_r        = 'body_panel',
+        door_pside_r        = 'body_panel',
+    }
+
+    local commodity = physicalMap[partKey]
+    if not commodity then
+        return { ok = false, err = 'invalid_part' }
+    end
+
+    -- Rollback Mode se Broker desabilitado
+    if Config.Broker and Config.Broker.Enable == false then
+        if partKey == 'catalytic_converter' then
+            local resConsume = PartEntitlement.Consume(entitlementId, src, 'fence_sell_catalytic', 'catalytic_converter')
+            if not resConsume.ok then return { ok = false, err = resConsume.err } end
+            local cfg = (Config.CatalyticTheft and Config.CatalyticTheft.Payout) or { min = 1200, max = 2200 }
+            local minPay = tonumber(cfg.min) or 1200
+            local maxPay = tonumber(cfg.max) or 2200
+            local payout = math.random(minPay, maxPay)
+            local paid = BridgeAddCash(src, payout, 'chopshop_fence_catalytic')
+            if not paid then
+                return { ok = false, err = 'payment_failed', terminalConsumed = true }
+            end
+            return { ok = true, payout = payout, commodity = 'catalytic_converter' }
+        else
+            return { ok = false, err = 'broker_disabled' }
+        end
+    end
+
+    -- Fail-closed checks no BrokerMarket
+    if not BrokerMarket or not BrokerMarket.IsReady() then
+        return { ok = false, err = 'market_not_ready' }
+    end
+    if BrokerMarket.IsIntegrityLocked and BrokerMarket.IsIntegrityLocked() then
+        return { ok = false, err = 'market_integrity_locked' }
+    end
+
+    -- Validação de Heat via Provenance Server-Side
+    local prov = entOrErr.provenance
+    if not prov or not prov.realPlate or prov.realPlate == '' then
+        return { ok = false, err = 'provenance_missing' }
+    end
+
+    local heatMult = 1.00
+    if type(VPChopHeatGetPriceMult) == 'function' then
+        heatMult = VPChopHeatGetPriceMult(prov.realPlate)
+    end
+    if heatMult <= 0 then
+        return { ok = false, err = 'heat_blocked' }
+    end
+
+    local lockOk, lockErr = BrokerMarket.AcquireLocks(commodity)
+    if not lockOk then
+        return { ok = false, err = lockErr or 'market_busy' }
+    end
+
+    local prog = VPChopGetProgression(src)
+
+    local quote = BrokerMarket.QuoteSale(commodity, 1, {
+        trustLevel      = trust,
+        progressionTier = prog.tier,
+        heatMultiplier  = heatMult,
+    })
+
+    if not quote.ok then
+        BrokerMarket.ReleaseLocks(commodity)
+        return { ok = false, err = quote.err }
+    end
+
+    local payout = quote.total
+
+    -- Consume At-Most-Once
+    local resConsume = PartEntitlement.Consume(entitlementId, src, 'fence_part_sale', partKey)
+    if not resConsume.ok then
+        BrokerMarket.ReleaseLocks(commodity)
+        return { ok = false, err = resConsume.err }
+    end
+
+    local paid = BridgeAddCash(src, payout, 'chopshop_fence_part')
+    if not paid then
+        BrokerMarket.ReleaseLocks(commodity)
+        local playerKey = (type(ServerChopPlayerKey) == 'function' and ServerChopPlayerKey(src)) or tostring(src)
+        print(('[vp_chopshop][fence] CRITICAL: BridgeAddCash failed post-consume for src %d (playerKey: %s, entitlement: %s, payout: %d)'):format(
+            src, playerKey, tostring(entitlementId), payout
+        ))
+        return { ok = false, err = 'payment_failed', terminalConsumed = true }
+    end
+
+    local marketDegraded = false
+    local bRes = BrokerMarket.RecordSalesBatch({ { commodity = commodity, count = 1 } })
+    if not bRes.ok then
+        print(('[vp_chopshop][fence] CRITICAL: RecordSalesBatch failed post-payment for commodity %s (src %d): %s'):format(
+            commodity, src, tostring(bRes.err or bRes.reason)))
+        if BrokerMarket.SetIntegrityLock then
+            BrokerMarket.SetIntegrityLock(true)
+        end
+        marketDegraded = true
+    end
+
+    BrokerMarket.ReleaseLocks(commodity)
+
+    return { ok = true, payout = payout, commodity = commodity, marketDegraded = marketDegraded or nil }
+end
+
+lib.callback.register('vp_chopshop:fence:sellCarriedPart', function(src, entitlementId)
+    return VPChopFenceSellCarriedPart(src, entitlementId, nil)
+end)
+
+lib.callback.register('vp_chopshop:fence:sellCatalytic', function(src, entitlementId)
+    return VPChopFenceSellCarriedPart(src, entitlementId, 'catalytic_converter')
+end)
+
 -- Vender materiais do inventário
 lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     if not IsValidSource(src) then return { ok=false } end
@@ -435,51 +599,145 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     local nightM    = getNightBonusMultiplier()
     local basePrices = (Config.Fence and Config.Fence.BasePrices) or {}
 
-    -- [FIX M1] Dry-run: calcular valor total antes de remover qualquer item.
-    -- Isso evita remoção parcial quando totalValue acaba sendo 0.
-    local totalValue = 0
-    local candidates = {}
-
+    -- ─── 1. Agregação e Normalização de Entradas Duplicadas ──────────────────
+    local aggregated = {}
     for _, entry in ipairs(itemList or {}) do
         local item   = type(entry.name) == 'string' and entry.name or nil
         local amount = math.floor(tonumber(entry.amount) or 0)
-        if item and amount > 0 and basePrices[item] then
-            local have = exports.ox_inventory:GetItemCount(src, item)
-            local sell = math.min(amount, math.floor(tonumber(have) or 0))
-            if sell > 0 then
-                local price  = math.floor(basePrices[item] * trustM * tierMult * nightM)
-                local earned = price * sell
-                totalValue   = totalValue + earned
-                candidates[#candidates+1] = { name=item, amount=sell, earned=earned }
-            end
+        if item and amount > 0 then
+            aggregated[item] = (aggregated[item] or 0) + amount
         end
     end
 
-    if totalValue <= 0 then return { ok=false, err='nothing_sold' } end
+    -- ─── 2. Classificação: Dynamic vs Explicit Legacy vs Desconhecido ────────
+    local isBrokerEnabled = (Config.Broker and Config.Broker.Enable ~= false)
+    local itemMap = (Config.Broker and Config.Broker.Integration and Config.Broker.Integration.ItemToCommodity) or {}
+    local legacyAllowlist = (Config.Broker and Config.Broker.Integration and Config.Broker.Integration.LegacyStaticItems) or { rubber=true, plastic=true, glass=true }
 
-    -- Remover itens confirmados; acumular apenas o que foi realmente removido
+    local dynamicItems = {}
+    local legacyItems = {}
+    local lockedCommodities = {}
+
+    for item, requestedAmount in pairs(aggregated) do
+        local commodity = itemMap[item]
+        if isBrokerEnabled and commodity then
+            dynamicItems[item] = { commodity = commodity, requested = requestedAmount }
+            lockedCommodities[#lockedCommodities + 1] = commodity
+        elseif legacyAllowlist[item] or not isBrokerEnabled then
+            if basePrices[item] then
+                legacyItems[item] = { requested = requestedAmount }
+            end
+        else
+            return { ok = false, err = 'invalid_item' }
+        end
+    end
+
+    -- ─── 3. Validação Fail-Closed do Mercado ────────────────────────────────
+    if isBrokerEnabled and #lockedCommodities > 0 then
+        if not BrokerMarket or not BrokerMarket.IsReady() then
+            return { ok = false, err = 'market_not_ready' }
+        end
+        if BrokerMarket.IsIntegrityLocked and BrokerMarket.IsIntegrityLocked() then
+            return { ok = false, err = 'market_integrity_locked' }
+        end
+
+        local lockOk, lockErr = BrokerMarket.AcquireLocks(lockedCommodities)
+        if not lockOk then
+            return { ok = false, err = lockErr or 'market_busy' }
+        end
+    end
+
+    local function releaseLocks()
+        if isBrokerEnabled and #lockedCommodities > 0 and BrokerMarket and BrokerMarket.ReleaseLocks then
+            BrokerMarket.ReleaseLocks(lockedCommodities)
+        end
+    end
+
+    -- ─── 4. Cotações e Dry-Run de Quantidades ────────────────────────────────
+    local dynamicQuotes = {}
+
+    for item, info in pairs(dynamicItems) do
+        local have = exports.ox_inventory:GetItemCount(src, item)
+        local planned = math.min(info.requested, math.floor(tonumber(have) or 0))
+        if planned > 0 then
+            local q = BrokerMarket.QuoteSale(info.commodity, planned, {
+                trustLevel      = trust,
+                progressionTier = prog.tier,
+            })
+            if not q.ok then
+                releaseLocks()
+                return { ok = false, err = q.err }
+            end
+            dynamicQuotes[item] = { commodity = info.commodity, planned = planned, quote = q }
+        end
+    end
+
+    local legacyQuotes = {}
+    for item, info in pairs(legacyItems) do
+        local have = exports.ox_inventory:GetItemCount(src, item)
+        local planned = math.min(info.requested, math.floor(tonumber(have) or 0))
+        if planned > 0 and basePrices[item] then
+            local unitP = math.floor(basePrices[item] * trustM * tierMult * nightM)
+            legacyQuotes[item] = { planned = planned, unitPrice = unitP }
+        end
+    end
+
+    -- ─── 5. Remoção Real do Inventário e Acumulação ──────────────────────────
     local soldItems = {}
+    local dynamicBatch = {}
     local realTotal = 0
-    for _, c in ipairs(candidates) do
-        if exports.ox_inventory:RemoveItem(src, c.name, c.amount) then
-            soldItems[#soldItems+1] = c
-            realTotal = realTotal + c.earned
+
+    -- Dynamic removals
+    for item, dq in pairs(dynamicQuotes) do
+        if exports.ox_inventory:RemoveItem(src, item, dq.planned) then
+            local actualCount = dq.planned
+            local earned = dq.quote.prefixTotals[actualCount] or 0
+            realTotal = realTotal + earned
+            soldItems[#soldItems + 1] = { name = item, amount = actualCount, earned = earned }
+            dynamicBatch[#dynamicBatch + 1] = { commodity = dq.commodity, count = actualCount }
+        end
+    end
+
+    -- Legacy removals
+    for item, lq in pairs(legacyQuotes) do
+        if exports.ox_inventory:RemoveItem(src, item, lq.planned) then
+            local actualCount = lq.planned
+            local earned = lq.unitPrice * actualCount
+            realTotal = realTotal + earned
+            soldItems[#soldItems + 1] = { name = item, amount = actualCount, earned = earned }
         end
     end
 
     if #soldItems == 0 or realTotal <= 0 then
+        releaseLocks()
         return { ok = false, err = 'nothing_sold' }
     end
 
-    -- [FIX C-1] Pagar apenas pelo que foi realmente removido (evita pagar totalValue
-    -- quando algum RemoveItem falha silenciosamente entre o dry-run e a remoção real).
+    -- ─── 6. Pagamento Canônico ───────────────────────────────────────────────
     local paid = BridgeAddCash(src, realTotal, 'fence_sale')
     if not paid then
+        releaseLocks()
         local key = ServerChopPlayerKey(src)
         print(('[vp_chopshop][fence:sellItems] CRITICAL: falha no BridgeAddCash — playerKey=%s, amount=$%d, soldItems=%s, operation=fence_sale'):format(
             tostring(key), realTotal, json.encode(soldItems)))
         return { ok = false, err = 'payment_failed' }
     end
+
+    -- ─── 7. Registro de Pressão de Vendas (Apenas pós-pagamento confirmado) ─
+    local marketDegraded = false
+    if isBrokerEnabled and #dynamicBatch > 0 then
+        local bRes = BrokerMarket.RecordSalesBatch(dynamicBatch)
+        if not bRes.ok then
+            print(('[vp_chopshop][fence:sellItems] CRITICAL: RecordSalesBatch failed post-payment (src %d): %s'):format(
+                src, tostring(bRes.err or bRes.reason)))
+            if BrokerMarket.SetIntegrityLock then
+                BrokerMarket.SetIntegrityLock(true)
+            end
+            marketDegraded = true
+        end
+    end
+
+    releaseLocks()
 
     -- XP de trust
     addTrustXp(src, (Config.Fence and Config.Fence.XpPerDelivery) or 20)
@@ -487,24 +745,20 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     -- Emitir evento para progressão
     TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, soldItems, realTotal, 'material')
 
-    return { ok=true, total=realTotal }
+    return { ok = true, total = realTotal, sold = soldItems, marketDegraded = marketDegraded or nil }
 end)
 
 -- Vender pneus (truck OU inventário)
 lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, truckNetId)
     if not IsValidSource(src) then return { ok=false } end
-    -- [H1 FIX] Mutex per player: prevents double-payout from rapid double-fire.
-    -- release() clears it on every code path and returns the result table.
     if SellTyresBusy[src] then return { ok=false, err='processing' } end
     SellTyresBusy[src] = true
     local function release(res) SellTyresBusy[src] = nil; return res end
 
-    -- [AUDIT M4] Validar o tipo recebido do client ANTES de qualquer yield (.await do trust).
     if source_type ~= 'truck' and source_type ~= 'inventory' then
         return release({ ok=false, err='invalid_type' })
     end
 
-    -- [PR-E hardening] Quarentena econômica de venda de pneu (estorno falhou antes).
     local qKey = ServerChopPlayerKey(src)
     if TyreSaleQuarantine[qKey] then
         return release({ ok=false, err='transaction_locked' })
@@ -520,27 +774,28 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     end
 
     local prog     = VPChopGetProgression(src)
-    local tierMult = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
-    local trustM   = trustMult(trust)
-    local nightM   = getNightBonusMultiplier()
-    local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult * nightM)
-
+    local isBrokerEnabled = (Config.Broker and Config.Broker.Enable ~= false)
     local xpPerTyre = math.floor(((Config.Fence and Config.Fence.XpPerDelivery) or 20) * 0.5)
 
     if source_type == 'truck' and truckNetId then
         local nid = tonumber(truckNetId)
         if not nid then return release({ ok=false, err='no_truck' }) end
 
-        -- [PR-E] Identidade do storage (read-only — não cunha). netId reciclado /
-        -- marcador não bate ⇒ 'storage_identity'.
         local storageId, sErr = TruckStorage.Peek(nid)
         if not storageId then return release({ ok=false, err = sErr or 'no_tyres' }) end
 
-        -- Lock por STORAGE: dois vendedores não vendem o mesmo storage, e nenhuma
-        -- carga entra durante a venda. releaseTruck() encadeia release() do player.
         if TruckStorageBusy[storageId] then return release({ ok=false, err='truck_busy' }) end
         TruckStorageBusy[storageId] = true
-        local function releaseTruck(res) TruckStorageBusy[storageId] = nil; return release(res) end
+
+        local marketLockHeld = false
+        local function releaseTruck(res)
+            TruckStorageBusy[storageId] = nil
+            if marketLockHeld and isBrokerEnabled and BrokerMarket and BrokerMarket.ReleaseLocks then
+                BrokerMarket.ReleaseLocks('tyre')
+                marketLockHeld = false
+            end
+            return release(res)
+        end
 
         local truck = NetworkGetEntityFromNetworkId(nid)
         if not truck or truck == 0 or not DoesEntityExist(truck) then
@@ -554,58 +809,157 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
             return releaseTruck({ ok=false, err='truck_range' })
         end
 
-        -- Contagem DERIVADA + snapshot ANTES do pagamento.
         local ids   = TruckStorage.SnapshotStored(storageId)
         local count = #ids
         if count <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
 
-        -- Pagar ANTES de comprometer SOLD; se falhar, os entitlements seguem STORED.
-        local total = unitPrice * count
-        if not BridgeAddCash(src, total, 'fence_tyres') then
-            return releaseTruck({ ok=false, err='payment' })
-        end
-        -- Commit SOLD (idempotente por entitlement; SOLD nunca volta p/ STORED).
-        local sold = TruckStorage.CommitSold(storageId, ids)
-        if sold < count then
-            -- [PR-E hardening] Algum entitlement do snapshot deixou de estar STORED
-            -- durante o yield do pagamento (ex.: truck sumiu → OnTruckRemoved → LOST).
-            -- Estornar a diferença — o jogador foi pago por count, só `sold` foram vendidos.
-            local refund = unitPrice * (count - sold)
-            if not BridgeRemoveCash(src, refund, 'fence_tyres_rollback') then
-                -- Estorno FALHOU: o jogador ficou com $refund a mais. Fail-closed
-                -- econômico — nenhuma nova venda de pneu até limpeza explícita.
-                -- NÃO mexer no ledger SOLD/LOST (a venda parcial em si está correta).
-                TyreSaleQuarantine[qKey] = (TyreSaleQuarantine[qKey] or 0) + refund
-                LogSuspicious(src, 'fence:sellTyres',
-                    ('SEVERE: venda parcial player=%s storage=%s count=%d sold=%d refund_esperado=$%d NÃO RECUPERADO — QUARANTINED'):format(
-                        qKey, tostring(storageId), count, sold, refund))
+        if isBrokerEnabled then
+            if not BrokerMarket or not BrokerMarket.IsReady() then
+                return releaseTruck({ ok=false, err='market_not_ready' })
             end
-            total = unitPrice * sold
+            if BrokerMarket.IsIntegrityLocked and BrokerMarket.IsIntegrityLocked() then
+                return releaseTruck({ ok=false, err='market_integrity_locked' })
+            end
+
+            local lockOk, lockErr = BrokerMarket.AcquireLocks('tyre')
+            if not lockOk then return releaseTruck({ ok=false, err=lockErr or 'market_busy' }) end
+            marketLockHeld = true
+
+            local quote = BrokerMarket.QuoteSale('tyre', count, {
+                trustLevel      = trust,
+                progressionTier = prog.tier,
+            })
+            if not quote.ok then return releaseTruck({ ok=false, err=quote.err }) end
+
+            local quotedTotal = quote.total
+            if not BridgeAddCash(src, quotedTotal, 'fence_tyres') then
+                return releaseTruck({ ok=false, err='payment' })
+            end
+
+            local sold = TruckStorage.CommitSold(storageId, ids)
+            local totalPaid = quotedTotal
+            if sold < count then
+                local due = (sold > 0 and quote.prefixTotals[sold]) or 0
+                local refund = quotedTotal - due
+                if not BridgeRemoveCash(src, refund, 'fence_tyres_rollback') then
+                    TyreSaleQuarantine[qKey] = (TyreSaleQuarantine[qKey] or 0) + refund
+                    LogSuspicious(src, 'fence:sellTyres',
+                        ('SEVERE: venda parcial player=%s storage=%s count=%d sold=%d refund_esperado=$%d NÃO RECUPERADO — QUARANTINED'):format(
+                            qKey, tostring(storageId), count, sold, refund))
+                end
+                totalPaid = due
+            end
+
+            if sold <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
+
+            local marketDegraded = false
+            local bRes = BrokerMarket.RecordSalesBatch({ { commodity = 'tyre', count = sold } })
+            if not bRes.ok then
+                print(('[vp_chopshop][fence:sellTyres] CRITICAL: RecordSalesBatch failed post-payment (src %d): %s'):format(
+                    src, tostring(bRes.err or bRes.reason)))
+                if BrokerMarket.SetIntegrityLock then BrokerMarket.SetIntegrityLock(true) end
+                marketDegraded = true
+            end
+
+            addTrustXp(src, xpPerTyre * sold)
+            TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, totalPaid, 'tyre')
+            return releaseTruck({ ok=true, count=sold, total=totalPaid, marketDegraded=marketDegraded or nil })
+        else
+            -- Legacy fallback v1.16
+            local tierMult  = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
+            local trustM    = trustMult(trust)
+            local nightM    = getNightBonusMultiplier()
+            local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult * nightM)
+            local total = unitPrice * count
+            if not BridgeAddCash(src, total, 'fence_tyres') then
+                return releaseTruck({ ok=false, err='payment' })
+            end
+            local sold = TruckStorage.CommitSold(storageId, ids)
+            if sold < count then
+                local refund = unitPrice * (count - sold)
+                if not BridgeRemoveCash(src, refund, 'fence_tyres_rollback') then
+                    TyreSaleQuarantine[qKey] = (TyreSaleQuarantine[qKey] or 0) + refund
+                end
+                total = unitPrice * sold
+            end
+            if sold <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
+            addTrustXp(src, xpPerTyre * sold)
+            TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
+            return releaseTruck({ ok=true, count=sold, total=total })
         end
-        if sold <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
-        addTrustXp(src, xpPerTyre * sold)
-        TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
-        return releaseTruck({ ok=true, count=sold, total=total })
     end
 
     -- Inventário: chopshop_tyre items
     local count = exports.ox_inventory:GetItemCount(src, 'chopshop_tyre') or 0
     if count <= 0 then return release({ ok=false, err='no_tyres' }) end
-    if not exports.ox_inventory:RemoveItem(src, 'chopshop_tyre', count) then
-        return release({ ok=false, err='remove_failed' })
-    end
 
-    local total = unitPrice * count
-    if not BridgeAddCash(src, total, 'fence_tyres') then
-        -- [v1.15 P0-2] Compensação: devolver os pneus removidos se o pagamento falhar.
-        if not exports.ox_inventory:AddItem(src, 'chopshop_tyre', count) then
-            print(('[vp_chopshop] WARN: sellTyres refund falhou (inv cheio) para %s — %d pneus'):format(ServerChopPlayerKey(src), count))
+    if isBrokerEnabled then
+        if not BrokerMarket or not BrokerMarket.IsReady() then
+            return release({ ok=false, err='market_not_ready' })
         end
-        return release({ ok=false, err='payment' })
+        if BrokerMarket.IsIntegrityLocked and BrokerMarket.IsIntegrityLocked() then
+            return release({ ok=false, err='market_integrity_locked' })
+        end
+
+        local lockOk, lockErr = BrokerMarket.AcquireLocks('tyre')
+        if not lockOk then return release({ ok=false, err=lockErr or 'market_busy' }) end
+        local function releaseInv(res)
+            if BrokerMarket and BrokerMarket.ReleaseLocks then BrokerMarket.ReleaseLocks('tyre') end
+            return release(res)
+        end
+
+        local quote = BrokerMarket.QuoteSale('tyre', count, {
+            trustLevel      = trust,
+            progressionTier = prog.tier,
+        })
+        if not quote.ok then return releaseInv({ ok=false, err=quote.err }) end
+
+        if not exports.ox_inventory:RemoveItem(src, 'chopshop_tyre', count) then
+            return releaseInv({ ok=false, err='remove_failed' })
+        end
+
+        local total = quote.total
+        if not BridgeAddCash(src, total, 'fence_tyres') then
+            if not exports.ox_inventory:AddItem(src, 'chopshop_tyre', count) then
+                print(('[vp_chopshop] WARN: sellTyres refund falhou (inv cheio) para %s — %d pneus'):format(ServerChopPlayerKey(src), count))
+            end
+            return releaseInv({ ok=false, err='payment' })
+        end
+
+        local marketDegraded = false
+        local bRes = BrokerMarket.RecordSalesBatch({ { commodity = 'tyre', count = count } })
+        if not bRes.ok then
+            print(('[vp_chopshop][fence:sellTyres] CRITICAL: RecordSalesBatch failed post-payment (src %d): %s'):format(
+                src, tostring(bRes.err or bRes.reason)))
+            if BrokerMarket.SetIntegrityLock then BrokerMarket.SetIntegrityLock(true) end
+            marketDegraded = true
+        end
+
+        addTrustXp(src, xpPerTyre * count)
+        TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
+        return releaseInv({ ok=true, count=count, total=total, marketDegraded=marketDegraded or nil })
+    else
+        -- Legacy fallback v1.16
+        local tierMult  = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
+        local trustM    = trustMult(trust)
+        local nightM    = getNightBonusMultiplier()
+        local unitPrice = math.floor(((Config.Fence and Config.Fence.BasePrices and Config.Fence.BasePrices.chopshop_tyre) or 400) * trustM * tierMult * nightM)
+
+        if not exports.ox_inventory:RemoveItem(src, 'chopshop_tyre', count) then
+            return release({ ok=false, err='remove_failed' })
+        end
+
+        local total = unitPrice * count
+        if not BridgeAddCash(src, total, 'fence_tyres') then
+            if not exports.ox_inventory:AddItem(src, 'chopshop_tyre', count) then
+                print(('[vp_chopshop] WARN: sellTyres refund falhou (inv cheio) para %s — %d pneus'):format(ServerChopPlayerKey(src), count))
+            end
+            return release({ ok=false, err='payment' })
+        end
+        addTrustXp(src, xpPerTyre * count)
+        TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
+        return release({ ok=true, count=count, total=total })
     end
-    addTrustXp(src, xpPerTyre * count)
-    TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
-    return release({ ok=true, count=count, total=total })
 end)
 
 --- [v1.15 PR-H] Retries de deleção de mundo — IDENTIDADE ESTRITA por MARCADOR
@@ -985,3 +1339,21 @@ AddEventHandler('playerDropped', function()
     OrderGenBusy[k]  = nil
     DeliveryBusy[k]  = nil
 end)
+
+if GetConvar('vp_chopshop_selftest', '0') == '1' then
+    _G.VPChopFence = _G.VPChopFence or {}
+    _G.VPChopFence._test = {
+        setTrust = function(src, level, xp)
+            TrustCache[src] = { trust_level = level, trust_xp = xp or 0, last_seen = os.time() }
+        end,
+        getTrust = function(src)
+            return TrustCache[src]
+        end,
+        clearTrust = function(src)
+            if src then TrustCache[src] = nil else for k in pairs(TrustCache) do TrustCache[k] = nil end end
+        end,
+        clearQuarantine = function(key)
+            if key then TyreSaleQuarantine[key] = nil else for k in pairs(TyreSaleQuarantine) do TyreSaleQuarantine[k] = nil end end
+        end,
+    }
+end

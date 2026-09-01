@@ -1,8 +1,9 @@
 -- server/broker/market.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.17 BROKER-1.2] DYNAMIC BROKER MARKET ENGINE
+--  [v1.17 BROKER-2] DYNAMIC BROKER MARKET ENGINE & MARGINAL BATCH QUOTE
 --  Autoridade econômica server-side para precificação dinâmica, pressão de volume,
---  recuperação temporal (lazy), persistência assíncrona segura e aplicação de bounds.
+--  recuperação temporal (lazy), persistência assíncrona segura, cotação marginal em lote,
+--  travamento de concorrência determinístico e circuit breaker de integridade.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 BrokerMarket = BrokerMarket or {}
@@ -12,6 +13,8 @@ local _clockFn = nil
 local _rngFn = nil
 local _dbInstance = nil
 local _isReady = false
+local _commodityLocks = {}
+local _marketIntegrityLocked = false
 
 local function getNow()
     if _clockFn then return _clockFn() end
@@ -124,8 +127,76 @@ function BrokerMarket.IsReady()
     return _isReady == true
 end
 
+--- Informa se o circuit breaker de integridade está ativo
+---@return boolean
+function BrokerMarket.IsIntegrityLocked()
+    return _marketIntegrityLocked == true
+end
+
+--- Altera o estado do circuit breaker de integridade
+---@param locked boolean
+function BrokerMarket.SetIntegrityLock(locked)
+    _marketIntegrityLocked = (locked == true)
+end
+
 -- ─────────────────────────────────────────────────────────────────────────────
--- 1. RECUPERAÇÃO TEMPORAL (LAZY TIME RECOVERY)
+-- 1. CONCURRENCY / COMMODITY LOCKS (DETERMINISTIC DEADLOCK-FREE)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+--- Adquire locks em commodities de forma atômica e ordenada
+---@param commodityList table|string
+---@return boolean ok, string|nil err
+function BrokerMarket.AcquireLocks(commodityList)
+    if type(commodityList) == 'string' then
+        commodityList = { commodityList }
+    end
+    if type(commodityList) ~= 'table' then
+        return false, 'invalid_args'
+    end
+
+    -- Deduplica e ordena alfabeticamente
+    local unique = {}
+    local ordered = {}
+    for _, c in ipairs(commodityList) do
+        if type(c) == 'string' and not unique[c] then
+            unique[c] = true
+            ordered[#ordered + 1] = c
+        end
+    end
+    table.sort(ordered)
+
+    -- Verifica se alguma está ocupada
+    for _, c in ipairs(ordered) do
+        if _commodityLocks[c] then
+            return false, 'market_busy'
+        end
+    end
+
+    -- Trava todas sincronamente
+    for _, c in ipairs(ordered) do
+        _commodityLocks[c] = true
+    end
+
+    return true
+end
+
+--- Libera locks em commodities
+---@param commodityList table|string
+function BrokerMarket.ReleaseLocks(commodityList)
+    if type(commodityList) == 'string' then
+        commodityList = { commodityList }
+    end
+    if type(commodityList) ~= 'table' then return end
+
+    for _, c in ipairs(commodityList) do
+        if type(c) == 'string' then
+            _commodityLocks[c] = nil
+        end
+    end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 2. RECUPERAÇÃO TEMPORAL (LAZY TIME RECOVERY)
 -- ─────────────────────────────────────────────────────────────────────────────
 
 --- Aplica recuperação temporal lazy rumo ao equilíbrio (1.00)
@@ -190,59 +261,6 @@ function BrokerMarket.GetDemandIndex(commodity, now)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 2. REGISTRO DE VENDA E PRESSÃO DE VOLUME
--- ─────────────────────────────────────────────────────────────────────────────
-
---- Registra uma venda e aplica pressão de demanda decrescente
----@param commodity string
----@param count integer
----@param now integer|nil
----@return table
-function BrokerMarket.RecordSale(commodity, count, now)
-    if Config.Broker and Config.Broker.Enable == false then
-        return { ok = false, err = 'broker_disabled' }
-    end
-    if not BrokerMarket.IsReady() then
-        return { ok = false, err = 'market_not_ready' }
-    end
-
-    local cfg = getCommodityConfig(commodity)
-    if not cfg then
-        return { ok = false, err = 'unknown_commodity' }
-    end
-
-    if type(count) ~= 'number' or count ~= count or count == math.huge or count == -math.huge or count < 1 or count > 10000 or count ~= math.floor(count) then
-        return { ok = false, err = 'invalid_count' }
-    end
-    local qty = count
-
-    local t = now or getNow()
-    local prevDemand = BrokerMarket.RecoverDemand(commodity, t)
-    local mCfg = getMarketConfig()
-
-    local pressure = (cfg.salePressure or 0.03) * qty
-    local newDemand = math.max(mCfg.DemandFloor, math.min(mCfg.DemandCeiling, prevDemand - pressure))
-
-    local state = _marketState[commodity]
-    state.demand = newDemand
-    state.recentVolume = state.recentVolume + qty
-    state.lastRecovery = t
-    state.dirty = true
-
-    logDebug(('RecordSale: %s x%d -> Demand: %.4f (was %.4f)'):format(commodity, qty, newDemand, prevDemand))
-
-    return {
-        ok = true,
-        commodity = commodity,
-        count = qty,
-        previousDemand = prevDemand,
-        newDemand = newDemand,
-        volume = state.recentVolume,
-        lastRecovery = state.lastRecovery,
-    }
-end
-
--- ─────────────────────────────────────────────────────────────────────────────
 -- 3. RESOLUÇÃO DE PREÇO SERVER-AUTHORITATIVE
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -254,6 +272,9 @@ end
 function BrokerMarket.ResolvePrice(commodity, context)
     if Config.Broker and Config.Broker.Enable == false then
         return { ok = false, err = 'broker_disabled' }
+    end
+    if _marketIntegrityLocked then
+        return { ok = false, err = 'market_integrity_locked' }
     end
     if not BrokerMarket.IsReady() then
         return { ok = false, err = 'market_not_ready' }
@@ -383,7 +404,217 @@ function BrokerMarket.ResolvePrice(commodity, context)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 4. SNAPSHOT E PERSISTÊNCIA ASSÍNCRONA
+-- 4. COTAÇÃO MARGINAL EM LOTE (QUOTE SALE)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+--- Calcula a cotação de venda marginal para N unidades de uma commodity
+--- Diminishing returns real: cada unidade consecutiva sofre a pressão da unidade anterior.
+--- NÃO altera o estado nem aplica sale pressure real.
+---@param commodity string
+---@param count integer
+---@param context table|nil
+---@return table
+function BrokerMarket.QuoteSale(commodity, count, context)
+    if Config.Broker and Config.Broker.Enable == false then
+        return { ok = false, err = 'broker_disabled' }
+    end
+    if _marketIntegrityLocked then
+        return { ok = false, err = 'market_integrity_locked' }
+    end
+    if not BrokerMarket.IsReady() then
+        return { ok = false, err = 'market_not_ready' }
+    end
+
+    local cfg = getCommodityConfig(commodity)
+    if not cfg then
+        return { ok = false, err = 'unknown_commodity' }
+    end
+
+    if type(count) ~= 'number' or count ~= count or count == math.huge or count == -math.huge or count < 1 or count > 10000 or count ~= math.floor(count) then
+        return { ok = false, err = 'invalid_count' }
+    end
+
+    local ctx = context or {}
+    local mCfg = getMarketConfig()
+    local t = ctx.timestamp or getNow()
+
+    -- Ponto de partida de demanda
+    local startDemand
+    if ctx.demandOverride ~= nil then
+        local validDem, isNum = sanitizeNumber(ctx.demandOverride, nil, mCfg.DemandFloor, mCfg.DemandCeiling)
+        if not isNum then return { ok = false, err = 'invalid_demand' } end
+        startDemand = validDem
+    else
+        local d = BrokerMarket.RecoverDemand(commodity, t)
+        if not d then return { ok = false, err = 'market_not_ready' } end
+        startDemand = math.max(mCfg.DemandFloor, math.min(mCfg.DemandCeiling, d))
+    end
+
+    -- Jitter fixo para toda a operação da transação
+    local maxJitter = mCfg.Jitter or 0.03
+    local txJitter = ctx.jitter
+    if txJitter == nil then
+        local r = getRng()
+        txJitter = (r * 2.0 - 1.0) * maxJitter
+    else
+        local sanitized, okNum = sanitizeNumber(txJitter, 0.0, -maxJitter, maxJitter)
+        if not okNum then return { ok = false, err = 'invalid_multipliers' } end
+        txJitter = sanitized
+    end
+
+    local pressurePerUnit = cfg.salePressure or 0.03
+    local unitPrices = {}
+    local prefixTotals = {}
+    local runningTotal = 0
+
+    for i = 1, count do
+        -- Demanda marginal para a unidade i
+        local marginalDemand = math.max(mCfg.DemandFloor, math.min(mCfg.DemandCeiling, startDemand - ((i - 1) * pressurePerUnit)))
+
+        local unitCtx = {
+            demandOverride  = marginalDemand,
+            trustLevel      = ctx.trustLevel,
+            trustMultiplier = ctx.trustMultiplier,
+            isBlockedTrust  = ctx.isBlockedTrust,
+            progressionTier = ctx.progressionTier,
+            tierMultiplier  = ctx.tierMultiplier,
+            hour            = ctx.hour,
+            nightMultiplier = ctx.nightMultiplier,
+            heatLabel       = ctx.heatLabel,
+            heatMultiplier  = ctx.heatMultiplier,
+            isBurningHeat   = ctx.isBurningHeat,
+            jitter          = txJitter,
+            timestamp       = t,
+        }
+
+        local unitRes = BrokerMarket.ResolvePrice(commodity, unitCtx)
+        if not unitRes.ok then
+            return unitRes
+        end
+
+        local p = unitRes.unitPrice
+        unitPrices[i] = p
+        runningTotal = runningTotal + p
+        prefixTotals[i] = runningTotal
+    end
+
+    local projectedAfter = math.max(mCfg.DemandFloor, math.min(mCfg.DemandCeiling, startDemand - (count * pressurePerUnit)))
+
+    return {
+        ok                   = true,
+        commodity            = commodity,
+        count                = count,
+        total                = runningTotal,
+        averageUnitPrice     = runningTotal / count,
+        unitPrices           = unitPrices,
+        prefixTotals         = prefixTotals,
+        demandBefore         = startDemand,
+        demandAfterProjected = projectedAfter,
+        jitter               = txJitter,
+    }
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5. REGISTRO DE VENDAS ATÔMICO EM LOTE (RECORD SALES BATCH)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+--- Registra um lote de vendas de forma atômica e síncrona sem yields
+--- Valida 100% dos itens antes de realizar qualquer mutação in-memory.
+---@param salesList table<{commodity: string, count: integer}>
+---@param now integer|nil
+---@return table
+function BrokerMarket.RecordSalesBatch(salesList, now)
+    if Config.Broker and Config.Broker.Enable == false then
+        return { ok = false, err = 'broker_disabled' }
+    end
+    if _marketIntegrityLocked then
+        return { ok = false, err = 'market_integrity_locked' }
+    end
+    if not BrokerMarket.IsReady() then
+        return { ok = false, err = 'market_not_ready' }
+    end
+
+    if type(salesList) ~= 'table' or #salesList == 0 then
+        return { ok = false, err = 'invalid_batch', reason = 'empty_or_not_table' }
+    end
+
+    -- ─── 1. Validação Estrita Pré-Mutação ───────────────────────────────────
+    for idx, item in ipairs(salesList) do
+        if type(item) ~= 'table' then
+            return { ok = false, err = 'invalid_batch', reason = 'item_not_table', index = idx }
+        end
+        local c = item.commodity
+        local cnt = item.count
+        if type(c) ~= 'string' or not getCommodityConfig(c) then
+            return { ok = false, err = 'invalid_batch', reason = 'unknown_commodity', commodity = tostring(c), index = idx }
+        end
+        if type(cnt) ~= 'number' or cnt ~= cnt or cnt == math.huge or cnt == -math.huge or cnt < 1 or cnt > 10000 or cnt ~= math.floor(cnt) then
+            return { ok = false, err = 'invalid_batch', reason = 'invalid_count', count = tostring(cnt), index = idx }
+        end
+    end
+
+    -- ─── 2. Mutação Síncrona Atômica (Zero Yields) ──────────────────────────
+    local t = now or getNow()
+    local mCfg = getMarketConfig()
+    local results = {}
+
+    for _, item in ipairs(salesList) do
+        local c = item.commodity
+        local qty = item.count
+        local cfg = getCommodityConfig(c)
+
+        local prevDemand = BrokerMarket.RecoverDemand(c, t) or 1.0000
+        local pressure = (cfg.salePressure or 0.03) * qty
+        local newDemand = math.max(mCfg.DemandFloor, math.min(mCfg.DemandCeiling, prevDemand - pressure))
+
+        local state = _marketState[c]
+        state.demand = newDemand
+        state.recentVolume = state.recentVolume + qty
+        state.lastRecovery = t
+        state.dirty = true
+
+        results[#results + 1] = {
+            commodity      = c,
+            count          = qty,
+            previousDemand = prevDemand,
+            newDemand      = newDemand,
+            volume         = state.recentVolume,
+        }
+        logDebug(('RecordSalesBatch: %s x%d -> Demand: %.4f (was %.4f)'):format(c, qty, newDemand, prevDemand))
+    end
+
+    return {
+        ok      = true,
+        updated = #results,
+        sales   = results,
+    }
+end
+
+--- Registra uma única venda delegando para RecordSalesBatch
+---@param commodity string
+---@param count integer
+---@param now integer|nil
+---@return table
+function BrokerMarket.RecordSale(commodity, count, now)
+    local batchRes = BrokerMarket.RecordSalesBatch({ { commodity = commodity, count = count } }, now)
+    if not batchRes.ok then
+        return { ok = false, err = batchRes.reason or batchRes.err }
+    end
+
+    local s = batchRes.sales[1]
+    return {
+        ok             = true,
+        commodity      = s.commodity,
+        count          = s.count,
+        previousDemand = s.previousDemand,
+        newDemand      = s.newDemand,
+        volume         = s.volume,
+        lastRecovery   = _marketState[commodity] and _marketState[commodity].lastRecovery,
+    }
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 6. SNAPSHOT E PERSISTÊNCIA ASSÍNCRONA
 -- ─────────────────────────────────────────────────────────────────────────────
 
 --- Obtém o snapshot de mercado de uma ou todas as commodities
@@ -478,7 +709,7 @@ function BrokerMarket.TriggerPeriodicFlush(now)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 5. BOOTSTRAP & TEST INJECTION HOOKS
+-- 7. BOOTSTRAP & TEST INJECTION HOOKS
 -- ─────────────────────────────────────────────────────────────────────────────
 
 --- Carrega o snapshot persistido do banco de dados
@@ -493,6 +724,8 @@ function BrokerMarket.Init(clockFn, dbOverride, rngFn)
     _dbInstance = dbOverride
     _marketState = {}
     _isReady = false
+    _commodityLocks = {}
+    _marketIntegrityLocked = false
 
     if Config.Broker and Config.Broker.Enable == false then
         logDebug('BrokerMarket disabled by config.')
