@@ -138,6 +138,16 @@ function VPChopDbInit()
                     INDEX `idx_carcass_pending` (`cleanup_pending`, `processed_at`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [v1.17 BROKER] Snapshot dinâmico de mercado do Broker.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_broker_market` (
+                    `commodity`     VARCHAR(64)          NOT NULL,
+                    `demand_index`  DECIMAL(5, 4)        NOT NULL DEFAULT 1.0000,
+                    `recent_volume` INT UNSIGNED         NOT NULL DEFAULT 0,
+                    `last_recovery` TIMESTAMP            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`commodity`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
             VPChopDBReady = true
             TriggerEvent('vp_chopshop:server:dbReady')
         end)

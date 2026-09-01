@@ -73,31 +73,33 @@ CREATE TABLE IF NOT EXISTS `vp_chop_workshop_journal` (
 
 ---
 
-## 2. Sequência de PRs Proposta (Stack Modular v1.17)
+## 2. Sequência de PRs em Execução (Stack Modular v1.17)
 
 ```mermaid
 graph TD
-    B0[PR BROKER-0: Specs, DB Schemas & Mock Harness] --> B1[PR BROKER-1: BrokerMarket Pricing & Sim Engine]
-    B1 --> B2[PR BROKER-2: Fence Integration & Market Resolution]
+    B0[BROKER-0: Architecture Frozen & Canonical Docs ✅] --> B1[PR BROKER-1: Market Schema, Engine & Sim Engine]
+    B1 --> B2[PR BROKER-2: Fence Integration & Dynamic Payouts]
     B2 --> B3[PR BROKER-3: BrokerContracts & High-Demand Lists]
     B3 --> B4[PR BROKER-4: WorkshopBridge & Persistent SAGA Journal]
     B4 --> B5[PR BROKER-5: NPC Ambient Speech & Context UI]
     B5 --> B6[PR BROKER-6: Live QA & Final Release Gate]
 ```
 
-### PR BROKER-0: Architecture Specs & Test Harness
-- Criação dos schemas de banco em `server/db.lua` e `sql/vp_chopshop.sql` (`vp_chop_broker_contracts`, `vp_chop_broker_market`, `vp_chop_workshop_journal`).
-- Criação dos mocks e stubs de teste em `server/broker/market_spec.lua` e `tools/run_spec.lua`.
-- **Meta:** 100% GREEN no CI.
+### BROKER-0: Architecture Frozen & Canonical Design ✅
+- Consolidação arquitetural e auditoria de segurança (BROKER-0, 0.1 e 0.2).
+- Modelagem de persistência e SAGA recovery para transações externas.
 
-### PR BROKER-1: Dynamic Market Pricing & Economic Simulation Engine
+### PR BROKER-1: Market Schema, Pricing Engine & Economic Simulation Engine
+- Schema de persistência de mercado: `vp_chop_broker_market` em `sql/vp_chopshop.sql` e `server/db.lua`.
 - Implementação de `server/broker/market.lua`:
-  - `BrokerMarket.GetDemandIndex(commodity)`
-  - `BrokerMarket.ResolvePrice(commodity, context)`
-  - `BrokerMarket.RecordSale(commodity, count)`
-  - Sweeper de recuperação temporal de demanda.
-- **Suíte de Simulação Obrigatória:** Execução de `market_sim_spec.lua` (1.000 iterações sintéticas provando floor, ceiling e recovery).
-- **Testes:** Cobertura de `MARKET-01` a `MARKET-09`.
+  - `BrokerMarket.GetDemandIndex(commodity, timestamp)`
+  - `BrokerMarket.ResolvePrice(commodity, context)` (com regra estrita: Trust 0 ou Burning Heat = `NO TRADE`)
+  - `BrokerMarket.RecordSale(commodity, count, timestamp)`
+  - `BrokerMarket.RecoverDemand(commodity, timestamp)` (Lazy Time Recovery assintótica)
+  - `BrokerMarket.GetSnapshot(commodity, timestamp)` e `BrokerMarket.Flush(timestamp)`
+- **Suíte de Simulação Obrigatória:** Execução de `market_sim_spec.lua` (1.000+ iterações sintéticas provando monotonicidade, floor, ceiling, jitter determinístico e recovery assintótico).
+- **Testes:** Cobertura de `MARKET-01` a `MARKET-09` e testes de propriedades sobre o módulo real.
+- **Zero alteração nos payouts do Fence atual** (integração mantida para BROKER-2).
 
 ### PR BROKER-2: Fence Integration & Market Resolution
 - Conexão de `sellCatalytic`, `sellTyres` e `sellItems` com a engine do `BrokerMarket`.

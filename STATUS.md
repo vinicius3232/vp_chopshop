@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de integração:** `feat/v1.16-ux-e-carcass-minigame` (HEAD: `1756d38`, base de PR #40)
+**Branch de integração:** `feat/v1.17-broker-1-market-engine` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `53683d7`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1113 PASS / 0 FAIL / 1113 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1193 PASS / 0 FAIL / 1193 asserts**
 
 ---
 
@@ -16,35 +16,24 @@ Fase 0 — Base + Dores da QA             ✅ HOMOLOGADO & MERGED   (#14 #15 #16
 Fase 1 — Part Registry vira autoridade  ✅ HOMOLOGADO & MERGED   (#17 #18 #19 #20 #21 #22)
 P2.1   — Client sai de ChopParts        ✅ HOMOLOGADO & MERGED   (#23)
 ─────────────────────────────────────────────────────────────────────────
-Stack UX & Gameplay v1.16:
-UX-0   — DisplayName server-safe fix    ✅ HOMOLOGADO            (956f5fe)
-UX-A   — Interaction Core & NUI         ✅ HOMOLOGADO            (d390f29)
-UX-B   — Wheel 5-Bolt Rotate Minigame   ✅ TESTADO IN-GAME (OK)  (#37)
-UX-C   — Body Panels Cut Minigame       ✅ TESTADO IN-GAME (OK)  (#38)
-UX-D   — Engine Removal & Mounts        ✅ TESTADO IN-GAME (OK)  (#39)
-UX-E   — Carcass Structural Trace Cut   ✅ TESTADO IN-GAME (OK)  (#40)
-UX-F   — Auto-Pan & Smooth Sequencing   ✅ TESTADO IN-GAME (OK)  (e173ee5)
+Stack UX & Gameplay v1.16:              ✅ HOMOLOGADO & MERGED   (#40)
+(Minigames Rodas/Painéis/Motor/Carcaça, Physical Carry, Unificação Bancada,
+ Dano de Motor, Furto Catalisador, Roubo Player Vehicles, SEC-1, PAY-1.1)
 ─────────────────────────────────────────────────────────────────────────
-Novas Mecânicas Físicas & Oficinas:
-PHYS-1 — Physical Part Carry (Braços)   ✅ TESTADO IN-GAME (OK)  (ffe26e5)
-PHYS-2 — Workbench Part Dismantling     ✅ TESTADO IN-GAME (OK)  (ffe26e5)
-DMG-1  — Damage Health Scaling (Motor)  ✅ TESTADO IN-GAME (OK)  (bedfb9a)
-CAT-1  — Catalytic Converter Theft      ✅ TESTADO IN-GAME (OK)  (3feab7a)
-OWN-1  — Player-Vehicle Theft & Anti-Exp✅ TESTADO IN-GAME (OK)  (b39dd5e)
+v1.17 Chop Broker, Dynamic Market & Workshop Economy:
+BROKER-0   — Architecture Frozen & Canonical Design ✅ CONCLUÍDO (Docs)
+BROKER-1.2 — Final Parity & Fail-Closed Boot Engine ✅ CODE READY (PR #42)
+             (vp_chop_broker_market schema, pcall closure patterns,
+              dirty state retry on DB error/nil, low-frequency flush thread,
+              fail-closed BrokerMarket.IsReady() on DB absent/error,
+              Config.Fence.NightBonus 21->6 paridade, FencePriceMult tier parity,
+              NaN/Inf guards, 108.000+ simulation iterations @ 1193 PASS)
+BROKER-2   — Fence Integration & Dynamic Payouts    ⏸
+BROKER-3   — Contracts & High-Demand Lists          ⏸
+BROKER-4   — WorkshopBridge & SAGA Journal          ⏸
+BROKER-5   — NPC Ambient Speech & Context UI        ⏸
+BROKER-6   — Live QA & Final Release Gate           ⏸
 ─────────────────────────────────────────────────────────────────────────
-Hardening de Segurança & Autoridade Econômica:
-SEC-1  — Part Entitlement Core Authority✅ HOMOLOGADO & MERGED   (#41)
-         (Bench Server Authority, Fence Tokenized Sale, Strict Mode Allowlist,
-          Fail-Closed InvCanCarry, Catalytic 2-step Server Timing & Replay TTL,
-          Carcass Statebag Fail-safe, Canonical BridgeAddCash Payment)
-PAY-1.1— Payment & Zero-Sale Consistency✅ HOMOLOGADO (v1.16)    (14d7dcf)
-         (P1-01 sellItems zero-sale guard + fail-closed BridgeAddCash checks,
-          P1-02 fulfillOrder fail-closed checks, real callback regression tests)
-─────────────────────────────────────────────────────────────────────────
-Fase 3 — Processamento de Peça Avançado  ✅ EM ANDAMENTO / INTEGRADO
-Fase 4 — Camada de Crime & Perícia       ⏸
-Fase 5 — Polish Final + CI + Release     ⏸
-```
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)
 

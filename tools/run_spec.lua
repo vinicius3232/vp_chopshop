@@ -255,10 +255,74 @@ _G.Config = {
         XpOrderBonus = 80,
         TrustXpPerLevel = { [1] = 100, [2] = 300, [3] = 600, [4] = 1000 },
         WholeCarBasePayout = 8000,
-        NightBonus = { Enable = false },
+        NightBonus = {
+            Enable = true,
+            StartHour = 21,
+            EndHour = 6,
+            Multiplier = 1.3,
+        },
     },
     Progression = {
-        FencePriceMult = { [1] = 1.0, [2] = 1.15, [3] = 1.30, [4] = 1.50 },
+        FencePriceMult = { [1] = 1.0, [2] = 1.0, [3] = 1.0, [4] = 1.10 },
+    },
+    Broker = {
+        Enable = true,
+        Debug = false,
+        Market = {
+            DemandFloor = 0.40,
+            DemandCeiling = 1.30,
+            PriceFloor = 0.40,
+            PriceCeiling = 2.50,
+            Jitter = 0.03,
+            FlushIntervalSec = 300,
+        },
+        Commodities = {
+            catalytic_converter = {
+                basePrice = 1600,
+                salePressure = 0.04,
+                recoveryPerHour = 0.15,
+            },
+            adv_engine = {
+                basePrice = 2800,
+                salePressure = 0.05,
+                recoveryPerHour = 0.12,
+            },
+            tyre = {
+                basePrice = 450,
+                salePressure = 0.015,
+                recoveryPerHour = 0.20,
+            },
+            stolen_plate = {
+                basePrice = 1200,
+                salePressure = 0.03,
+                recoveryPerHour = 0.15,
+            },
+            metalscrap = {
+                basePrice = 120,
+                salePressure = 0.002,
+                recoveryPerHour = 0.25,
+            },
+            steel = {
+                basePrice = 180,
+                salePressure = 0.003,
+                recoveryPerHour = 0.25,
+            },
+            aluminum = {
+                basePrice = 200,
+                salePressure = 0.004,
+                recoveryPerHour = 0.20,
+            },
+            copper = {
+                basePrice = 300,
+                salePressure = 0.005,
+                recoveryPerHour = 0.20,
+            },
+            car_parts = {
+                basePrice = 350,
+                salePressure = 0.004,
+                recoveryPerHour = 0.20,
+            },
+        },
     },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
@@ -316,6 +380,7 @@ function RegisterCommand(_, _, _) end
 function IsPlayerAceAllowed(_, _) return false end
 
 local base = arg[1] or '.'
+_G.BASE_RESOURCE_PATH = base
 _G._HARNESS_BASE = base
 dofile(base .. '/shared/registry/tools.lua')          -- [P1.1] VPChopToolRegistry
 dofile(base .. '/shared/registry/parts.lua')          -- [P1.1] VPChopPartRegistry
@@ -348,6 +413,7 @@ dofile(base .. '/server/advanced_chop.lua')           -- [PR-G] provê VPChopAdv
 dofile(base .. '/server/action/base_tyre.lua')        -- [PR-F] registra kind/executor 'tyre' (spec sobrescreve o executor)
 dofile(base .. '/server/action/advanced_chop.lua')    -- [PR-G] registra kinds/executores adv_*
 dofile(base .. '/bridge/vp_gangs.lua')                -- [INT-01A] provê VPChopGangs* (ponte vp_chopshop→vp_gangs)
+dofile(base .. '/server/broker/market.lua')              -- [v1.17 BROKER-1] provê BrokerMarket
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
@@ -369,6 +435,7 @@ dofile(base .. '/bridge/vp_gangs_spec.lua')                   -- [INT-01A]
 dofile(base .. '/server/partserial_spec.lua')                 -- [UX-0 QA findings]
 dofile(base .. '/client/minigame/minigame_spec.lua')         -- [UX-A Interaction Core]
 dofile(base .. '/server/session/fence_payment_spec.lua')     -- [v1.16-FENCE-PAY-1]
+dofile(base .. '/server/broker/market_sim_spec.lua')         -- [v1.17 BROKER-1]
 
 local anyFail = false
 for i = specStart, #threads do
