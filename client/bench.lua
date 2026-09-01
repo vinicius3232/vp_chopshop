@@ -75,13 +75,15 @@ local function craftOnBench(benchId, recipeIndex, recipe)
     end
 end
 
-local function doProcessCarriedPartOnBench(benchId)
-    if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
-    local partKey = VPChopCarryingPart.partKey
-
+local function executeBenchPartMode(benchId, partKey, mode, netId)
+    local labels = {
+        raw_materials = L('bench_progress_raw') or 'Desmanchando peça em matérias-primas...',
+        clean_serial  = L('bench_progress_clean') or 'Raspando e limpando número de série...',
+        stolen_serial = L('bench_progress_stolen') or 'Acondicionando peça com serial roubado...',
+    }
     local ok = lib.progressBar({
-        duration = 3500,
-        label = L('bench_processing_part'),
+        duration = 4000,
+        label = labels[mode] or L('bench_processing_part'),
         useWhileDead = false,
         canCancel = true,
         disable = { move = true, car = true, combat = true },
@@ -89,7 +91,7 @@ local function doProcessCarriedPartOnBench(benchId)
     })
     if not ok then return end
 
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchProcessPart', false, benchId, partKey)
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchProcessPart', false, benchId, partKey, mode, netId)
     if not cbOk or not res or not res.ok then
         VPChopNotify(L('notify_generic_error'), 'error')
         return
@@ -97,6 +99,51 @@ local function doProcessCarriedPartOnBench(benchId)
 
     VPChopDropCarryPart()
     VPChopNotify(L('bench_part_processed'), 'success')
+end
+
+local function doProcessCarriedPartOnBench(benchId)
+    if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
+    local partKey = VPChopCarryingPart.partKey
+    local netId   = VPChopCarryingPart.netId or 0
+
+    -- Catalisador tem fluxo direto de reciclagem
+    if partKey == 'catalytic_converter' then
+        executeBenchPartMode(benchId, partKey, 'raw_materials', netId)
+        return
+    end
+
+    -- Menu com as 3 opções para peças de lataria e motor
+    lib.registerContext({
+        id = 'vp_chop_bench_part_action_menu',
+        title = L('bench_process_part'),
+        options = {
+            {
+                title = L('bench_opt_raw_materials'),
+                description = L('bench_desc_raw_materials'),
+                icon = 'fa-solid fa-recycle',
+                onSelect = function()
+                    executeBenchPartMode(benchId, partKey, 'raw_materials', netId)
+                end,
+            },
+            {
+                title = L('bench_opt_clean_serial'),
+                description = L('bench_desc_clean_serial'),
+                icon = 'fa-solid fa-spray-can-sparkles',
+                onSelect = function()
+                    executeBenchPartMode(benchId, partKey, 'clean_serial', netId)
+                end,
+            },
+            {
+                title = L('bench_opt_stolen_serial'),
+                description = L('bench_desc_stolen_serial'),
+                icon = 'fa-solid fa-skull-crossbones',
+                onSelect = function()
+                    executeBenchPartMode(benchId, partKey, 'stolen_serial', netId)
+                end,
+            },
+        }
+    })
+    lib.showContext('vp_chop_bench_part_action_menu')
 end
 
 ---@param bench { id: integer, x: number, y: number, z: number, heading: number }

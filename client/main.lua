@@ -584,6 +584,7 @@ local function registerGroundPartTarget(groundProp, partKey)
                     partKey    = partKey,
                     propHandle = groundProp,
                     isPart     = true,
+                    netId      = netId,
                 }
                 lib.showTextUI(L('carry_part_textui'), {
                     position = 'left-center',
@@ -599,6 +600,7 @@ local function placeCarPartOnGround()
 
     local handProp = VPChopCarryingPart.propHandle
     local partKey  = VPChopCarryingPart.partKey
+    local netId    = VPChopCarryingPart.netId
 
     VPChopCarryingPart.propHandle = nil
     VPChopDropCarryPart()
@@ -622,7 +624,7 @@ local function placeCarPartOnGround()
     end
     FreezeEntityPosition(handProp, true)
 
-    registerGroundPartTarget(handProp, partKey)
+    registerGroundPartTarget(handProp, partKey, netId)
     VPChopNotify(L('part_dropped'), 'inform')
 end
 
@@ -646,12 +648,14 @@ local function spawnCarriedPartInHands(partKey, veh)
     SetModelAsNoLongerNeeded(modelHash)
     if not prop or prop == 0 then return nil end
 
+    local netId = (veh and DoesEntityExist(veh) and NetworkGetNetworkIdFromEntity(veh)) or 0
     attachCarPartToPed(prop, partKey)
     VPChopCarryingPart = {
         partKey    = partKey,
         propHandle = prop,
         isPart     = true,
         veh        = veh,
+        netId      = netId,
     }
     lib.showTextUI(L('carry_part_textui'), {
         position = 'left-center',

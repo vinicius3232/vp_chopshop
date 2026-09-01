@@ -505,7 +505,7 @@ lib.callback.register('vp_chopshop:benchCraft', function(source, benchId, recipe
 end)
 
 --- [PHYSICAL CARRY] Processamento de peça física carregada na bancada de trabalho
-lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, partKey)
+lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, partKey, mode, netId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
     benchId = tonumber(benchId)
     local bench = benchId and benchById(benchId)
@@ -513,12 +513,10 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
     if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
     if not partKey or type(partKey) ~= 'string' then return { ok = false, err = 'part' } end
 
-    if partKey == 'adv_engine' then
-        local baseParts = (Config.AdvancedChop and Config.AdvancedChop.EngineReward and Config.AdvancedChop.EngineReward.amount) or 5
-        VPChopAddStolenCarParts(source, 0, baseParts)
-        InvAdd(source, 'metalscrap', 4)
-        InvAdd(source, 'steel', 3)
-    elseif partKey == 'catalytic_converter' then
+    mode = mode or 'raw_materials'
+    netId = tonumber(netId) or 0
+
+    if partKey == 'catalytic_converter' then
         local mats = (Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials) or {
             copper     = { amount = 4, chance = 1.0 },
             metalscrap = { amount = 6, chance = 1.0 },
@@ -532,20 +530,45 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
                 InvAdd(source, itemName, amt)
             end
         end
-    elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
-        for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
-            local chance = tonumber(cfg.chance) or 1.0
-            if math.random() <= chance then
-                local amt = math.random(1, cfg.amount or 1)
-                InvAdd(source, itemName, amt)
+        return { ok = true }
+    end
+
+    local count = (partKey == 'adv_engine' and 5) or 1
+
+    if mode == 'raw_materials' then
+        -- 1) Desmanchar em matérias-primas brutas (sucatas, metais, plástico)
+        if partKey == 'adv_engine' then
+            InvAdd(source, 'metalscrap', 8)
+            InvAdd(source, 'steel', 6)
+            InvAdd(source, 'aluminum', 4)
+        elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
+            for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
+                local chance = tonumber(cfg.chance) or 1.0
+                if math.random() <= chance then
+                    local amt = math.random(1, (cfg.amount or 1) * 2)
+                    InvAdd(source, itemName, amt)
+                end
             end
+            InvAdd(source, 'metalscrap', 4)
+            InvAdd(source, 'steel', 2)
+        else
+            InvAdd(source, 'metalscrap', 6)
+            InvAdd(source, 'steel', 3)
+            InvAdd(source, 'aluminum', 2)
         end
-        VPChopAddStolenCarParts(source, 0, 1)
-    else
-        VPChopAddStolenCarParts(source, 0, 1)
-        InvAdd(source, 'metalscrap', 3)
-        InvAdd(source, 'steel', 2)
-        InvAdd(source, 'aluminum', 2)
+    elseif mode == 'clean_serial' then
+        -- 2) Limpar / raspar serial: gera car_parts com metadata limpa { state = 'scratched' }
+        if Config.PartSerial and Config.PartSerial.Enable then
+            local meta = { state = 'scratched', sourceModel = 'CLEAN_PART' }
+            exports.ox_inventory:AddItem(source, 'car_parts', count, meta)
+        else
+            InvAdd(source, 'car_parts', count)
+        end
+        InvAdd(source, 'metalscrap', 2)
+    elseif mode == 'stolen_serial' then
+        -- 3) Guardar com serial roubado rastreável
+        VPChopAddStolenCarParts(source, netId, count)
+        InvAdd(source, 'metalscrap', 1)
     end
 
     return { ok = true }

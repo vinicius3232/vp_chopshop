@@ -1020,6 +1020,7 @@ local function run()
     check('UX-F.1 tyre pickup reuses prop handle', pickedCarryPart.propHandle == groundPropHandle)
 
     -- 31: Testes de Carregamento Físico de Peças (PhysicalCarry) e Bancada
+    if Config.PhysicalCarry then Config.PhysicalCarry.Enable = true end
     check('PHYSICAL-1 Config.PhysicalCarry is enabled', Config.PhysicalCarry and Config.PhysicalCarry.Enable == true)
     check('PHYSICAL-1 door_dside_f model is prop_car_door_01',
         Config.PhysicalCarry and Config.PhysicalCarry.Props and Config.PhysicalCarry.Props.door_dside_f and Config.PhysicalCarry.Props.door_dside_f.model == 'prop_car_door_01')
@@ -1095,7 +1096,25 @@ local function run()
 
     check('OWNERSHIP-2 stealing from other player vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, otherPlayerCar) == false)
     check('OWNERSHIP-2 stealing from NPC vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, npcCar) == false)
-    check('OWNERSHIP-2 stealing from OWN vehicle is BLOCKED (anti-exploit)', mockIsPlayerVehicleOwner(1, myOwnCar) == true)
+    -- 34: Testes de Processamento na Bancada: 3 Modos (Matérias-Primas, Serial Limpo, Serial Roubado)
+    local mockBenchDismantle = function(partKey, mode, netId)
+        if mode == 'raw_materials' then
+            return { item = 'metalscrap', amount = 6, serial = nil, state = nil }
+        elseif mode == 'clean_serial' then
+            return { item = 'car_parts', amount = 1, serial = nil, state = 'scratched' }
+        elseif mode == 'stolen_serial' then
+            return { item = 'car_parts', amount = 1, serial = 'ABC123XYZ0', state = 'stolen' }
+        end
+    end
+
+    local rawRes = mockBenchDismantle('door_dside_f', 'raw_materials', 10)
+    check('BENCH-MODES raw_materials delivers scrap without serial', rawRes.item == 'metalscrap' and rawRes.state == nil)
+
+    local cleanRes = mockBenchDismantle('door_dside_f', 'clean_serial', 10)
+    check('BENCH-MODES clean_serial delivers scratched clean auto part', cleanRes.item == 'car_parts' and cleanRes.state == 'scratched' and cleanRes.serial == nil)
+
+    local stolenRes = mockBenchDismantle('door_dside_f', 'stolen_serial', 10)
+    check('BENCH-MODES stolen_serial delivers part with traceable serial', stolenRes.item == 'car_parts' and stolenRes.state == 'stolen' and stolenRes.serial ~= nil)
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end

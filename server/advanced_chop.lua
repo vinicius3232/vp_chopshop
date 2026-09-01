@@ -120,7 +120,11 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
     if mDup then return { ok = false, err = 'done' } end
     advMarkCooldown(src)
 
-    giveReward(src, netId, Config.AdvancedChop.DoorReward or { item = 'car_parts', amount = 1 })
+    -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, a peça vai para os braços
+    -- e o jogador escolhe como processá-la na bancada (matérias-primas / serial limpo / serial roubado).
+    if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
+        giveReward(src, netId, Config.AdvancedChop.DoorReward or { item = 'car_parts', amount = 1 })
+    end
 
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
@@ -199,11 +203,15 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
         end
     end
 
-    if finalParts > 0 then
-        giveReward(src, netId, { item = 'car_parts', amount = finalParts })
-    end
-    if scrapBonus > 0 then
-        giveReward(src, netId, { item = 'metalscrap', amount = scrapBonus })
+    -- [PHYSICAL CARRY] Se o carregamento físico estiver ativo, o bloco do motor vai para os braços
+    -- e o jogador escolhe como processá-lo na bancada (matérias-primas / serial limpo / serial roubado).
+    if not (Config.PhysicalCarry and Config.PhysicalCarry.Enable) then
+        if finalParts > 0 then
+            giveReward(src, netId, { item = 'car_parts', amount = finalParts })
+        end
+        if scrapBonus > 0 then
+            giveReward(src, netId, { item = 'metalscrap', amount = scrapBonus })
+        end
     end
 
     local vehCoords = getVehCoords(netId)

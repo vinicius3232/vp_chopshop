@@ -69,6 +69,7 @@ local function fresh()
     Config.ActionSession.RequireBaseTyres = true
     Config.ActionSession.RequireAdvanced = true
     Config.AdvancedChop.Enable = true
+    if Config.PhysicalCarry then Config.PhysicalCarry.Enable = false end
     if VPChopAdv_test then VPChopAdv_test.clearCooldown() end
 end
 
