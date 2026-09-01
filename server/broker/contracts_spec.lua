@@ -576,6 +576,54 @@ local function run()
         check('CONTRACT-TERMS-05 remaining > quantity rejeitado com invalid_contract_terms', resT5.ok == false and resT5.err == 'invalid_contract_terms')
     end
 
+    -- ─── CONTRACT-PRICE-FAIL Suite (BROKER-3.2) ─────────────────────────────
+    do
+        -- CONTRACT-PRICE-FAIL-01: Config.Broker.Enable = false retorna broker_disabled
+        resetEnv()
+        Config.Broker.Enable = false
+        local cIdP1 = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1)
+        local engP1, _ = PE.Issue('session_p1', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PRICE1', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resP1 = fulfillContractCb(1, cIdP1, engP1)
+        check('CONTRACT-PRICE-FAIL-01 Broker desabilitado retorna broker_disabled sem exception', resP1 ~= nil and resP1.ok == false and resP1.err == 'broker_disabled')
+        check('CONTRACT-PRICE-FAIL-01 Entitlement segue ISSUED após broker_disabled', PE.State(engP1) == 'ISSUED')
+        check('CONTRACT-PRICE-FAIL-01 Quota do contrato permanece intacta (1)', mockDbRows[cIdP1].remaining == 1)
+        check('CONTRACT-PRICE-FAIL-01 Zero pagamento efetuado (cashPaid == 0)', (cashPaid[1] or 0) == 0)
+        Config.Broker.Enable = true
+    end
+
+    do
+        -- CONTRACT-PRICE-FAIL-02: Commodity ausente no BrokerMarket retorna unknown_commodity
+        resetEnv()
+        local oldComm = Config.Broker.Commodities and Config.Broker.Commodities.adv_engine
+        Config.Broker.Commodities.adv_engine = nil
+        local cIdP2 = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1)
+        local engP2, _ = PE.Issue('session_p2', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PRICE2', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resP2 = fulfillContractCb(1, cIdP2, engP2)
+        check('CONTRACT-PRICE-FAIL-02 Commodity desconhecida retorna unknown_commodity sem exception', resP2 ~= nil and resP2.ok == false and resP2.err == 'unknown_commodity')
+        check('CONTRACT-PRICE-FAIL-02 Entitlement segue ISSUED após unknown_commodity', PE.State(engP2) == 'ISSUED')
+        check('CONTRACT-PRICE-FAIL-02 Quota do contrato permanece intacta (1)', mockDbRows[cIdP2].remaining == 1)
+        check('CONTRACT-PRICE-FAIL-02 Zero pagamento efetuado (cashPaid == 0)', (cashPaid[1] or 0) == 0)
+        Config.Broker.Commodities.adv_engine = oldComm
+    end
+
+    do
+        -- CONTRACT-PRICE-FAIL-03: ResolvePrice com unitPrice nil/inválido retorna invalid_price
+        resetEnv()
+        local origResolve = BM.ResolvePrice
+        BM.ResolvePrice = function(...) return { ok = true, unitPrice = nil } end
+        local cIdP3 = createContract(nil, 'part_type', 'adv_engine', 1, 1.20, 0, 1)
+        local engP3, _ = PE.Issue('session_p3', 1, 'adv_engine', 10, { origin = 'advanced', provenance = { realPlate = 'PRICE3', model = 1234 } })
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+        local resP3 = fulfillContractCb(1, cIdP3, engP3)
+        check('CONTRACT-PRICE-FAIL-03 unitPrice nil retorna invalid_price sem exception', resP3 ~= nil and resP3.ok == false and resP3.err == 'invalid_price')
+        check('CONTRACT-PRICE-FAIL-03 Entitlement segue ISSUED após invalid_price', PE.State(engP3) == 'ISSUED')
+        check('CONTRACT-PRICE-FAIL-03 Quota do contrato permanece intacta (1)', mockDbRows[cIdP3].remaining == 1)
+        check('CONTRACT-PRICE-FAIL-03 Zero pagamento efetuado (cashPaid == 0)', (cashPaid[1] or 0) == 0)
+        BM.ResolvePrice = origResolve
+    end
+
     -- ─── CONTRACT-GEN Suite ─────────────────────────────────────────────────
     do
         resetEnv()

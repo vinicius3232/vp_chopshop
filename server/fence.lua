@@ -1478,12 +1478,25 @@ lib.callback.register('vp_chopshop:broker:fulfillContract', function(src, contra
         heatMultiplier  = heatMult,
         jitter          = 0.0,
     })
-    if not quote or quote.blocked or quote.unitPrice <= 0 then
-        return { ok = false, err = quote and quote.reason or 'price_blocked' }
+    if not quote then
+        return { ok = false, err = 'price_blocked' }
+    end
+    if quote.ok ~= true then
+        return { ok = false, err = quote.err or 'price_blocked' }
+    end
+
+    local quotedUnitPrice = tonumber(quote.unitPrice)
+    if not quotedUnitPrice
+        or quotedUnitPrice ~= quotedUnitPrice
+        or quotedUnitPrice == math.huge
+        or quotedUnitPrice == -math.huge
+        or quotedUnitPrice <= 0
+    then
+        return { ok = false, err = 'invalid_price' }
     end
 
     local rewardMult = math.max(1.0, math.min(2.5, tonumber(contract.rewardMult) or 1.0))
-    local unitPayout = math.floor(quote.unitPrice * rewardMult)
+    local unitPayout = math.floor(quotedUnitPrice * rewardMult)
 
     -- Mutex por contractId protegendo a seção crítica econômica
     if not BrokerContracts.AcquireLock(cId) then
