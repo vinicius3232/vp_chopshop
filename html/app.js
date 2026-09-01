@@ -29,7 +29,7 @@
   }
 
   function completePoint(pt) {
-    if (!pt || pt.completed) return;
+    if (pt.completed) return;
     pt.completed = true;
     pt.progress = 100;
 
@@ -46,6 +46,11 @@
         if (icon) icon.innerHTML = '&#10003;';
       }
       pt.isTracing = false;
+
+      // Ocultar imediatamente a seção cortada da tela
+      if (pt.element) {
+        pt.element.style.display = 'none';
+      }
     } else {
       if (pt.progressCircle) {
         pt.progressCircle.style.strokeDashoffset = 0;
@@ -55,7 +60,7 @@
       }
     }
 
-    if (pt.element) {
+    if (pt.element && pt.primitive !== 'trace') {
       pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing');
       pt.element.classList.add('completed');
     }
@@ -64,6 +69,27 @@
     activeHotspotId = null;
     stopCuttingLoop();
     updateOverallProgress();
+
+    // [UX-E Auto-Advance] Segue automaticamente para o próximo corte na carcaça
+    if (pt.primitive === 'trace') {
+      const allKeys = Object.keys(pointsMap);
+      let nextPt = null;
+      for (const k of allKeys) {
+        const candidate = pointsMap[k];
+        if (candidate && candidate.primitive === 'trace' && !candidate.completed && candidate.id !== pt.id) {
+          nextPt = candidate;
+          break;
+        }
+      }
+
+      if (nextPt) {
+        setTimeout(() => {
+          if (!activeMinigame || nextPt.completed) return;
+          activeHotspotId = nextPt.id;
+          postNui('minigamePointStart', { id: nextPt.id });
+        }, 400);
+      }
+    }
   }
 
   function startCuttingLoop(ptId) {
@@ -192,13 +218,30 @@
               }
             }
           });
+          if (pointsMap[ptId] && pointsMap[ptId].completed) {
+            bgPath.style.display = 'none';
+            fgPath.style.display = 'none';
+            if (startNode) startNode.style.display = 'none';
+            return;
+          }
+
           if (!allNodesVisible) {
             bgPath.style.display = 'none';
             fgPath.style.display = 'none';
             return;
           }
-          bgPath.style.display = 'block';
-          fgPath.style.display = 'block';
+
+          const isThisPointActive = (activeHotspotId === ptId);
+          const hasActiveHotspot = (activeHotspotId !== null);
+
+          if (hasActiveHotspot && !isThisPointActive) {
+            bgPath.style.display = 'none';
+            fgPath.style.display = 'none';
+          } else {
+            bgPath.style.display = 'block';
+            fgPath.style.display = 'block';
+          }
+
           bgPath.setAttribute('d', d);
           fgPath.setAttribute('d', d);
           const totalLen = fgPath.getTotalLength ? fgPath.getTotalLength() : 500;

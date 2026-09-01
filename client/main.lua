@@ -1649,6 +1649,18 @@ local function doAdvAction(veh, netId, tCfg, opts)
         end
 
         advMarkChopped(netId, opts.action)
+        if opts.action == 'adv_carcass' then
+            if JackstandData[veh] then
+                if JackstandData[veh].props then
+                    for i = 1, #JackstandData[veh].props do
+                        local prop = JackstandData[veh].props[i]
+                        if DoesEntityExist(prop) then DeleteEntity(prop) end
+                    end
+                end
+                JackstandData[veh] = nil
+            end
+            exports.ox_target:removeLocalEntity(veh)
+        end
         VPChopNotify(L(opts.notifyOk), 'success')
     end)
 end
