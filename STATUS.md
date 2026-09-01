@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-01
 **Branch de integração:** `feat/v1.17-broker-1-market-engine` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `53683d7`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1174 PASS / 0 FAIL / 1174 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1193 PASS / 0 FAIL / 1193 asserts**
 
 ---
 
@@ -22,12 +22,12 @@ Stack UX & Gameplay v1.16:              ✅ HOMOLOGADO & MERGED   (#40)
 ─────────────────────────────────────────────────────────────────────────
 v1.17 Chop Broker, Dynamic Market & Workshop Economy:
 BROKER-0   — Architecture Frozen & Canonical Design ✅ CONCLUÍDO (Docs)
-BROKER-1.1 — Market Persistence & Parity Hardening  ✅ CODE READY (PR #42)
+BROKER-1.2 — Final Parity & Fail-Closed Boot Engine ✅ CODE READY (PR #42)
              (vp_chop_broker_market schema, pcall closure patterns,
               dirty state retry on DB error/nil, low-frequency flush thread,
-              fail-closed BrokerMarket.IsReady() & Config.Broker.Enable,
-              action_session_spec restoration, FencePriceMult tier parity,
-              NaN/Inf guards, 108.000+ simulation iterations @ 1174 PASS)
+              fail-closed BrokerMarket.IsReady() on DB absent/error,
+              Config.Fence.NightBonus 21->6 paridade, FencePriceMult tier parity,
+              NaN/Inf guards, 108.000+ simulation iterations @ 1193 PASS)
 BROKER-2   — Fence Integration & Dynamic Payouts    ⏸
 BROKER-3   — Contracts & High-Demand Lists          ⏸
 BROKER-4   — WorkshopBridge & SAGA Journal          ⏸

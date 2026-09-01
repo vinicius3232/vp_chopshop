@@ -1,6 +1,6 @@
 -- server/broker/market.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.17 BROKER-1.1] DYNAMIC BROKER MARKET ENGINE
+--  [v1.17 BROKER-1.2] DYNAMIC BROKER MARKET ENGINE
 --  Autoridade econômica server-side para precificação dinâmica, pressão de volume,
 --  recuperação temporal (lazy), persistência assíncrona segura e aplicação de bounds.
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -12,7 +12,6 @@ local _clockFn = nil
 local _rngFn = nil
 local _dbInstance = nil
 local _isReady = false
-local _flushLoopStarted = false
 
 local function getNow()
     if _clockFn then return _clockFn() end
@@ -67,6 +66,41 @@ local function getCommodityConfig(commodity)
     return Config.Broker.Commodities[commodity]
 end
 
+--- Resolve o multiplicador noturno reutilizando Config.Fence.NightBonus
+---@param hour number|nil
+---@return number
+local function resolveNightMultiplier(hour)
+    local nbCfg = Config.Fence and Config.Fence.NightBonus
+    if not nbCfg or not nbCfg.Enable then
+        return 1.00
+    end
+
+    local h = hour
+    if h == nil and _G.GetClockHours then
+        h = _G.GetClockHours()
+    end
+    if h == nil then
+        return 1.00
+    end
+
+    local startH = nbCfg.StartHour or 21
+    local endH = nbCfg.EndHour or 6
+    local mult = nbCfg.Multiplier or 1.30
+
+    local isNight = false
+    if startH > endH then
+        -- Janela overnight (ex: 21h às 6h)
+        isNight = (h >= startH or h < endH)
+    else
+        -- Janela intra-dia / normal (ex: 1h às 5h)
+        isNight = (h >= startH and h < endH)
+    end
+
+    return isNight and mult or 1.00
+end
+
+BrokerMarket.ResolveNightMultiplier = resolveNightMultiplier
+
 --- Inicializa o estado em memória para uma commodity se ainda não existir
 ---@param commodity string
 ---@param now integer|nil
@@ -84,7 +118,7 @@ local function ensureState(commodity, now)
     return _marketState[commodity]
 end
 
---- Informa se a engine de mercado foi inicializada e está pronta
+--- Informa se a engine de mercado foi inicializada e está pronta com DB saudável
 ---@return boolean
 function BrokerMarket.IsReady()
     return _isReady == true
@@ -282,22 +316,14 @@ function BrokerMarket.ResolvePrice(commodity, context)
         tierMult = multTable[tier] or 1.00
     end
 
-    -- Bônus Noturno
+    -- Bônus Noturno (Reutiliza Config.Fence.NightBonus)
     local nightMult = ctx.nightMultiplier
     if nightMult ~= nil then
         local sanitized, okNum = sanitizeNumber(nightMult, 1.00, 0.0, 5.0)
         if not okNum then return { ok = false, err = 'invalid_multipliers' } end
         nightMult = sanitized
     else
-        local h = ctx.hour
-        if h == nil and GetClockHours then
-            h = GetClockHours()
-        end
-        if h ~= nil and (h >= 22 or h < 6) then
-            nightMult = 1.30
-        else
-            nightMult = 1.00
-        end
+        nightMult = resolveNightMultiplier(ctx.hour)
     end
 
     -- Penalidade de Heat Policial
@@ -456,6 +482,7 @@ end
 -- ─────────────────────────────────────────────────────────────────────────────
 
 --- Carrega o snapshot persistido do banco de dados
+--- Fail-closed: DB ausente ou falha no SELECT resulta em isReady = false
 ---@param clockFn function|nil
 ---@param dbOverride table|nil
 ---@param rngFn function|nil
@@ -472,8 +499,14 @@ function BrokerMarket.Init(clockFn, dbOverride, rngFn)
         return false
     end
 
-    local t = getNow()
     local db = _dbInstance or _G.MySQL
+    if not db or not db.query or not db.query.await then
+        logDebug('BrokerMarket DB absent/invalid. Running in DEGRADED/UNAVAILABLE state.')
+        _isReady = false
+        return false
+    end
+
+    local t = getNow()
 
     if Config.Broker and Config.Broker.Commodities then
         for k, _ in pairs(Config.Broker.Commodities) do
@@ -486,28 +519,24 @@ function BrokerMarket.Init(clockFn, dbOverride, rngFn)
         end
     end
 
-    if db and db.query and db.query.await then
-        local ok, rows = pcall(function()
-            return db.query.await('SELECT `commodity`, `demand_index`, `recent_volume`, UNIX_TIMESTAMP(`last_recovery`) AS last_rec FROM `vp_chop_broker_market`')
-        end)
+    local ok, rows = pcall(function()
+        return db.query.await('SELECT `commodity`, `demand_index`, `recent_volume`, UNIX_TIMESTAMP(`last_recovery`) AS last_rec FROM `vp_chop_broker_market`')
+    end)
 
-        if ok and type(rows) == 'table' then
-            for _, row in ipairs(rows) do
-                if _marketState[row.commodity] then
-                    _marketState[row.commodity].demand = tonumber(row.demand_index) or 1.0000
-                    _marketState[row.commodity].recentVolume = tonumber(row.recent_volume) or 0
-                    _marketState[row.commodity].lastRecovery = tonumber(row.last_rec) or t
-                    _marketState[row.commodity].dirty = false
-                end
+    if ok and type(rows) == 'table' then
+        for _, row in ipairs(rows) do
+            if _marketState[row.commodity] then
+                _marketState[row.commodity].demand = tonumber(row.demand_index) or 1.0000
+                _marketState[row.commodity].recentVolume = tonumber(row.recent_volume) or 0
+                _marketState[row.commodity].lastRecovery = tonumber(row.last_rec) or t
+                _marketState[row.commodity].dirty = false
             end
-            _isReady = true
-        else
-            logDebug('BrokerMarket DB Init failed. Running in DEGRADED/UNAVAILABLE state.')
-            _isReady = false
-            return false
         end
-    else
         _isReady = true
+    else
+        logDebug('BrokerMarket DB Init SELECT query failed. Running in DEGRADED/UNAVAILABLE state.')
+        _isReady = false
+        return false
     end
 
     logDebug('BrokerMarket initialized successfully.')

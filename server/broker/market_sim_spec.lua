@@ -294,6 +294,52 @@ local function run()
     check('MARKET-READY-02 RecordSale falha closed em estado degradado (market_not_ready)', saleDegraded.ok == false and saleDegraded.err == 'market_not_ready')
     shouldFailQuery = false
 
+    -- ─── MARKET-READY-03: DB AUSENTE RESULTA EM FAIL-CLOSED DEGRADED ─────────
+    resetMarket()
+    local origMySQL = _G.MySQL
+    _G.MySQL = nil
+    local noDbInit = BM.Init(function() return virtualTime end, nil, function() return 0.5 end)
+    check('MARKET-READY-03 Init sem DB retorna false', noDbInit == false)
+    check('MARKET-READY-03 IsReady() sem DB é false', BM.IsReady() == false)
+    local noDbPrice = BM.ResolvePrice('metalscrap', {})
+    check('MARKET-READY-03 ResolvePrice sem DB falha com market_not_ready', noDbPrice.ok == false and noDbPrice.err == 'market_not_ready')
+    local noDbSale = BM.RecordSale('metalscrap', 1, virtualTime)
+    check('MARKET-READY-03 RecordSale sem DB falha com market_not_ready', noDbSale.ok == false and noDbSale.err == 'market_not_ready')
+    _G.MySQL = origMySQL
+    resetMarket()
+
+    -- ─── MARKET-NIGHT: PARIDADE COM CONFIG.FENCE.NIGHTBONUS ──────────────────
+    resetMarket()
+    -- MARKET-NIGHT-01: Config atual 21 -> 6 (overnight) com 1.30
+    Config.Fence.NightBonus = { Enable = true, StartHour = 21, EndHour = 6, Multiplier = 1.30 }
+    check('MARKET-NIGHT-01 20:59 retorna 1.0 (fora da janela)', math.abs(BM.ResolveNightMultiplier(20.99) - 1.00) < 0.0001)
+    check('MARKET-NIGHT-01 21:00 retorna 1.30 (início)', math.abs(BM.ResolveNightMultiplier(21.00) - 1.30) < 0.0001)
+    check('MARKET-NIGHT-01 23:00 retorna 1.30 (noite)', math.abs(BM.ResolveNightMultiplier(23.00) - 1.30) < 0.0001)
+    check('MARKET-NIGHT-01 02:00 retorna 1.30 (madrugada)', math.abs(BM.ResolveNightMultiplier(2.00) - 1.30) < 0.0001)
+    check('MARKET-NIGHT-01 05:59 retorna 1.30 (fim da madrugada)', math.abs(BM.ResolveNightMultiplier(5.99) - 1.30) < 0.0001)
+    check('MARKET-NIGHT-01 06:00 retorna 1.0 (amanhecer)', math.abs(BM.ResolveNightMultiplier(6.00) - 1.00) < 0.0001)
+
+    -- MARKET-NIGHT-02: Enable=false retorna 1.0
+    Config.Fence.NightBonus.Enable = false
+    check('MARKET-NIGHT-02 NightBonus desabilitado retorna 1.0 mesmo à noite (23h)', math.abs(BM.ResolveNightMultiplier(23.00) - 1.00) < 0.0001)
+    Config.Fence.NightBonus.Enable = true
+
+    -- MARKET-NIGHT-03: Config custom 23 -> 5 com multiplier 1.20
+    Config.Fence.NightBonus = { Enable = true, StartHour = 23, EndHour = 5, Multiplier = 1.20 }
+    check('MARKET-NIGHT-03 Custom 22h fora da janela retorna 1.0', math.abs(BM.ResolveNightMultiplier(22.00) - 1.00) < 0.0001)
+    check('MARKET-NIGHT-03 Custom 23h dentro da janela retorna 1.20', math.abs(BM.ResolveNightMultiplier(23.00) - 1.20) < 0.0001)
+    check('MARKET-NIGHT-03 Custom 04h dentro da janela retorna 1.20', math.abs(BM.ResolveNightMultiplier(4.00) - 1.20) < 0.0001)
+    check('MARKET-NIGHT-03 Custom 05h fora da janela retorna 1.0', math.abs(BM.ResolveNightMultiplier(5.00) - 1.00) < 0.0001)
+
+    -- MARKET-NIGHT-04: Janela não-overnight (intra-dia: ex: 1h às 5h)
+    Config.Fence.NightBonus = { Enable = true, StartHour = 1, EndHour = 5, Multiplier = 1.25 }
+    check('MARKET-NIGHT-04 Intra-dia 0h retorna 1.0', math.abs(BM.ResolveNightMultiplier(0.00) - 1.00) < 0.0001)
+    check('MARKET-NIGHT-04 Intra-dia 1h retorna 1.25', math.abs(BM.ResolveNightMultiplier(1.00) - 1.25) < 0.0001)
+    check('MARKET-NIGHT-04 Intra-dia 3h retorna 1.25', math.abs(BM.ResolveNightMultiplier(3.00) - 1.25) < 0.0001)
+    check('MARKET-NIGHT-04 Intra-dia 5h retorna 1.0', math.abs(BM.ResolveNightMultiplier(5.00) - 1.00) < 0.0001)
+    -- Restaura padrão
+    Config.Fence.NightBonus = { Enable = true, StartHour = 21, EndHour = 6, Multiplier = 1.30 }
+
     -- ─── CONFIG.BROKER.ENABLE == FALSE ───────────────────────────────────────
     resetMarket()
     Config.Broker.Enable = false

@@ -255,7 +255,12 @@ _G.Config = {
         XpOrderBonus = 80,
         TrustXpPerLevel = { [1] = 100, [2] = 300, [3] = 600, [4] = 1000 },
         WholeCarBasePayout = 8000,
-        NightBonus = { Enable = false },
+        NightBonus = {
+            Enable = true,
+            StartHour = 21,
+            EndHour = 6,
+            Multiplier = 1.3,
+        },
     },
     Progression = {
         FencePriceMult = { [1] = 1.0, [2] = 1.0, [3] = 1.0, [4] = 1.10 },
