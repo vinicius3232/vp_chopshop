@@ -1382,7 +1382,7 @@ lib.callback.register('vp_chopshop:broker:getNpcContext', function(src)
             status      = (trust >= 2),
             contracts   = (trust >= minContractTrust and contractsReady == true),
             legacyOrder = (trust >= 3),
-            deliverCar  = (trust >= 4),
+            deliverCar  = (trust >= 4 and (prog.tier or 1) >= 4),
         },
         brokerEnabled  = isBrokerEnabled,
         contractsReady = contractsReady,

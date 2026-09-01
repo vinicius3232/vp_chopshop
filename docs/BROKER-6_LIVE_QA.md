@@ -85,8 +85,13 @@
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-B07:** Jogador com Trust 4 possui acesso à Entrega de Veículo Inteiro (`deliverCar`).
-  - **Expected:** Opção de venda direta de carro ocupado ativa.
+- [ ] **QA-B07A:** Jogador com Trust 4 e Tier 3 no Broker Main Context.
+  - **Expected:** Opção `deliverCar` ausente no menu (`capabilities.deliverCar == false`).
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-B07B:** Jogador com Trust 4 e Tier 4 no Broker Main Context.
+  - **Expected:** Opção `deliverCar` presente e acessível (`capabilities.deliverCar == true`).
   - **Observed:**
   - **Evidence:**
 
@@ -301,12 +306,17 @@
 ## QA-G — DELIVERCAR (WHOLE STOLEN VEHICLE SALE)
 
 - [ ] **QA-G01:** Jogador com Trust < 4 tenta acionar entrega de veículo inteiro.
-  - **Expected:** Bloqueado pelo servidor com `err_trust_gate`.
+  - **Expected:** Bloqueado pelo servidor com `ok = false`, `err = 'no_trust'`, zero payout e zero mutação no cooldown.
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-G02:** Jogador com Trust 4 ao volante de veículo roubado solicita entrega.
-  - **Expected:** Veículo avaliado, valor creditado e entidade deletada com segurança.
+- [ ] **QA-G01B:** Jogador com Trust 4 e Tier < 4 tenta acionar entrega de veículo inteiro.
+  - **Expected:** Bloqueado pelo servidor com `ok = false`, `err = 'tier'`, zero payout e zero mutação no cooldown.
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-G02:** Jogador com Trust 4 e Tier 4 ao volante de veículo roubado elegível.
+  - **Expected:** Veículo avaliado, valor creditado e entidade deletada com segurança no fluxo normal de deliverCar.
   - **Observed:**
   - **Evidence:**
 
@@ -459,8 +469,18 @@
   - **Observed:**
   - **Evidence:**
 
-- [ ] **QA-J04:** Falha de pagamento na venda de pneus.
-  - **Expected:** Zero double payout; entitlement/storage segue semântica fail-closed homologada; nenhuma venda repetida cria dinheiro.
+- [ ] **QA-J04A:** Falha de pagamento na venda de pneus do caminhão (`TruckStorage`).
+  - **Expected:** Servidor retorna `err = 'payment'`; entitlements permanecem `STORED`; storage intacto; zero cash pago; zero pressão de mercado (`RecordSalesBatch`).
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-J04B:** Falha de pagamento na venda de pneus do inventário.
+  - **Expected:** Servidor retorna `err = 'payment'`; pneus removidos são restaurados ao inventário; zero cash; zero pressão de mercado.
+  - **Observed:**
+  - **Evidence:**
+
+- [ ] **QA-J04C:** Falha parcial de `CommitSold` ou falha de refund na venda de pneus.
+  - **Expected:** `TyreSaleQuarantine` ativada; próxima venda bloqueada com `transaction_locked`; zero possibilidade de pagamento duplicado.
   - **Observed:**
   - **Evidence:**
 

@@ -24,7 +24,7 @@ Uma peça física em estado `ISSUED` pode transicionar para **exatamente UM** de
 ### 4. StablePartIdentity Survives Runtime-ID Collision
 A identidade durável de uma peça (`stablePartIdentity`) é um identificador opaco server-generated, restart-stable para a integridade histórica da SAGA e independente do `entitlementId` efêmero em memória (`pe:<seq>`).
 $$\text{Formato:} \quad \texttt{spi:<bootNonce>:<timestamp>:<sequence>:<nonce>}$$
-Mesmo se o resource reiniciar e o contador em memória for resetado para `pe:1`, o `stablePartIdentity` impede qualquer colisão com transações históricas no journal persistente (`vp_chop_workshop_journal`).
+A `stablePartIdentity` não é uma identidade determinística recalculada a partir do veículo. Ela é gerada em runtime no momento da emissão e persistida de forma durável no snapshot/journal (`vp_chop_workshop_journal`), permitindo reconhecer historicamente aquela mesma peça mesmo que o resource reinicie (com novo boot nonce) e recupere transações pendentes.
 
 ### 5. Workshop COMMITTING Durable Before Remote Commit
 No protocolo distribuído de SAGA com workshops externos, o estado `COMMITTING` **deve** ser persistido de forma durável no banco de dados (`vp_chop_workshop_journal`) **antes** de efetuar a chamada remota de liquidação (`CommitPurchase`). Se o resource cair imediatamente antes ou durante a chamada remota, o reconciliador de boot possui registro inequívoco para verificar o status junto ao provider.
@@ -36,10 +36,13 @@ Durante a reconciliação de transações pendentes ou após reinicialização d
 O bônus financeiro de conclusão de contrato (`bonusCash`) é concedido **estritamente uma única vez**. A concorrência é isolada por mutex em runtime por `contractId` e por um `UPDATE` condicional atômico no banco de dados, onde `affectedRows == 1` determina o vencedor inequívoco da quota final e do bônus decorrente.
 
 ### 8. Payment Failure Cannot Replay Payout (Fail-Closed)
-Falhas na entrega de dinheiro (ex.: falha no framework de economia) seguem o princípio de que **falha de pagamento não pode gerar duplicação ou replay de dinheiro**. Isso não implica em rollback universal em todos os domínios:
-- **Broker (Peça Física):** A peça permanece `CONSUMED` com `terminalConsumed = true`, zero payout em dinheiro, zero retry econômico e zero registro de pressão de venda (`RecordSalesBatch`).
-- **Broker (Contratos):** O `entitlement` permanece `CONSUMED` e a quota consumida, zero crédito em dinheiro, zero Trust XP/evento e retry rejeitado.
-- **Legacy Encomendas (`fulfillOrder`) & Pneus:** Seguem semântica terminalizada onde nenhuma tentativa repetida gera crédito financeiro duplicado.
+Falhas na entrega de dinheiro (ex.: falha no framework de economia) seguem o princípio de que **falha de pagamento não pode gerar duplicação ou replay de dinheiro**. O tratamento é estritamente específico por domínio:
+- **Broker (Peça Física nos Braços):** A peça permanece `CONSUMED` com `terminalConsumed = true`, zero payout em dinheiro, zero retry econômico e zero registro de pressão de venda (`RecordSalesBatch`).
+- **Broker (Contratos Pessoais / Globais):** O `entitlement` permanece `CONSUMED` e a quota consumida, zero crédito em dinheiro, zero Trust XP ou evento, e retry rejeitado sem novo pagamento.
+- **Legacy Encomendas (`fulfillOrder`):** Operação terminalizada conforme comportamento existente; payment failure não permite replay de payout nem concessão de XP.
+- **Pneus — Caminhão (`TruckStorage`):** Se `BridgeAddCash` falha antes de `CommitSold`, os entitlements continuam `STORED`, o storage é preservado, zero pressão de mercado (`RecordSalesBatch`); uma tentativa futura legítima pode ocorrer porque nenhum pagamento foi efetuado.
+- **Pneus — Inventário:** Se o pagamento falha, os itens removidos são restaurados ao inventário do jogador, com zero pressão de mercado e zero dinheiro creditado.
+- **Pneus — Falha Parcial de Commit / Refund:** Ativação de `TyreSaleQuarantine`, com bloqueio de vendas subsequentes (`transaction_locked`), impedindo qualquer criação indevida de dinheiro ou pagamento duplicado.
 
 ### 9. Market General Sales and Contract Sinks Remain Strictly Separate
 - **Venda Geral no Broker:** Executa `BrokerMarket.RecordSalesBatch` / `RecordSale`, aplicando pressão sobre o `demand_index` da commodity correspondente.

@@ -153,9 +153,12 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
             TaskStartScenarioInPlace(ent, locCfg.scenario, 0, true)
         end
 
-        -- Buscar nível de trust (callback separado — getProgression NÃO retorna trust)
+        -- Buscar nível de trust e progressão (callbacks de setup inicial)
         local ok, trust = pcall(lib.callback.await, 'vp_chopshop:fence:getTrust', false)
         trust = (ok and type(trust) == 'number') and trust or 0
+
+        local pOk, prog = pcall(lib.callback.await, 'vp_chopshop:getProgression', false)
+        local tier = (pOk and type(prog) == 'table' and prog.tier) or 1
 
         -- Blip baseado em trust
         local locs = Config.Fence and Config.Fence.Locations
@@ -183,7 +186,7 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
             end,
         }
 
-        if trust >= 4 then
+        if trust >= 4 and tier >= 4 then
             options[#options + 1] = {
                 name        = 'vp_fence_deliver_car',
                 label       = L('fence_target_deliver_car'),
