@@ -74,6 +74,14 @@ local function doForge()
     end
 end
 
+function VPChopSerialDoScratch()
+    doScratch()
+end
+
+function VPChopSerialDoForge()
+    doForge()
+end
+
 --- [SERIAL] Devolve as opções de ox_target da bancada relativas à série. Chamada por
 --- client/bench.lua (VPChopUpsertBench) ao montar os targets. canInteract consulta o
 --- servidor (benchAvailability) para só mostrar quando há peça elegível + tier suficiente.

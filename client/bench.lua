@@ -1,3 +1,8 @@
+-- client/bench.lua
+-- Bancada de desmanche / crafting: processamento de peças carregadas, forja de placas,
+-- gerenciamento de séries e fabricação de insumos.
+-- Expõe: VPChopUpsertBench(bench), VPChopRemoveBench(id), VPChopForgeFakePlate(benchId, plate)
+
 BenchEntities = BenchEntities or {}
 
 ---@param recipe { labelKey?: string, label?: string }
@@ -16,15 +21,12 @@ local function clearBench(id)
     BenchEntities[id] = nil
 end
 
--- [GAMEPLAY unificação] Função deliverPartToBench REMOVIDA.
--- A recompensa da Fase 1 agora cai no inventário na hora do desmanche; a bancada não
--- recebe mais peças. O carry prop (visual e necessário pro fluxo de pneu→truck) continua
--- spawnando após o chop — só o REWARD deixou de depender da bancada.
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 1. FORJA DE PLACA FALSA
+-- ─────────────────────────────────────────────────────────────────────────────
 
--- [FASE2 placas] Forja de placa falsa: barra de progresso + callback dedicado.
--- benchId é cosmético aqui (servidor valida proximidade de QUALQUER bancada); mantido por clareza.
 ---@param benchId integer
----@param sourcePlate string|nil  placa-fonte escolhida (metadata da stolen_plate)
+---@param sourcePlate string|nil Placa-fonte escolhida (metadata da stolen_plate)
 function VPChopForgeFakePlate(benchId, sourcePlate)
     local ok = lib.progressBar({
         duration = 8000,
@@ -53,6 +55,48 @@ function VPChopForgeFakePlate(benchId, sourcePlate)
     end
 end
 
+local function openFakePlatePicker(benchId)
+    local slots = exports.ox_inventory:Search('slots', 'stolen_plate')
+    if type(slots) ~= 'table' or #slots == 0 then
+        VPChopNotify(L('fake_plate_forge_no_source'), 'error')
+        return
+    end
+
+    if #slots == 1 then
+        local sourcePlate = slots[1].metadata and slots[1].metadata.plate
+        VPChopForgeFakePlate(benchId, sourcePlate)
+        return
+    end
+
+    local seen, menuOpts = {}, {}
+    for i = 1, #slots do
+        local pl = slots[i].metadata and slots[i].metadata.plate
+        if pl and not seen[pl] then
+            seen[pl] = true
+            menuOpts[#menuOpts + 1] = {
+                title = ('Placa: %s'):format(pl),
+                description = 'Usar esta placa roubada como matriz',
+                icon = 'fa-solid fa-car',
+                onSelect = function()
+                    VPChopForgeFakePlate(benchId, pl)
+                end,
+            }
+        end
+    end
+
+    lib.registerContext({
+        id = 'vp_chop_forge_fake_pick',
+        title = L('fake_plate_forge_pick_title'),
+        menu = 'vp_chop_bench_main_' .. tostring(benchId),
+        options = menuOpts,
+    })
+    lib.showContext('vp_chop_forge_fake_pick')
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 2. FABRICAÇÃO / CRAFTING
+-- ─────────────────────────────────────────────────────────────────────────────
+
 local function craftOnBench(benchId, recipeIndex, recipe)
     local ok = lib.progressBar({
         duration = recipe.duration or 8000,
@@ -74,6 +118,77 @@ local function craftOnBench(benchId, recipeIndex, recipe)
         )
     end
 end
+
+local function openBenchCraftingMenu(benchId)
+    local menuOpts = {}
+    for index, recipe in ipairs(Config.BenchRecipes or {}) do
+        local idx = index
+        local inputsDesc = {}
+        if recipe.inputs then
+            for item, count in pairs(recipe.inputs) do
+                inputsDesc[#inputsDesc + 1] = ('%dx %s'):format(count, item)
+            end
+        end
+
+        menuOpts[#menuOpts + 1] = {
+            title = benchRecipeLabel(recipe),
+            description = #inputsDesc > 0 and ('Requer: %s'):format(table.concat(inputsDesc, ', ')) or nil,
+            icon = 'fa-solid fa-hammer',
+            onSelect = function()
+                craftOnBench(benchId, idx, recipe)
+            end,
+        }
+    end
+
+    lib.registerContext({
+        id = 'vp_chop_bench_crafting_' .. tostring(benchId),
+        title = L('bench_menu_crafting_title') or 'Fabricar Ferramentas & Materiais',
+        menu = 'vp_chop_bench_main_' .. tostring(benchId),
+        options = menuOpts,
+    })
+    lib.showContext('vp_chop_bench_crafting_' .. tostring(benchId))
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3. GERENCIAMENTO DE SÉRIES (INVENTÁRIO)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+local function openSerialManagementMenu(benchId)
+    local menuOpts = {
+        {
+            title = L('serial_scratch_label'),
+            description = 'Raspar e descaracterizar números de série de peças do inventário',
+            icon = 'fa-solid fa-eraser',
+            onSelect = function()
+                if VPChopSerialDoScratch then
+                    VPChopSerialDoScratch()
+                end
+            end,
+        },
+        {
+            title = L('serial_forge_label'),
+            description = 'Remarcar peças com novo número de série legítimo forjado',
+            icon = 'fa-solid fa-stamp',
+            onSelect = function()
+                if VPChopSerialDoForge then
+                    VPChopSerialDoForge()
+                end
+            end,
+        },
+    }
+
+    lib.registerContext({
+        id = 'vp_chop_bench_serial_' .. tostring(benchId),
+        title = L('serial_menu_title') or 'Gerenciamento de Séries (Inventário)',
+        menu = 'vp_chop_bench_main_' .. tostring(benchId),
+        options = menuOpts,
+    })
+    lib.showContext('vp_chop_bench_serial_' .. tostring(benchId))
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 4. PROCESSAMENTO DE PEÇA FÍSICA CARREGADA
+-- ─────────────────────────────────────────────────────────────────────────────
 
 local function executeBenchPartMode(benchId, mode)
     if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
@@ -118,7 +233,7 @@ local function doProcessCarriedPartOnBench(benchId)
         return
     end
 
-    -- Menu com as 3 opções para peças de lataria e motor
+    -- Menu unificado com as 3 opções claras para peças de lataria e motor
     lib.registerContext({
         id = 'vp_chop_bench_part_action_menu',
         title = L('bench_process_part'),
@@ -152,6 +267,100 @@ local function doProcessCarriedPartOnBench(benchId)
     lib.showContext('vp_chop_bench_part_action_menu')
 end
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5. MENU PRINCIPAL UNIFICADO DA BANCADA
+-- ─────────────────────────────────────────────────────────────────────────────
+
+local function openBenchMainMenu(benchId)
+    local options = {}
+
+    -- Destaque se estiver carregando peça física
+    if VPChopCarryingPart and VPChopCarryingPart.isPart then
+        options[#options + 1] = {
+            title = L('bench_process_part'),
+            description = 'Desmanchar, limpar serial ou guardar a peça física que você está carregando',
+            icon = 'fa-solid fa-recycle',
+            iconColor = '#48bb78',
+            onSelect = function()
+                doProcessCarriedPartOnBench(benchId)
+            end,
+        }
+    end
+
+    -- Fabricação / Crafting
+    if Config.BenchRecipes and #Config.BenchRecipes > 0 then
+        options[#options + 1] = {
+            title = L('bench_menu_crafting_title') or 'Fabricar Ferramentas & Materiais',
+            description = L('bench_menu_crafting_desc') or 'Compactar sucata, separar cobre, montar kits e ferramentas',
+            icon = 'fa-solid fa-gears',
+            onSelect = function()
+                openBenchCraftingMenu(benchId)
+            end,
+        }
+    end
+
+    -- Forja de Placas Falsas
+    if Config.Plates and Config.Plates.Enable then
+        local count = exports.ox_inventory:Search('count', 'stolen_plate') or 0
+        if count and count > 0 then
+            options[#options + 1] = {
+                title = L('fake_plate_forge_label'),
+                description = 'Forjar placa clonada a partir de uma placa roubada do inventário',
+                icon = 'fa-solid fa-id-card-clip',
+                onSelect = function()
+                    openFakePlatePicker(benchId)
+                end,
+            }
+        end
+    end
+
+    -- Gerenciamento de Séries (peças de inventário)
+    if Config.PartSerial and Config.PartSerial.Enable then
+        local countParts = exports.ox_inventory:Search('count', 'car_parts') or 0
+        if countParts and countParts > 0 then
+            options[#options + 1] = {
+                title = L('serial_menu_title') or 'Gerenciamento de Séries (Inventário)',
+                description = L('serial_menu_desc') or 'Raspar ou forjar números de série em peças do inventário',
+                icon = 'fa-solid fa-stamp',
+                onSelect = function()
+                    openSerialManagementMenu(benchId)
+                end,
+            }
+        end
+    end
+
+    -- Recolher Bancada
+    options[#options + 1] = {
+        title = L('target_pickup_bench'),
+        description = 'Desmontar e recolher esta bancada de volta para o inventário',
+        icon = 'fa-solid fa-hand',
+        onSelect = function()
+            local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:pickupBench', false, benchId)
+            if not cbOk then res = nil end
+            if res and res.ok then
+                VPChopNotify(L('notify_installed'), 'success')
+            else
+                local errKey = ({
+                    not_owner = 'err_pickup_not_owner',
+                    has_parts = 'err_pickup_has_parts',
+                })[(res and res.err) or ''] or 'notify_generic_error'
+                VPChopNotify(L(errKey), 'error')
+            end
+        end,
+    }
+
+    lib.registerContext({
+        id = 'vp_chop_bench_main_' .. tostring(benchId),
+        title = L('bench_menu_title') or 'Bancada de Trabalho',
+        options = options,
+    })
+    lib.showContext('vp_chop_bench_main_' .. tostring(benchId))
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 6. OX_TARGET REGISTRATION
+-- ─────────────────────────────────────────────────────────────────────────────
+
 ---@param bench { id: integer, x: number, y: number, z: number, heading: number }
 function VPChopUpsertBench(bench)
     clearBench(bench.id)
@@ -174,7 +383,7 @@ function VPChopUpsertBench(bench)
 
     local options = {}
 
-    -- [PHYSICAL CARRY] Desmanchar peça que o jogador está carregando nos braços
+    -- 1. [PHYSICAL CARRY] Desmanchar peça que o jogador está carregando nos braços
     options[#options + 1] = {
         name = ('vp_chop_bench_process_part_%s'):format(bench.id),
         label = L('bench_process_part'),
@@ -189,86 +398,21 @@ function VPChopUpsertBench(bench)
         end,
     }
 
-    for index, recipe in ipairs(Config.BenchRecipes) do
-        local idx = index
-        options[#options + 1] = {
-            name = ('vp_chop_bench_%s_%s'):format(bench.id, idx),
-            label = benchRecipeLabel(recipe),
-            icon = 'fa-solid fa-gears',
-            distance = Config.InteractDistance,
-            onSelect = function()
-                craftOnBench(bench.id, idx, recipe)
-            end,
-        }
-    end
+    -- 2. Menu Principal Unificado da Bancada
+    options[#options + 1] = {
+        name = ('vp_chop_bench_menu_%s'):format(bench.id),
+        label = L('bench_menu_title') or 'Acessar Bancada',
+        icon = 'fa-solid fa-toolbox',
+        distance = Config.InteractDistance,
+        canInteract = function()
+            return GetVehiclePedIsIn(cache.ped, false) == 0
+        end,
+        onSelect = function()
+            openBenchMainMenu(bench.id)
+        end,
+    }
 
-    -- [FASE2 placas] Forjar placa falsa — fluxo DEDICADO (não usa Config.BenchRecipes porque
-    -- o output herda a placa do `stolen_plate` específico). Só aparece se a feature está on e
-    -- o jogador carrega ao menos uma placa roubada. A verdade (tier, proximidade, insumos,
-    -- metadata, cooldown) é toda validada no servidor (server/plates.lua).
-    if Config.Plates and Config.Plates.Enable then
-        options[#options + 1] = {
-            name = ('vp_chop_bench_forge_fake_%s'):format(bench.id),
-            label = L('fake_plate_forge_label'),
-            icon = 'fa-solid fa-id-card-clip',
-            distance = Config.InteractDistance,
-            canInteract = function()
-                if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
-                -- UX: só oferece se houver placa roubada no inventário (servidor revalida)
-                local count = exports.ox_inventory:Search('count', 'stolen_plate') or 0
-                return count and count > 0
-            end,
-            onSelect = function()
-                -- Se houver várias placas roubadas, deixar o jogador escolher a placa-fonte.
-                local slots = exports.ox_inventory:Search('slots', 'stolen_plate')
-                local sourcePlate = nil
-                if type(slots) == 'table' and #slots > 0 then
-                    if #slots == 1 then
-                        sourcePlate = slots[1].metadata and slots[1].metadata.plate
-                    else
-                        -- Menu de seleção (ox_lib) entre as placas disponíveis.
-                        local seen, menuOpts = {}, {}
-                        for i = 1, #slots do
-                            local pl = slots[i].metadata and slots[i].metadata.plate
-                            if pl and not seen[pl] then
-                                seen[pl] = true
-                                menuOpts[#menuOpts + 1] = {
-                                    title = pl,
-                                    icon = 'fa-solid fa-car',
-                                    onSelect = function()
-                                        VPChopForgeFakePlate(bench.id, pl)
-                                    end,
-                                }
-                            end
-                        end
-                        lib.registerContext({
-                            id = 'vp_chop_forge_fake_pick',
-                            title = L('fake_plate_forge_pick_title'),
-                            options = menuOpts,
-                        })
-                        lib.showContext('vp_chop_forge_fake_pick')
-                        return
-                    end
-                end
-                VPChopForgeFakePlate(bench.id, sourcePlate)
-            end,
-        }
-    end
-
-    -- [SERIAL] Opções de série na bancada: "Riscar série" / "Forjar série". Só aparecem
-    -- quando o servidor confirma elegibilidade (peça elegível + tier). A verdade está nos
-    -- callbacks server (vp_chopshop:serial:scratch / :forge). VPChopSerialBenchOptions é
-    -- definida em client/partserial.lua (carregado antes de main.lua → bench).
-    if Config.PartSerial and Config.PartSerial.Enable and VPChopSerialBenchOptions then
-        for _, opt in ipairs(VPChopSerialBenchOptions(bench.id)) do
-            options[#options + 1] = opt
-        end
-    end
-
-    -- [GAMEPLAY unificação] Target "entregar peça" REMOVIDO da bancada.
-    -- A recompensa agora é imediata no desmanche; a bancada só faz craft (recipes acima)
-    -- e pickup (abaixo). O fluxo de pneu→truck→fence NÃO usa a bancada e segue intacto.
-
+    -- 3. Recolher Bancada (Acesso direto no target)
     options[#options + 1] = {
         name = ('vp_chop_bench_pickup_%s'):format(bench.id),
         label = L('target_pickup_bench'),
@@ -283,10 +427,11 @@ function VPChopUpsertBench(bench)
             if res and res.ok then
                 VPChopNotify(L('notify_installed'), 'success')
             else
-                VPChopNotify(
-                    (res and res.err) and L('notify_chop_failed_fmt', VPChopLocaleErr(res.err)) or L('notify_generic_error'),
-                    'error'
-                )
+                local errKey = ({
+                    not_owner = 'err_pickup_not_owner',
+                    has_parts = 'err_pickup_has_parts',
+                })[(res and res.err) or ''] or 'notify_generic_error'
+                VPChopNotify(L(errKey), 'error')
             end
         end,
     }
