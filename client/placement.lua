@@ -27,7 +27,7 @@ end
 ---@param callbackName string
 ---@return boolean
 local function ghostPlace(modelHash, callbackName)
-    local hash = resolveModel(modelHash, 'prop_gas_tank_01a')
+    local hash = resolveModel(modelHash, 'tr_int1_smod_compressor_03')
     local loaded = lib.requestModel(hash, 8000)
     if not loaded then
         VPChopNotify(L('notify_model_unavailable'), 'error')

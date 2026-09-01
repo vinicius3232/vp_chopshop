@@ -21,7 +21,7 @@ end
 function VPChopUpsertWelder(welder)
     clearWelder(welder.id)
     CreateThread(function()
-        local hash = resolveModel(Config.WelderModel, 'prop_gas_tank_01a')
+        local hash = resolveModel(Config.WelderModel, 'tr_int1_smod_compressor_03')
         lib.requestModel(hash, 8000)
 
         local x, y, z = welder.x, welder.y, welder.z
