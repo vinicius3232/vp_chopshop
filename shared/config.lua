@@ -1314,4 +1314,69 @@ Config.Broker = {
             glass   = true,
         },
     },
+
+    Contracts = {
+        Enable = true,
+        MinTrust = 3,            -- Gate padrão para contratos especiais / pessoais (alinhado a ordens especiais)
+        GlobalSlots = 3,         -- Quantidade de janelas públicas simultâneas
+        PersonalSlots = 3,       -- Máximo de contratos pessoais ativos por jogador
+        GlobalTTL = 7200,        -- 2h de duração para contratos globais
+        PersonalTTL = 3600,      -- 1h de duração para contratos pessoais
+        RewardMultMin = 1.05,    -- Multiplicador mínimo de recompensa (1.05x)
+        RewardMultMax = 1.80,    -- Multiplicador máximo de recompensa (1.80x)
+        BonusCashMax = 15000,    -- Bônus máximo de conclusão de contrato
+        HighValueTargets = {
+            adv_engine          = true,
+            catalytic_converter = true,
+        },
+        VehicleClasses = {
+            [0]  = 'compacts',
+            [1]  = 'sedans',
+            [2]  = 'suvs',
+            [3]  = 'coupes',
+            [4]  = 'muscle',
+            [5]  = 'sports_classics',
+            [6]  = 'sports',
+            [7]  = 'super',
+            [8]  = 'motorcycles',
+            [9]  = 'offroad',
+            [10] = 'industrial',
+            [11] = 'utility',
+            [12] = 'vans',
+            [13] = 'cycles',
+            [14] = 'boats',
+            [15] = 'helicopters',
+            [16] = 'planes',
+            [17] = 'service',
+            [18] = 'emergency',
+            [19] = 'military',
+            [20] = 'commercial',
+            [21] = 'trains',
+            [22] = 'open_wheel',
+        },
+        Pools = {
+            part_type = {
+                { key = 'adv_engine', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+                { key = 'catalytic_converter', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 1800 },
+                { key = 'body_panel', minTrust = 1, minQty = 2, maxQty = 6, mult = 1.15, bonus = 1000 },
+                { key = 'tyre', minTrust = 1, minQty = 4, maxQty = 8, mult = 1.15, bonus = 1200 },
+            },
+            model = {
+                { key = 'sultan', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.35, bonus = 3000 },
+                { key = 'bison', minTrust = 1, minQty = 1, maxQty = 2, mult = 1.20, bonus = 2000 },
+                { key = 'baller', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.25, bonus = 2200 },
+                { key = 'banshee', minTrust = 3, minQty = 1, maxQty = 1, mult = 1.40, bonus = 4000 },
+            },
+            class = {
+                { key = 'sports', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.30, bonus = 3000 },
+                { key = 'suvs', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 2000 },
+                { key = 'muscle', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+                { key = 'coupes', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.15, bonus = 1800 },
+            },
+            high_value = {
+                { key = 'adv_engine', minTrust = 3, minQty = 1, maxQty = 2, mult = 1.50, bonus = 5000 },
+                { key = 'catalytic_converter', minTrust = 3, minQty = 2, maxQty = 3, mult = 1.45, bonus = 4500 },
+            },
+        },
+    },
 }

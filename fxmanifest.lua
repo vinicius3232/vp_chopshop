@@ -121,6 +121,9 @@ server_scripts {
     -- [v1.17 BROKER-1] Dynamic Broker Market Engine & Sim
     'server/broker/market.lua',
     'server/broker/market_sim_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
+    -- [v1.17 BROKER-3] Contracts & High-Demand Lists Domain
+    'server/broker/contracts.lua',
+    'server/broker/contracts_spec.lua',   -- self-gated (vp_chopshop_selftest 1)
     -- [SPIKE PR-I] self-test dos registries (shared/registry/*.lua). Self-gated.
     'shared/registry/registry_spec.lua',
     'server/cooldown.lua',

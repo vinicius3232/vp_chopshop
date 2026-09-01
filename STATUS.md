@@ -3,7 +3,7 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-01
-**Branch de integração:** `feat/v1.17-broker-2-fence-integration` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `c9778ef`)
+**Branch de trabalho:** `feat/v1.17-broker-3-contracts-demand-lists` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `a369e32`)
 **`main`:** `v1.14.3`
 **Harness:** `lua tools/run_spec.lua .` → **1285 PASS / 0 FAIL / 1285 asserts**
 
@@ -23,14 +23,8 @@ Stack UX & Gameplay v1.16:              ✅ HOMOLOGADO & MERGED   (#40)
 v1.17 Chop Broker, Dynamic Market & Workshop Economy:
 BROKER-0   — Architecture Frozen & Canonical Design ✅ CONCLUÍDO (Docs)
 BROKER-1.2 — Final Parity & Fail-Closed Boot Engine ✅ HOMOLOGADO & MERGED (PR #42)
-BROKER-2.1 — Concurrency, Time & Provenance         ✅ FINAL CODE READY (PR #43)
-              Hardening
-             (Tyre market lock ownership & non-leak on busy/early-returns,
-              Night bonus canonical game clock via GetClockHours(),
-              PartEntitlement.CaptureVehicleProvenance helper & MDT fallback,
-              Catalytic Trust XP parity removal, real post-pay circuit breaker,
-              1285 PASS @ zero regressions)
-BROKER-3   — Contracts & High-Demand Lists          ⏸
+BROKER-2.1 — Fence Integration & Dynamic Payouts   ✅ HOMOLOGADO & MERGED (PR #43, merge SHA a369e32)
+BROKER-3   — Contracts & High-Demand Lists          🚧 IN PROGRESS (feat/v1.17-broker-3-contracts-demand-lists)
 BROKER-4   — WorkshopBridge & SAGA Journal          ⏸
 BROKER-5   — NPC Ambient Speech & Context UI        ⏸
 BROKER-6   — Live QA & Final Release Gate           ⏸

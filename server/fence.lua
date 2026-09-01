@@ -1325,6 +1325,190 @@ lib.callback.register('vp_chopshop:fence:fulfillOrder', function(src, orderId)
     return { ok=true, total=total }
 end)
 
+-- ─── [v1.17 BROKER-3] Contratos & Janelas de Alta Demanda Callbacks ───────────
+
+-- Obter contratos disponíveis (globais + pessoais do jogador)
+lib.callback.register('vp_chopshop:broker:getContracts', function(src)
+    if not IsValidSource(src) then return { ok = false, err = 'invalid_source' } end
+    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+
+    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
+    if loc and loc.coords and not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
+        return { ok = false, err = 'distance' }
+    end
+
+    if not BrokerContracts or not BrokerContracts.IsReady() then
+        return { ok = false, err = 'contracts_not_ready' }
+    end
+
+    local trust = VPChopFenceGetTrust(src)
+    if trust < 1 then return { ok = false, err = 'no_trust' } end
+
+    local playerKey = ServerChopPlayerKey(src)
+    local contracts = BrokerContracts.GetAvailable(playerKey, trust)
+    return { ok = true, contracts = contracts }
+end)
+
+-- Aceitar contrato pessoal (AVAILABLE -> ACCEPTED)
+lib.callback.register('vp_chopshop:broker:acceptContract', function(src, contractId)
+    if not IsValidSource(src) then return { ok = false, err = 'invalid_source' } end
+    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+
+    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
+    if loc and loc.coords and not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
+        return { ok = false, err = 'distance' }
+    end
+
+    if not BrokerContracts or not BrokerContracts.IsReady() then
+        return { ok = false, err = 'contracts_not_ready' }
+    end
+
+    local cId = tonumber(contractId)
+    if not cId then return { ok = false, err = 'invalid_contract' } end
+
+    local trust = VPChopFenceGetTrust(src)
+    if trust < 1 then return { ok = false, err = 'no_trust' } end
+
+    local playerKey = ServerChopPlayerKey(src)
+    local res = BrokerContracts.Accept(cId, playerKey, trust)
+    return res
+end)
+
+-- Cumprir contrato entregando peça com PartEntitlement
+lib.callback.register('vp_chopshop:broker:fulfillContract', function(src, contractId, entitlementId)
+    if not IsValidSource(src) then return { ok = false, err = 'invalid_source' } end
+    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+
+    local loc = VPChopFenceCurrentLocation and VPChopFenceCurrentLocation()
+    if loc and loc.coords and not ValidatePlayerNearCoords(src, loc.coords, 6.0) then
+        return { ok = false, err = 'distance' }
+    end
+
+    if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(src, 'fulfillContract', 400) then
+        return { ok = false, err = 'cooldown' }
+    end
+
+    if not BrokerContracts or not BrokerContracts.IsReady() then
+        return { ok = false, err = 'contracts_not_ready' }
+    end
+    if not BrokerMarket or not BrokerMarket.IsReady() then
+        return { ok = false, err = 'market_not_ready' }
+    end
+    if BrokerMarket.IsIntegrityLocked and BrokerMarket.IsIntegrityLocked() then
+        return { ok = false, err = 'market_integrity_locked' }
+    end
+
+    local cId = tonumber(contractId)
+    if not cId then return { ok = false, err = 'invalid_contract' } end
+
+    local entId = tostring(entitlementId or '')
+    if entId == '' then return { ok = false, err = 'invalid_entitlement' } end
+
+    local trust = VPChopFenceGetTrust(src)
+    if trust < 1 then return { ok = false, err = 'no_trust' } end
+
+    local prog = VPChopGetProgression(src)
+    local tier = prog and prog.tier or 1
+    local playerKey = ServerChopPlayerKey(src)
+    local now = BrokerContracts and BrokerContracts.GetNow and BrokerContracts.GetNow() or os.time()
+
+    -- 1. Carregar contrato
+    local contract = BrokerContracts.Get(cId)
+    if not contract then return { ok = false, err = 'not_found' } end
+
+    if contract.expiresAt and contract.expiresAt <= now then
+        return { ok = false, err = 'contract_expired' }
+    end
+    if contract.playerKey and contract.playerKey ~= playerKey then
+        return { ok = false, err = 'owner_mismatch' }
+    end
+    if contract.minTrust > trust then
+        return { ok = false, err = 'trust_gate' }
+    end
+    if contract.remaining <= 0 or contract.state == 'COMPLETED' then
+        return { ok = false, err = 'contract_fulfilled' }
+    end
+    if contract.state == 'EXPIRED' then
+        return { ok = false, err = 'contract_expired' }
+    end
+
+    -- 2. Validar entitlement
+    local okVal, entOrErr = PartEntitlement.Validate(entId, src)
+    if not okVal then
+        return { ok = false, err = entOrErr }
+    end
+
+    -- 3. Match server-authoritative
+    local matched, matchCommodityOrErr = BrokerContracts.Match(contract, entOrErr)
+    if not matched then
+        return { ok = false, err = matchCommodityOrErr }
+    end
+    local commodity = matchCommodityOrErr
+
+    -- 4. Calcular cotação base via BrokerMarket (sem saturação de volume)
+    local heatMult = 1.0
+    if entOrErr.provenance and entOrErr.provenance.realPlate and _G.VPChopHeatGetPriceMult then
+        heatMult = _G.VPChopHeatGetPriceMult(entOrErr.provenance.realPlate)
+    end
+    if heatMult <= 0.0 then
+        return { ok = false, err = 'heat_blocked' }
+    end
+
+    local quote = BrokerMarket.ResolvePrice(commodity, {
+        trustLevel      = trust,
+        progressionTier = tier,
+        heatMultiplier  = heatMult,
+        jitter          = 0.0,
+    })
+    if not quote or quote.blocked or quote.unitPrice <= 0 then
+        return { ok = false, err = quote and quote.reason or 'price_blocked' }
+    end
+
+    local rewardMult = math.max(1.0, math.min(2.5, tonumber(contract.rewardMult) or 1.0))
+    local unitPayout = math.floor(quote.unitPrice * rewardMult)
+
+    -- 5. Reserva atômica no banco de dados (remaining decrement)
+    local resReserve = BrokerContracts.ReserveFulfillment(cId, playerKey, trust)
+    if not resReserve.ok then
+        return { ok = false, err = resReserve.err }
+    end
+
+    local appliesBonus = (resReserve.completed == true) and (contract.bonusCash > 0)
+    local bonusCash = appliesBonus and contract.bonusCash or 0
+    local totalPayout = unitPayout + bonusCash
+
+    -- 6. Consumir atômico da peça no PartEntitlement
+    local resConsume = PartEntitlement.Consume(entId, src, 'broker_contract_' .. tostring(cId), entOrErr.partKey)
+    if not resConsume.ok then
+        BrokerContracts.CompensateReservation(cId, 1)
+        return { ok = false, err = resConsume.err }
+    end
+
+    -- 7. Pagamento financeiro (BridgeAddCash)
+    local paid = BridgeAddCash(src, totalPayout, 'chopshop_broker_contract')
+    if not paid then
+        print(('[vp_chopshop][fence:fulfillContract] CRITICAL: falha no BridgeAddCash — playerKey=%s, contractId=%s, entitlementId=%s, amount=$%d, operation=broker_contract'):format(
+            tostring(playerKey), tostring(cId), tostring(entId), totalPayout))
+        -- Fail-closed: quota permanece consumida, peça permanece CONSUMED, ZERO refund, ZERO retry
+        return { ok = false, err = 'payment_failed', terminalConsumed = true }
+    end
+
+    -- 8. Sucesso: Trust XP & Evento
+    local xpBonus = (Config.Fence and Config.Fence.XpOrderBonus) or 80
+    addTrustXp(src, xpBonus)
+    TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, { [commodity] = 1 }, totalPayout, 'contract')
+
+    return {
+        ok         = true,
+        payout     = totalPayout,
+        unitPayout = unitPayout,
+        bonusCash  = bonusCash,
+        completed  = resReserve.completed,
+        remaining  = resReserve.remaining,
+        commodity  = commodity,
+    }
+end)
+
 -- Drop de fence_referral: lógica implementada diretamente em ambushSpawnOne em server/ambush.lua
 -- (Task 8.2 adiciona a thread de verificação de morte do ped lá)
 
@@ -1354,6 +1538,9 @@ if GetConvar('vp_chopshop_selftest', '0') == '1' then
         end,
         clearQuarantine = function(key)
             if key then TyreSaleQuarantine[key] = nil else for k in pairs(TyreSaleQuarantine) do TyreSaleQuarantine[k] = nil end end
+        end,
+        clearOrderGenBusy = function()
+            OrderGenBusy = {}
         end,
     }
 end
