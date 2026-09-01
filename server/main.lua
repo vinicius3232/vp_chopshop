@@ -777,13 +777,7 @@ lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, 
     -- [v1.16 SEC-1.2] Emissão autoritativa baseada no theft token (imune a reciclagem de netId)
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        local prov = nil
-        if veh and veh ~= 0 and DoesEntityExist(veh) then
-            local rawPlate = GetVehicleNumberPlateText(veh)
-            local realPlate = (type(VPChopMDT) == 'table' and type(VPChopMDT.GetRealPlate) == 'function' and VPChopMDT.GetRealPlate(rawPlate)) or rawPlate
-            local model = GetEntityModel(veh)
-            prov = { realPlate = realPlate, model = model }
-        end
+        local prov = (PartEntitlement.CaptureVehicleProvenance and PartEntitlement.CaptureVehicleProvenance(veh)) or nil
         peId = PartEntitlement.Issue(('cat:%s'):format(theft.token), source, 'catalytic_converter', netId, { origin = 'theft', provenance = prov })
     end
     TriggerEvent(VPChopEvt.PART_CHOPPED, source, netId, 'catalytic_converter', 1)

@@ -16,10 +16,10 @@ local function run()
         total = total + 1
         if cond then
             pass = pass + 1
-            print(('[broker_fence/spec] PASS %s'):format(desc))
+            print(('[broker_fence/spec] PASS  %s'):format(desc))
         else
             fail = fail + 1
-            print(('[broker_fence/spec] FAIL %s'):format(desc))
+            print(('[broker_fence/spec] FAIL  %s'):format(desc))
         end
     end
 
@@ -506,6 +506,187 @@ local function run()
     _G.VPChopGetProgression = function(src) return { tier = 4, xp = 1000 } end
     local res30NoVeh = deliverCarCb(1, 0)
     check('B2-30 deliverCar segue no pipeline legacy (vehicle para netId 0)', res30NoVeh.ok == false and res30NoVeh.err == 'vehicle')
+
+    -- ─── B2-LOCK-01: Lock ownership & non-leak on market_busy / early-returns ───
+    resetEnv()
+    FAKE_TRUCK[200] = { model = GetHashKey('bison') }
+    local sId1, _ = TruckStorage.Resolve(200)
+    makeStoredTyre(sId1, 'te:lock_1')
+    makeStoredTyre(sId1, 'te:lock_2')
+
+    -- 1. Player A adquire lock de 'tyre'
+    local aLockOk = BM.AcquireLocks('tyre')
+    check('B2-LOCK-01 Player A adquire lock em tyre', aLockOk == true)
+
+    -- 2. Player B tenta sellTyres -> recebe market_busy e executa releaseTruck
+    local resLockB = sellTyresCb(2, 'truck', 200)
+    check('B2-LOCK-01 Player B recebe market_busy', resLockB.ok == false and resLockB.err == 'market_busy')
+
+    -- 3. Player C tenta adquirir lock -> ainda deve falhar (B não liberou lock de A)
+    local cLockFail = BM.AcquireLocks('tyre')
+    check('B2-LOCK-01 Lock de tyre ainda está retido por Player A após release de B', cLockFail == false)
+
+    -- 4. Early returns (no_truck, bad_truck, truck_range, no_tyres) não liberam lock de terceiro
+    sellTyresCb(2, 'truck', 99999) -- no_truck
+    check('B2-LOCK-01 Lock mantido após early-return no_truck', BM.AcquireLocks('tyre') == false)
+
+    -- 5. Player A libera explicitamente
+    BM.ReleaseLocks('tyre')
+    local cLockSuccess = BM.AcquireLocks('tyre')
+    check('B2-LOCK-01 Player C consegue adquirir lock após Player A liberar', cLockSuccess == true)
+    BM.ReleaseLocks('tyre')
+
+    -- ─── B2-NIGHT-01..03: Game Clock & Config.Fence.NightBonus Parity ─────────
+    resetEnv()
+    local origGetClockHours = _G.GetClockHours
+    
+    -- B2-NIGHT-01: 23h in-game -> NightBonus 1.30
+    _G.GetClockHours = function() return 23 end
+    local qNight = BM.QuoteSale('metalscrap', 1, { trustLevel = 1, progressionTier = 1, jitter = 0.0 })
+    local qDayRef = BM.QuoteSale('metalscrap', 1, { trustLevel = 1, progressionTier = 1, jitter = 0.0, hour = 12 })
+    check('B2-NIGHT-01 GetClockHours 23h aplica multiplicador noturno in-game 1.30', math.abs(qNight.total - math.floor(qDayRef.total * 1.30)) <= 1)
+
+    -- B2-NIGHT-02: 12h in-game -> 1.00
+    _G.GetClockHours = function() return 12 end
+    local qDay = BM.QuoteSale('metalscrap', 1, { trustLevel = 1, progressionTier = 1, jitter = 0.0 })
+    check('B2-NIGHT-02 GetClockHours 12h aplica multiplicador diurno 1.00', qDay.total == qDayRef.total)
+
+    -- B2-NIGHT-03: Custom Config.Fence.NightBonus 23->5 Multiplier 1.20
+    local origNB = Config.Fence.NightBonus
+    Config.Fence.NightBonus = { Enable = true, StartHour = 23, EndHour = 5, Multiplier = 1.20 }
+    _G.GetClockHours = function() return 23 end
+    local qCustomNight = BM.QuoteSale('metalscrap', 1, { trustLevel = 1, progressionTier = 1, jitter = 0.0 })
+    check('B2-NIGHT-03 Custom NightBonus 1.20 aplicado corretamente via GetClockHours', math.abs(qCustomNight.total - math.floor(qDayRef.total * 1.20)) <= 1)
+    
+    Config.Fence.NightBonus = origNB
+    _G.GetClockHours = origGetClockHours
+
+    -- ─── B2-PROV-01..04: Canonical Vehicle Provenance & MDT Resolution ─────────
+    resetEnv()
+    local origMDT = _G.VPChopMDT
+    local origPlateText = _G.GetVehicleNumberPlateText
+    _G.FAKE_VEH[1] = { model = 1234, plate = 'CHOP1' }
+    
+    -- B2-PROV-01: Fake plate com espaços resolvida para REAL999
+    _G.GetVehicleNumberPlateText = function(v) return " FAKE123  " end
+    _G.VPChopMDT = {
+        GetRealPlate = function(plate)
+            if plate == "FAKE123" then return "REAL999" end
+            return plate
+        end
+    }
+    local prov01 = PE.CaptureVehicleProvenance(70001)
+    check('B2-PROV-01 Placa padded com whitespace resolvida para canonicalRealPlate', prov01 and prov01.realPlate == "REAL999")
+
+    -- B2-PROV-02: Heat de REAL999 é burning -> venda bloqueada
+    _G.VPChopHeatGetPriceMult = function(plate)
+        if plate == "REAL999" then return 0.0 end
+        return 1.0
+    end
+    local entHotId, _ = PE.Issue('session_hot_prov', 1, 'door_dside_f', 1, { origin = 'advanced', provenance = prov01 })
+    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+    local resProv02 = sellCarriedPartCb(1, entHotId)
+    check('B2-PROV-02 Peça com Heat burning de REAL999 bloqueada no Broker (heat_blocked)', resProv02.ok == false and resProv02.err == 'heat_blocked')
+    check('B2-PROV-02 Entitlement segue ISSUED após bloqueio de Heat', PE.State(entHotId) == 'ISSUED')
+    _G.VPChopHeatGetPriceMult = function() return 1.0 end
+
+    -- B2-PROV-03: Resolver lança erro DB -> retirada física não crasha, provenance=nil, venda rejeita com provenance_missing
+    _G.VPChopMDT = {
+        GetRealPlate = function() error('DB connection timeout') end
+    }
+    local prov03 = PE.CaptureVehicleProvenance(70001)
+    check('B2-PROV-03 Erro no resolver MDT resulta em provenance=nil sem crash', prov03 == nil)
+    local entFailId, _ = PE.Issue('session_fail_prov', 1, 'bonnet', 1, { origin = 'advanced', provenance = prov03 })
+    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+    local resProv03 = sellCarriedPartCb(1, entFailId)
+    check('B2-PROV-03 Peça emitida com provenance=nil falha na venda com provenance_missing', resProv03.ok == false and resProv03.err == 'provenance_missing')
+    check('B2-PROV-03 Entitlement segue ISSUED com zero payout', PE.State(entFailId) == 'ISSUED')
+
+    -- B2-PROV-04: Resolver retorna string vazia ou nil -> fail-closed
+    _G.VPChopMDT = {
+        GetRealPlate = function() return "   " end
+    }
+    local prov04 = PE.CaptureVehicleProvenance(70001)
+    check('B2-PROV-04 Retorno vazio do MDT resulta em provenance=nil', prov04 == nil)
+
+    _G.VPChopMDT = origMDT
+    _G.GetVehicleNumberPlateText = origPlateText
+
+    -- ─── B2-CAT-TRUST-01..03: Catalytic Trust Parity (Zero Trust XP) ───────────
+    resetEnv()
+    trustLevels[1] = 1
+    if VPChopFence and VPChopFence._test then VPChopFence._test.setTrust(1, 1, 100) end
+    
+    -- B2-CAT-TRUST-01: Dynamic sale success -> Trust XP antes == Trust XP depois
+    local catIdT1, _ = PE.Issue('session_cat_t1', 1, 'catalytic_converter', 10, { origin = 'theft', provenance = { realPlate = 'SAFE1', model = 1234 } })
+    local tBefore1 = VPChopFence._test.getTrust(1).trust_xp
+    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+    local resCatT1 = sellCatalyticCb(1, catIdT1)
+    local tAfter1 = VPChopFence._test.getTrust(1).trust_xp
+    check('B2-CAT-TRUST-01 Venda dinâmica de catalisador tem sucesso', resCatT1.ok == true)
+    check('B2-CAT-TRUST-01 Venda dinâmica de catalisador concede ZERO Trust XP', tBefore1 == tAfter1 and tAfter1 == 100)
+
+    -- B2-CAT-TRUST-02: Legacy rollback Enable=false -> Trust XP antes == Trust XP depois
+    Config.Broker.Enable = false
+    local catIdT2, _ = PE.Issue('session_cat_t2', 1, 'catalytic_converter', 10, { origin = 'theft', provenance = { realPlate = 'SAFE2', model = 1234 } })
+    local tBefore2 = VPChopFence._test.getTrust(1).trust_xp
+    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+    local resCatT2 = sellCatalyticCb(1, catIdT2)
+    local tAfter2 = VPChopFence._test.getTrust(1).trust_xp
+    check('B2-CAT-TRUST-02 Venda legada de catalisador tem sucesso', resCatT2.ok == true)
+    check('B2-CAT-TRUST-02 Venda legada de catalisador concede ZERO Trust XP', tBefore2 == tAfter2 and tAfter2 == 100)
+    Config.Broker.Enable = true
+
+    -- B2-CAT-TRUST-03: Payment failure -> Trust XP sem mudança
+    local catIdT3, _ = PE.Issue('session_cat_t3', 1, 'catalytic_converter', 10, { origin = 'theft', provenance = { realPlate = 'SAFE3', model = 1234 } })
+    shouldFailPayment = true
+    local tBefore3 = VPChopFence._test.getTrust(1).trust_xp
+    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+    local resCatT3 = sellCatalyticCb(1, catIdT3)
+    local tAfter3 = VPChopFence._test.getTrust(1).trust_xp
+    check('B2-CAT-TRUST-03 Falha de pagamento em catalisador não altera Trust XP', tBefore3 == tAfter3 and tAfter3 == 100)
+    shouldFailPayment = false
+
+    -- ─── B2-CB-01: Real Post-Payment Market Commit Failure -> Circuit Breaker ─
+    resetEnv()
+    BM.SetIntegrityLock(false)
+    local catIdCB, _ = PE.Issue('session_cat_cb', 1, 'catalytic_converter', 10, { origin = 'theft', provenance = { realPlate = 'SAFE99', model = 1234 } })
+    
+    local origRecordSalesBatch = BM.RecordSalesBatch
+    BM.RecordSalesBatch = function(batch, now)
+        return { ok = false, err = 'forced_test_failure' }
+    end
+
+    local bridgeAddCashCount = 0
+    _G.BridgeAddCash = function(src, amount, reason)
+        bridgeAddCashCount = bridgeAddCashCount + 1
+        return true
+    end
+
+    local bridgeRemoveCashCount = 0
+    _G.BridgeRemoveCash = function(src, amount, reason)
+        bridgeRemoveCashCount = bridgeRemoveCashCount + 1
+        return true
+    end
+
+    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+    local resCB = sellCatalyticCb(1, catIdCB)
+    
+    check('B2-CB-01 Dinheiro entregue exatamente 1x ao jogador', bridgeAddCashCount == 1)
+    check('B2-CB-01 Entitlement ficou terminal CONSUMED', PE.State(catIdCB) == 'CONSUMED')
+    check('B2-CB-01 Zero refund automático emitido', bridgeRemoveCashCount == 0)
+    check('B2-CB-01 BrokerMarket ativou circuit breaker (IsIntegrityLocked == true)', BM.IsIntegrityLocked() == true)
+    check('B2-CB-01 Callback retorna ok=true com flag marketDegraded=true', resCB.ok == true and resCB.marketDegraded == true)
+    
+    -- Próxima venda dinâmica é bloqueada por market_integrity_locked
+    local catIdNext, _ = PE.Issue('session_cat_next', 1, 'catalytic_converter', 10, { origin = 'theft', provenance = { realPlate = 'SAFE100', model = 1234 } })
+    _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 1000
+    local resNext = sellCatalyticCb(1, catIdNext)
+    check('B2-CB-01 Próxima venda dinâmica rejeitada com market_integrity_locked', resNext.ok == false and resNext.err == 'market_integrity_locked')
+    check('B2-CB-01 Nenhum segundo pagamento emitido', bridgeAddCashCount == 1)
+
+    BM.RecordSalesBatch = origRecordSalesBatch
+    BM.SetIntegrityLock(false)
 
     _G.VPChopFenceGetTrust = origVPChopFenceGetTrust
     _G.VPChopGetProgression = origVPChopGetProgression

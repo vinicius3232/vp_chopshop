@@ -481,7 +481,6 @@ function VPChopFenceSellCarriedPart(src, entitlementId, expectedPartKey)
             if not paid then
                 return { ok = false, err = 'payment_failed', terminalConsumed = true }
             end
-            addTrustXp(src, (Config.Fence and Config.Fence.XpPerDelivery) or 20)
             return { ok = true, payout = payout, commodity = 'catalytic_converter' }
         else
             return { ok = false, err = 'broker_disabled' }
@@ -516,13 +515,11 @@ function VPChopFenceSellCarriedPart(src, entitlementId, expectedPartKey)
     end
 
     local prog = VPChopGetProgression(src)
-    local curHour = (os.date and tonumber(os.date('%H'))) or nil
 
     local quote = BrokerMarket.QuoteSale(commodity, 1, {
         trustLevel      = trust,
         progressionTier = prog.tier,
         heatMultiplier  = heatMult,
-        hour            = curHour,
     })
 
     if not quote.ok then
@@ -549,21 +546,20 @@ function VPChopFenceSellCarriedPart(src, entitlementId, expectedPartKey)
         return { ok = false, err = 'payment_failed', terminalConsumed = true }
     end
 
+    local marketDegraded = false
     local bRes = BrokerMarket.RecordSalesBatch({ { commodity = commodity, count = 1 } })
     if not bRes.ok then
-        print(('[vp_chopshop][fence] CRITICAL: RecordSalesBatch failed post-payment for commodity %s (src %d)'):format(commodity, src))
+        print(('[vp_chopshop][fence] CRITICAL: RecordSalesBatch failed post-payment for commodity %s (src %d): %s'):format(
+            commodity, src, tostring(bRes.err or bRes.reason)))
         if BrokerMarket.SetIntegrityLock then
             BrokerMarket.SetIntegrityLock(true)
         end
+        marketDegraded = true
     end
 
     BrokerMarket.ReleaseLocks(commodity)
 
-    if partKey == 'catalytic_converter' then
-        addTrustXp(src, (Config.Fence and Config.Fence.XpPerDelivery) or 20)
-    end
-
-    return { ok = true, payout = payout, commodity = commodity }
+    return { ok = true, payout = payout, commodity = commodity, marketDegraded = marketDegraded or nil }
 end
 
 lib.callback.register('vp_chopshop:fence:sellCarriedPart', function(src, entitlementId)
@@ -659,7 +655,6 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
 
     -- ─── 4. Cotações e Dry-Run de Quantidades ────────────────────────────────
     local dynamicQuotes = {}
-    local curHour = (os.date and tonumber(os.date('%H'))) or nil
 
     for item, info in pairs(dynamicItems) do
         local have = exports.ox_inventory:GetItemCount(src, item)
@@ -668,7 +663,6 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
             local q = BrokerMarket.QuoteSale(info.commodity, planned, {
                 trustLevel      = trust,
                 progressionTier = prog.tier,
-                hour            = curHour,
             })
             if not q.ok then
                 releaseLocks()
@@ -730,13 +724,16 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     end
 
     -- ─── 7. Registro de Pressão de Vendas (Apenas pós-pagamento confirmado) ─
+    local marketDegraded = false
     if isBrokerEnabled and #dynamicBatch > 0 then
         local bRes = BrokerMarket.RecordSalesBatch(dynamicBatch)
         if not bRes.ok then
-            print(('[vp_chopshop][fence:sellItems] CRITICAL: RecordSalesBatch failed post-payment (src %d)'):format(src))
+            print(('[vp_chopshop][fence:sellItems] CRITICAL: RecordSalesBatch failed post-payment (src %d): %s'):format(
+                src, tostring(bRes.err or bRes.reason)))
             if BrokerMarket.SetIntegrityLock then
                 BrokerMarket.SetIntegrityLock(true)
             end
+            marketDegraded = true
         end
     end
 
@@ -748,7 +745,7 @@ lib.callback.register('vp_chopshop:fence:sellItems', function(src, itemList)
     -- Emitir evento para progressão
     TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, soldItems, realTotal, 'material')
 
-    return { ok = true, total = realTotal, sold = soldItems }
+    return { ok = true, total = realTotal, sold = soldItems, marketDegraded = marketDegraded or nil }
 end)
 
 -- Vender pneus (truck OU inventário)
@@ -779,7 +776,6 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
     local prog     = VPChopGetProgression(src)
     local isBrokerEnabled = (Config.Broker and Config.Broker.Enable ~= false)
     local xpPerTyre = math.floor(((Config.Fence and Config.Fence.XpPerDelivery) or 20) * 0.5)
-    local curHour = (os.date and tonumber(os.date('%H'))) or nil
 
     if source_type == 'truck' and truckNetId then
         local nid = tonumber(truckNetId)
@@ -790,10 +786,13 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
 
         if TruckStorageBusy[storageId] then return release({ ok=false, err='truck_busy' }) end
         TruckStorageBusy[storageId] = true
+
+        local marketLockHeld = false
         local function releaseTruck(res)
             TruckStorageBusy[storageId] = nil
-            if isBrokerEnabled and BrokerMarket and BrokerMarket.ReleaseLocks then
+            if marketLockHeld and isBrokerEnabled and BrokerMarket and BrokerMarket.ReleaseLocks then
                 BrokerMarket.ReleaseLocks('tyre')
+                marketLockHeld = false
             end
             return release(res)
         end
@@ -824,11 +823,11 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
 
             local lockOk, lockErr = BrokerMarket.AcquireLocks('tyre')
             if not lockOk then return releaseTruck({ ok=false, err=lockErr or 'market_busy' }) end
+            marketLockHeld = true
 
             local quote = BrokerMarket.QuoteSale('tyre', count, {
                 trustLevel      = trust,
                 progressionTier = prog.tier,
-                hour            = curHour,
             })
             if not quote.ok then return releaseTruck({ ok=false, err=quote.err }) end
 
@@ -853,15 +852,18 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
 
             if sold <= 0 then return releaseTruck({ ok=false, err='no_tyres' }) end
 
+            local marketDegraded = false
             local bRes = BrokerMarket.RecordSalesBatch({ { commodity = 'tyre', count = sold } })
             if not bRes.ok then
-                print(('[vp_chopshop][fence:sellTyres] CRITICAL: RecordSalesBatch failed post-payment (src %d)'):format(src))
+                print(('[vp_chopshop][fence:sellTyres] CRITICAL: RecordSalesBatch failed post-payment (src %d): %s'):format(
+                    src, tostring(bRes.err or bRes.reason)))
                 if BrokerMarket.SetIntegrityLock then BrokerMarket.SetIntegrityLock(true) end
+                marketDegraded = true
             end
 
             addTrustXp(src, xpPerTyre * sold)
             TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, totalPaid, 'tyre')
-            return releaseTruck({ ok=true, count=sold, total=totalPaid })
+            return releaseTruck({ ok=true, count=sold, total=totalPaid, marketDegraded=marketDegraded or nil })
         else
             -- Legacy fallback v1.16
             local tierMult  = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
@@ -909,7 +911,6 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
         local quote = BrokerMarket.QuoteSale('tyre', count, {
             trustLevel      = trust,
             progressionTier = prog.tier,
-            hour            = curHour,
         })
         if not quote.ok then return releaseInv({ ok=false, err=quote.err }) end
 
@@ -925,15 +926,18 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
             return releaseInv({ ok=false, err='payment' })
         end
 
+        local marketDegraded = false
         local bRes = BrokerMarket.RecordSalesBatch({ { commodity = 'tyre', count = count } })
         if not bRes.ok then
-            print(('[vp_chopshop][fence:sellTyres] CRITICAL: RecordSalesBatch failed post-payment (src %d)'):format(src))
+            print(('[vp_chopshop][fence:sellTyres] CRITICAL: RecordSalesBatch failed post-payment (src %d): %s'):format(
+                src, tostring(bRes.err or bRes.reason)))
             if BrokerMarket.SetIntegrityLock then BrokerMarket.SetIntegrityLock(true) end
+            marketDegraded = true
         end
 
         addTrustXp(src, xpPerTyre * count)
         TriggerEvent(VPChopEvt.FENCE_DELIVERY, src, {}, total, 'tyre')
-        return releaseInv({ ok=true, count=count, total=total })
+        return releaseInv({ ok=true, count=count, total=total, marketDegraded=marketDegraded or nil })
     else
         -- Legacy fallback v1.16
         local tierMult  = (Config.Progression and Config.Progression.FencePriceMult and Config.Progression.FencePriceMult[prog.tier]) or 1.0
@@ -1341,6 +1345,9 @@ if GetConvar('vp_chopshop_selftest', '0') == '1' then
     _G.VPChopFence._test = {
         setTrust = function(src, level, xp)
             TrustCache[src] = { trust_level = level, trust_xp = xp or 0, last_seen = os.time() }
+        end,
+        getTrust = function(src)
+            return TrustCache[src]
         end,
         clearTrust = function(src)
             if src then TrustCache[src] = nil else for k in pairs(TrustCache) do TrustCache[k] = nil end end

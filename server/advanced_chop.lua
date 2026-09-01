@@ -122,14 +122,8 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
 
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        local prov = nil
         local veh = NetworkGetEntityFromNetworkId(netId)
-        if veh and veh ~= 0 and DoesEntityExist(veh) then
-            local rawPlate = GetVehicleNumberPlateText(veh)
-            local realPlate = (type(VPChopMDT) == 'table' and type(VPChopMDT.GetRealPlate) == 'function' and VPChopMDT.GetRealPlate(rawPlate)) or rawPlate
-            local model = GetEntityModel(veh)
-            prov = { realPlate = realPlate, model = model }
-        end
+        local prov = (PartEntitlement.CaptureVehicleProvenance and PartEntitlement.CaptureVehicleProvenance(veh)) or nil
         peId = PartEntitlement.Issue(sessionId, src, partKey, netId, { origin = 'advanced', provenance = prov })
     end
 
@@ -218,14 +212,8 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
 
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        local prov = nil
         local veh = NetworkGetEntityFromNetworkId(netId)
-        if veh and veh ~= 0 and DoesEntityExist(veh) then
-            local rawPlate = GetVehicleNumberPlateText(veh)
-            local realPlate = (type(VPChopMDT) == 'table' and type(VPChopMDT.GetRealPlate) == 'function' and VPChopMDT.GetRealPlate(rawPlate)) or rawPlate
-            local model = GetEntityModel(veh)
-            prov = { realPlate = realPlate, model = model }
-        end
+        local prov = (PartEntitlement.CaptureVehicleProvenance and PartEntitlement.CaptureVehicleProvenance(veh)) or nil
         peId = PartEntitlement.Issue(sessionId, src, 'adv_engine', netId, { origin = 'advanced', provenance = prov })
     end
 

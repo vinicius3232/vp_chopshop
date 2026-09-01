@@ -124,7 +124,7 @@ local function sellCarriedPart()
 
     VPChopDropCarryPart()
     local payout = res.payout or 0
-    VPChopNotify(('Peça vendida por $%d!'):format(payout), 'success')
+    VPChopNotify(L('fence_part_sold_fmt', payout), 'success')
 end
 
 -- ─── Setup NPC ───────────────────────────────────────────────────────────────

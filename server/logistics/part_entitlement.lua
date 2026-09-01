@@ -47,6 +47,52 @@ local function normalizeKey(val)
     return string.upper(s:gsub('%s+', ''))
 end
 
+-- ─── Provenance Canônica ───────────────────────────────────────────────────────
+
+--- Captura de forma canônica, segura e server-authoritative a proveniência do veículo.
+---@param veh number Entity handle do veículo server-side
+---@return { realPlate: string, model: number }|nil provenance
+function PartEntitlement.CaptureVehicleProvenance(veh)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then
+        return nil
+    end
+
+    local rawPlate = GetVehicleNumberPlateText(veh)
+    if not rawPlate or type(rawPlate) ~= 'string' then
+        return nil
+    end
+
+    local cleanPlate = rawPlate:gsub('%s+', '')
+    if cleanPlate == '' then
+        return nil
+    end
+
+    local canonicalRealPlate = nil
+    if _G.VPChopMDT and type(_G.VPChopMDT.GetRealPlate) == 'function' then
+        local ok, res = pcall(function()
+            return _G.VPChopMDT.GetRealPlate(cleanPlate)
+        end)
+        if ok and type(res) == 'string' then
+            local cleanedRes = res:gsub('%s+', '')
+            if cleanedRes ~= '' then
+                canonicalRealPlate = cleanedRes
+            end
+        end
+    else
+        canonicalRealPlate = cleanPlate
+    end
+
+    if not canonicalRealPlate or canonicalRealPlate == '' then
+        return nil
+    end
+
+    local model = GetEntityModel(veh)
+    return {
+        realPlate = canonicalRealPlate,
+        model     = tonumber(model) or 0,
+    }
+end
+
 -- ─── Emissão ───────────────────────────────────────────────────────────────────
 
 --- Emite (ou devolve o existente) o entitlement de uma peça física removida.
