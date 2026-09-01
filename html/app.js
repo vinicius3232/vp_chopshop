@@ -206,6 +206,7 @@
           currentPt.isTracing = true;
           currentPt.lastPointerTimestamp = Date.now();
           el.classList.add('active', 'tracing');
+          postNui('minigamePointStart', { id: ptId });
           if (torchTip) {
             const targetPos = currentPt.lastCutScreenPos || initialP0;
             torchTip.style.left = `${targetPos.x}px`;
@@ -256,6 +257,7 @@
           
           activeHotspotId = ptId;
           el.classList.add('active');
+          postNui('minigamePointStart', { id: ptId });
           const rect = el.getBoundingClientRect();
           const centerX = rect.left + rect.width / 2;
           const centerY = rect.top + rect.height / 2;
@@ -361,6 +363,7 @@
           pt.isTracing = true;
           pt.lastPointerTimestamp = Date.now();
           pt.element.classList.add('active', 'tracing');
+          postNui('minigamePointStart', { id: k });
           if (pt.torchTip) {
             pt.torchTip.style.left = `${targetPos.x}px`;
             pt.torchTip.style.top = `${targetPos.y}px`;

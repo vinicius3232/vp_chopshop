@@ -117,6 +117,43 @@ local function generateCarcassPoints(vehicle, boneKey)
     return sections
 end
 
+local function focusCarcassPoint(vehicle, pointId)
+    local minDim, maxDim, w, len, h, cLocal = resolveCarcassData(vehicle)
+    local camPos, lookAt, fov = nil, nil, 42.0
+
+    if pointId == 'carcass_crossmember_f' then
+        -- 1. Travessa Dianteira: enquadramento frontal focado no radiador/longarinas dianteiras
+        camPos = getOffset(vehicle, -w * 0.70, maxDim.y + 0.85, maxDim.z + 0.90)
+        lookAt = getOffset(vehicle, 0.0, maxDim.y - 0.15, minDim.z + 0.35)
+        fov = 40.0
+    elseif pointId == 'carcass_pillar_l' then
+        -- 2. Coluna Lateral Esq: enquadramento lateral esquerdo da soleira/coluna A e B
+        camPos = getOffset(vehicle, -w * 1.30, cLocal.y - (len * 0.05), maxDim.z + 0.75)
+        lookAt = getOffset(vehicle, -w * 0.45, cLocal.y - (len * 0.04), minDim.z + 0.45)
+        fov = 40.0
+    elseif pointId == 'carcass_pillar_r' then
+        -- 3. Coluna Lateral Dir: enquadramento lateral direito da soleira/coluna A e B
+        camPos = getOffset(vehicle, w * 1.30, cLocal.y - (len * 0.05), maxDim.z + 0.75)
+        lookAt = getOffset(vehicle, w * 0.45, cLocal.y - (len * 0.04), minDim.z + 0.45)
+        fov = 40.0
+    elseif pointId == 'carcass_floor_cross' then
+        -- 4. Túnel do Assoalho: enquadramento três-quartos elevado diretamente para o interior do assoalho
+        camPos = getOffset(vehicle, -w * 0.85, cLocal.y - (len * 0.25), maxDim.z + 1.10)
+        lookAt = getOffset(vehicle, 0.0, cLocal.y - (len * 0.06), minDim.z + 0.30)
+        fov = 38.0
+    elseif pointId == 'carcass_crossmember_r' then
+        -- 5. Longarina Traseira: enquadramento traseiro da suspensão/chassi traseiro
+        camPos = getOffset(vehicle, -w * 0.70, minDim.y - 0.85, maxDim.z + 0.90)
+        lookAt = getOffset(vehicle, 0.0, minDim.y + 0.20, minDim.z + 0.38)
+        fov = 40.0
+    else
+        camPos, lookAt = calculateCarcassCamera(vehicle)
+        fov = 48.0
+    end
+
+    return camPos, lookAt, fov
+end
+
 Profiles.list.carcass = {
     title = 'CORTE ESTRUTURAL DA CARCAÇA',
     helpText = 'Segure e acompanhe com o maçarico o traçado das linhas estruturais do chassi',
@@ -127,10 +164,12 @@ Profiles.list.carcass = {
     minUxMs = 6000,
     reserveMs = 4000,
     calculateCamera = calculateCarcassCamera,
+    focusPoint = focusCarcassPoint,
     generatePoints = generateCarcassPoints,
 }
 
 Profiles.list.adv_carcass = Profiles.list.carcass
 
 CarcassProfile.resolveCarcassData = resolveCarcassData
+CarcassProfile.focusCarcassPoint = focusCarcassPoint
 return CarcassProfile

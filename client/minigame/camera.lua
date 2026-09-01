@@ -53,6 +53,50 @@ function CamCtrl.Create(camCoords, lookAtCoords, fov, easeTimeMs)
     return true
 end
 
+--- Interpola suavemente a câmera ativa para novas coordenadas e foco
+---@param camCoords vector3|nil  Nova posição da câmera
+---@param lookAtCoords vector3|nil  Novo ponto de foco
+---@param fov number|nil  Novo campo de visão
+---@param easeTimeMs number|nil  Duração em ms (default 500)
+function CamCtrl.PanTo(camCoords, lookAtCoords, fov, easeTimeMs)
+    if not activeCam or not DoesCamExist(activeCam) then return end
+    easeTimeMs = tonumber(easeTimeMs) or 500
+
+    CreateThread(function()
+        local cam = activeCam
+        if not cam or not DoesCamExist(cam) then return end
+        local startPos = GetCamCoord(cam)
+        local startFov = GetCamFov(cam)
+        local targetFov = tonumber(fov) or startFov
+        local t0 = GetGameTimer()
+
+        while DoesCamExist(cam) and (GetGameTimer() - t0 < easeTimeMs) do
+            local p = (GetGameTimer() - t0) / easeTimeMs
+            local ease = p * p * (3.0 - 2.0 * p)
+
+            if camCoords then
+                local cx = startPos.x + (camCoords.x - startPos.x) * ease
+                local cy = startPos.y + (camCoords.y - startPos.y) * ease
+                local cz = startPos.z + (camCoords.z - startPos.z) * ease
+                SetCamCoord(cam, cx, cy, cz)
+            end
+            if lookAtCoords then
+                PointCamAtCoord(cam, lookAtCoords.x, lookAtCoords.y, lookAtCoords.z)
+            end
+            if targetFov then
+                SetCamFov(cam, startFov + (targetFov - startFov) * ease)
+            end
+            Wait(0)
+        end
+
+        if DoesCamExist(cam) then
+            if camCoords then SetCamCoord(cam, camCoords.x, camCoords.y, camCoords.z) end
+            if lookAtCoords then PointCamAtCoord(cam, lookAtCoords.x, lookAtCoords.y, lookAtCoords.z) end
+            if targetFov then SetCamFov(cam, targetFov) end
+        end
+    end)
+end
+
 --- Retorna a câmera suavemente para a visualização padrão do jogador e destrói o handle.
 ---@param easeTimeMs number|nil  Tempo de retorno em ms (default 400)
 function CamCtrl.Destroy(easeTimeMs)

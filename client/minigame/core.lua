@@ -20,6 +20,16 @@ local currentSession = nil
 
 --- Registra os NUI callbacks que comunicam o estado do JS para o Lua.
 local function setupNuiCallbacks()
+    RegisterNUICallback('minigamePointStart', function(data, cb)
+        if currentSession and data and data.id and currentSession.profile and currentSession.profile.focusPoint then
+            local camPos, lookAt, fov = currentSession.profile.focusPoint(currentSession.vehicle, data.id)
+            if camPos and lookAt then
+                CamCtrl.PanTo(camPos, lookAt, fov or 40.0, 500)
+            end
+        end
+        cb({ ok = true })
+    end)
+
     RegisterNUICallback('minigamePointComplete', function(data, cb)
         if currentSession and data and data.id then
             PlaySoundFrontend(-1, 'Pin_Good', 'DLC_HEIST_FLEECA_SOUNDSET', true)
