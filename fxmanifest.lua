@@ -69,6 +69,7 @@ server_scripts {
     -- expõe VPChopLeaveEvidence para os arquivos de crime abaixo. DEPOIS das bridges,
     -- ANTES de db.lua/heat.lua/plates.lua/main.lua.
     'bridge/evidence.lua',
+    'server/evidence_bridge_spec.lua', -- [v1.18 FORENSICS V2] self-gated (vp_chopshop_selftest 1)
     'server/db.lua',
     'server/validate.lua',
     -- [v1.15 arch] ChopSession — fonte server-authoritative do estado de desmanche.
