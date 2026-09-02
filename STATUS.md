@@ -2,10 +2,10 @@
 
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
-**Atualizado:** 2026-09-01
+**Atualizado:** 2026-09-02
 **Branch de trabalho:** `feat/v1.18-evidence-bridge-multi` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `ebcf8fb`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1570 PASS / 0 FAIL / 1570 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1594 PASS / 0 FAIL / 1594 asserts**
 
 ---
 
@@ -30,7 +30,7 @@ BROKER-5.1 — NPC Context UI & Readiness Hardening   ✅ HOMOLOGADO & MERGED (P
 BROKER-6.2 — Static Gate Approved & Live QA Matrix ✅ HOMOLOGADO & MERGED (PR #47, merge SHA ebcf8fb)
 ─────────────────────────────────────────────────────────────────────────
 v1.18 Camada de Crime & Perícia Policial Profunda:
-P4.1       — EvidenceBridge Multi-Framework         🚧 EM VALIDAÇÃO (feat/v1.18-evidence-bridge-multi)
+P4.1.1     — EvidenceBridge Provider Hardening      🚧 EM VALIDAÇÃO (PR #48)
 ─────────────────────────────────────────────────────────────────────────
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)

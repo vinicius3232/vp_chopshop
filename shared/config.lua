@@ -1113,20 +1113,24 @@ Config.Progression = {
 --- ─────────────────────────────────────────────────────────────────────────────
 --- [EVIDENCE] INTEGRAÇÃO FORENSE — resource `evidences` (Advanced FiveM evidence)
 --- ─────────────────────────────────────────────────────────────────────────────
---- Toda ação de crime do chopshop pode deixar VESTÍGIO no local (digital + DNA),
---- vinculado biometricamente ao criminoso. A polícia coleta e identifica via o
---- próprio resource `evidences`. Esta feature é 100% server-side e CONSOME a API
---- do evidences (export `syncEvidence`). Se o resource não estiver `started`,
---- ela se auto-desativa sem quebrar nenhuma ação de crime.
+--- [v1.18 FORENSICS V2] EvidenceBridge — Vestígios e Perícia Policial Multi-Framework
+--- Toda ação de crime do chopshop pode deixar vestígios no local (digital + DNA),
+--- vinculado biometricamente ao criminoso. O EvidenceBridge conecta de forma modular
+--- e fail-soft a scripts forenses externos (ex.: noobsystems/evidences, vp_crimescene).
+--- Se nenhum resource estiver iniciado ou Provider='none', a feature opera em modo inerte.
 Config.Evidence = {
-    Enable = true,                 -- [EVIDENCE] liga/desliga; auto-desativa se 'evidences' não estiver started
-    GlovesItem = 'gloves',         -- [EVIDENCE] item que, no inventário, BLOQUEIA digitais (checado server-side)
-    GlovesBlocksDna = false,       -- [EVIDENCE] luvas bloqueiam digital; DNA ainda cai (true = luvas bloqueiam tudo)
-    DnaType = 'blood',             -- [EVIDENCE] classe de DNA plantada: 'blood' | 'saliva'
-    HeatScaling = true,            -- [EVIDENCE] mais heat na placa = mais chance de vestígio
-    HeatFactor = 0.5,              -- [EVIDENCE] intensidade do scaling (chance_final = base * (1 + heat/100 * HeatFactor))
-    -- [EVIDENCE] chance base 0..1 por ação (fingerprint e dna independentes).
-    -- Digital com chance MAIOR (toca tudo); DNA com chance MENOR (corte/suor pontual).
+    Enable = true,                 -- liga/desliga a ponte de evidência
+    Provider = 'auto',             -- 'auto' | 'evidences' | 'vp_crimescene' | 'custom' | 'none'
+    AutoOrder = {                  -- ordem de preferência quando Provider='auto'
+        'evidences',
+        'vp_crimescene',
+    },
+    GlovesItem = 'gloves',         -- item que, no inventário, BLOQUEIA digitais (checado server-side)
+    GlovesBlocksDna = false,       -- luvas bloqueiam digital; DNA ainda cai (true = luvas bloqueiam tudo)
+    DnaType = 'blood',             -- classe de DNA plantada: 'blood' | 'saliva'
+    HeatScaling = true,            -- mais heat na placa = mais chance de vestígio
+    HeatFactor = 0.5,              -- intensidade do scaling (chance_final = base * (1 + heat/100 * HeatFactor))
+    -- chance base 0..1 por ação (fingerprint e dna independentes).
     Actions = {
         chop_part   = { fingerprint = 0.50, dna = 0.12 },
         vin_scratch = { fingerprint = 0.70, dna = 0.15 },

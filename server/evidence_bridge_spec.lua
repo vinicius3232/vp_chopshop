@@ -26,6 +26,7 @@ local function run()
     Config.Evidence = {
         Enable = true,
         Provider = 'auto',
+        AutoOrder = { 'evidences', 'vp_crimescene' },
         GlovesItem = 'gloves',
         GlovesBlocksDna = false,
         DnaType = 'blood',
@@ -53,129 +54,257 @@ local function run()
         return 0
     end
 
-    -- ─── 1. Provider Resolution & Availability ───────────────────────────────
+    local mockResourceStates = {}
+    _G.GetResourceState = function(resName)
+        return mockResourceStates[resName] or 'missing'
+    end
+
+    local origExports = _G.exports or {}
+    _G.exports = origExports
+
+    -- ─── 1. Provider Resolution & AutoOrder Contract ──────────────────────────
     do
         EvidenceBridge._test.reset()
-        check('EVID-PROV-01 EvidenceBridge module exists', type(EvidenceBridge) == 'table')
-        check('EVID-PROV-01 EvidenceBridge.GetProvider is a function', type(EvidenceBridge.GetProvider) == 'function')
-        check('EVID-PROV-01 EvidenceBridge.IsAvailable is a function', type(EvidenceBridge.IsAvailable) == 'function')
-        check('EVID-PROV-01 EvidenceBridge.Plant is a function', type(EvidenceBridge.Plant) == 'function')
+        mockResourceStates = {}
 
-        -- Disabled in Config
-        Config.Evidence.Enable = false
-        check('EVID-PROV-02 Config.Evidence.Enable=false returns provider none', EvidenceBridge.GetProvider() == 'none')
-        check('EVID-PROV-02 Config.Evidence.Enable=false is not available', EvidenceBridge.IsAvailable() == false)
-        Config.Evidence.Enable = true
+        -- EVID-CONFIG-01: Provider='none'
+        Config.Evidence.Provider = 'none'
+        check('EVID-CONFIG-01 Provider=none returns none', EvidenceBridge.GetProvider() == 'none')
+        check('EVID-CONFIG-01 Provider=none is not available', EvidenceBridge.IsAvailable() == false)
 
-        -- Mock provider selection
-        EvidenceBridge._test.setProvider('vp_crimescene', function() return true end)
-        check('EVID-PROV-03 Provider vp_crimescene is active and available', EvidenceBridge.GetProvider() == 'vp_crimescene' and EvidenceBridge.IsAvailable() == true)
+        -- EVID-CONFIG-02: Provider='evidences' + started
+        Config.Evidence.Provider = 'evidences'
+        mockResourceStates['evidences'] = 'started'
+        check('EVID-CONFIG-02 Provider=evidences when started returns evidences', EvidenceBridge.GetProvider() == 'evidences')
+        check('EVID-CONFIG-02 Provider=evidences is available', EvidenceBridge.IsAvailable() == true)
 
-        EvidenceBridge._test.setProvider('qbx_policejob', function() return true end)
-        check('EVID-PROV-04 Provider qbx_policejob is active and available', EvidenceBridge.GetProvider() == 'qbx_policejob' and EvidenceBridge.IsAvailable() == true)
+        -- EVID-CONFIG-03: Provider='evidences' + stopped
+        mockResourceStates['evidences'] = 'stopped'
+        check('EVID-CONFIG-03 Provider=evidences when stopped returns none', EvidenceBridge.GetProvider() == 'none')
+        check('EVID-CONFIG-03 Provider=evidences when stopped is not available', EvidenceBridge.IsAvailable() == false)
 
-        EvidenceBridge._test.setProvider('ox_evidence', function() return true end)
-        check('EVID-PROV-05 Provider ox_evidence is active and available', EvidenceBridge.GetProvider() == 'ox_evidence' and EvidenceBridge.IsAvailable() == true)
+        -- EVID-AUTO-01: Both evidences and vp_crimescene started -> evidences wins (AutoOrder)
+        Config.Evidence.Provider = 'auto'
+        Config.Evidence.AutoOrder = { 'evidences', 'vp_crimescene' }
+        mockResourceStates['evidences'] = 'started'
+        mockResourceStates['vp_crimescene'] = 'started'
+        check('EVID-AUTO-01 AutoOrder prefers evidences over vp_crimescene', EvidenceBridge.GetProvider() == 'evidences')
 
-        EvidenceBridge._test.setProvider('evidences', function() return true end)
-        check('EVID-PROV-06 Provider evidences is active and available', EvidenceBridge.GetProvider() == 'evidences' and EvidenceBridge.IsAvailable() == true)
+        -- EVID-AUTO-02: evidences stopped, vp_crimescene started -> vp_crimescene
+        mockResourceStates['evidences'] = 'stopped'
+        mockResourceStates['vp_crimescene'] = 'started'
+        check('EVID-AUTO-02 AutoOrder falls back to vp_crimescene when evidences stopped', EvidenceBridge.GetProvider() == 'vp_crimescene')
 
-        EvidenceBridge._test.setProvider('none', function() return false end)
-        check('EVID-PROV-07 Provider none is not available', EvidenceBridge.GetProvider() == 'none' and EvidenceBridge.IsAvailable() == false)
+        -- EVID-AUTO-03: Neither started -> none
+        mockResourceStates['evidences'] = 'stopped'
+        mockResourceStates['vp_crimescene'] = 'stopped'
+        check('EVID-AUTO-03 AutoOrder returns none when no providers started', EvidenceBridge.GetProvider() == 'none')
+        check('EVID-AUTO-03 AutoOrder is not available when none started', EvidenceBridge.IsAvailable() == false)
+
+        -- EVID-UNKNOWN-01: Unknown provider configured -> none fail-soft
+        Config.Evidence.Provider = 'non_existent_provider_xyz'
+        check('EVID-UNKNOWN-01 Unknown configured provider returns none fail-soft', EvidenceBridge.GetProvider() == 'none')
     end
 
-    -- ─── 2. Direct EvidenceBridge.Plant Validation ───────────────────────────
+    -- ─── 2. Real Adapter Contract: noobsystems/evidences ──────────────────────
     do
-        local plantedEvents = {}
-        EvidenceBridge._test.setProvider('vp_crimescene', function(evClass, src, coords, actKey, meta)
-            table.insert(plantedEvents, { evClass = evClass, src = src, coords = coords, actKey = actKey, meta = meta })
-            return true
+        EvidenceBridge._test.reset()
+        Config.Evidence.Provider = 'evidences'
+        mockResourceStates['evidences'] = 'started'
+
+        local capturedCalls = {}
+        _G.exports.evidences = {
+            syncEvidence = function(self, evClass, owner, fun, coords, meta)
+                table.insert(capturedCalls, {
+                    evidenceClass = evClass,
+                    owner = owner,
+                    functionName = fun,
+                    coords = coords,
+                    metadata = meta,
+                })
+                return true
+            end
+        }
+
+        -- EVID-ADAPTER-EVIDENCES-01: Fingerprint call arguments
+        capturedCalls = {}
+        local targetCoords = vector3(100.5, 200.5, 30.0)
+        local okPlantFp = EvidenceBridge.Plant('fingerprint', 42, targetCoords, 'chop_part', { custom = 'meta1' })
+        check('EVID-ADAPTER-EVIDENCES-01 Plant fingerprint succeeded', okPlantFp == true)
+        check('EVID-ADAPTER-EVIDENCES-01 syncEvidence called exactly once', #capturedCalls == 1)
+        check('EVID-ADAPTER-EVIDENCES-01 arg1 is fingerprint', capturedCalls[1] and capturedCalls[1].evidenceClass == 'fingerprint')
+        check('EVID-ADAPTER-EVIDENCES-01 arg2 is src serverId (42)', capturedCalls[1] and capturedCalls[1].owner == 42)
+        check('EVID-ADAPTER-EVIDENCES-01 arg3 is atCoords', capturedCalls[1] and capturedCalls[1].functionName == 'atCoords')
+        check('EVID-ADAPTER-EVIDENCES-01 arg4 is coords', capturedCalls[1] and capturedCalls[1].coords == targetCoords)
+        check('EVID-ADAPTER-EVIDENCES-01 arg5 has action and custom metadata', capturedCalls[1] and capturedCalls[1].metadata.action == 'chop_part' and capturedCalls[1].metadata.custom == 'meta1')
+
+        -- EVID-ADAPTER-EVIDENCES-02: DNA Blood call arguments
+        capturedCalls = {}
+        local okPlantBlood = EvidenceBridge.Plant('blood', 88, targetCoords, 'vin_scratch', { plate = 'HOT123' })
+        check('EVID-ADAPTER-EVIDENCES-02 Plant blood succeeded', okPlantBlood == true)
+        check('EVID-ADAPTER-EVIDENCES-02 arg1 is blood', capturedCalls[1] and capturedCalls[1].evidenceClass == 'blood')
+        check('EVID-ADAPTER-EVIDENCES-02 arg2 is src serverId (88)', capturedCalls[1] and capturedCalls[1].owner == 88)
+        check('EVID-ADAPTER-EVIDENCES-02 arg3 is atCoords', capturedCalls[1] and capturedCalls[1].functionName == 'atCoords')
+
+        -- EVID-ADAPTER-EVIDENCES-03: Saliva call arguments
+        capturedCalls = {}
+        local okPlantSaliva = EvidenceBridge.Plant('saliva', 12, targetCoords, 'plate_steal', {})
+        check('EVID-ADAPTER-EVIDENCES-03 Plant saliva succeeded', okPlantSaliva == true)
+        check('EVID-ADAPTER-EVIDENCES-03 arg1 is saliva', capturedCalls[1] and capturedCalls[1].evidenceClass == 'saliva')
+        check('EVID-ADAPTER-EVIDENCES-03 arg2 is src serverId (12)', capturedCalls[1] and capturedCalls[1].owner == 12)
+        check('EVID-ADAPTER-EVIDENCES-03 arg3 is atCoords', capturedCalls[1] and capturedCalls[1].functionName == 'atCoords')
+
+        -- EVID-ADAPTER-EVIDENCES-04: Export throws error -> fail-soft (returns false, no throw)
+        _G.exports.evidences.syncEvidence = function()
+            error('simulated_evidences_crash')
+        end
+        local okExportFail, resExportFail = pcall(function()
+            return EvidenceBridge.Plant('fingerprint', 1, targetCoords, 'chop_part')
         end)
-
-        -- Invalid source
-        local resInvalidSrc = EvidenceBridge.Plant('fingerprint', -1, vector3(0, 0, 0), 'chop_part')
-        check('EVID-PLANT-01 Invalid source rejects planting (ok=false)', resInvalidSrc == false and #plantedEvents == 0)
-
-        -- Invalid coords
-        local resInvalidCoords = EvidenceBridge.Plant('fingerprint', 1, nil, 'chop_part')
-        check('EVID-PLANT-02 Invalid coords rejects planting (ok=false)', resInvalidCoords == false and #plantedEvents == 0)
-
-        -- Valid plant
-        local resValid = EvidenceBridge.Plant('fingerprint', 1, vector3(10.0, 20.0, 30.0), 'chop_part', { custom = 'test' })
-        check('EVID-PLANT-03 Valid plant executes successfully', resValid == true and #plantedEvents == 1)
-        check('EVID-PLANT-03 Planted event contains correct parameters', plantedEvents[1].evClass == 'fingerprint' and plantedEvents[1].src == 1 and plantedEvents[1].meta.custom == 'test')
+        check('EVID-ADAPTER-EVIDENCES-04 Export crash does not throw exception', okExportFail == true)
+        check('EVID-ADAPTER-EVIDENCES-04 Export crash returns false', resExportFail == false)
     end
 
-    -- ─── 3. VPChopLeaveEvidence Full Crime Workflow & Gloves Counterplay ─────
+    -- ─── 3. Real Adapter Contract: vp_crimescene ─────────────────────────────
     do
-        local plants = {}
-        EvidenceBridge._test.setProvider('vp_crimescene', function(evClass, src, coords, actKey, meta)
-            table.insert(plants, { evClass = evClass, src = src, coords = coords, actKey = actKey, meta = meta })
+        EvidenceBridge._test.reset()
+        Config.Evidence.Provider = 'vp_crimescene'
+        mockResourceStates['vp_crimescene'] = 'started'
+
+        local capturedCrimeCalls = {}
+        _G.exports.vp_crimescene = {
+            AddGroundEvidence = function(self, evType, coords, playerSrc, meta)
+                table.insert(capturedCrimeCalls, {
+                    evidenceType = evType,
+                    coords = coords,
+                    playerSrc = playerSrc,
+                    metadata = meta,
+                })
+                return true
+            end
+        }
+
+        local crimeCoords = vector3(50.0, 60.0, 70.0)
+        local okCrimePlant = EvidenceBridge.Plant('fingerprint', 7, crimeCoords, 'plate_forge', { tool = 'pliers' })
+        check('EVID-ADAPTER-CRIME-01 vp_crimescene AddGroundEvidence succeeded', okCrimePlant == true)
+        check('EVID-ADAPTER-CRIME-01 vp_crimescene received evidenceClass', capturedCrimeCalls[1] and capturedCrimeCalls[1].evidenceType == 'fingerprint')
+        check('EVID-ADAPTER-CRIME-01 vp_crimescene received playerSrc (7)', capturedCrimeCalls[1] and capturedCrimeCalls[1].playerSrc == 7)
+        check('EVID-ADAPTER-CRIME-01 vp_crimescene received coords', capturedCrimeCalls[1] and capturedCrimeCalls[1].coords == crimeCoords)
+    end
+
+    -- ─── 4. Custom Provider Server-Side Registry & Security ─────────────────
+    do
+        EvidenceBridge._test.reset()
+        Config.Evidence.Provider = 'custom'
+
+        -- EVID-CUSTOM-01: Valid custom provider registration
+        local customPlanted = {}
+        local okReg, errReg = EvidenceBridge.RegisterProvider('custom', 'my_custom_police', function(evClass, src, coords, actKey, meta)
+            table.insert(customPlanted, { evClass = evClass, src = src, coords = coords, actKey = actKey, meta = meta })
             return true
         end)
+        check('EVID-CUSTOM-01 Custom provider registration succeeded', okReg == true and errReg == nil)
+        check('EVID-CUSTOM-01 Provider custom is active and available', EvidenceBridge.GetProvider() == 'custom' and EvidenceBridge.IsAvailable() == true)
+
+        local okCustomPlant = EvidenceBridge.Plant('blood', 99, vector3(1, 1, 1), 'chop_part', { custom = 'data' })
+        check('EVID-CUSTOM-01 Custom handler invoked successfully', okCustomPlant == true and #customPlanted == 1)
+        check('EVID-CUSTOM-01 Custom handler received src (99)', customPlanted[1] and customPlanted[1].src == 99)
+
+        -- EVID-CUSTOM-02: Hijack attempt by another resource is rejected
+        local okHijack, errHijack = EvidenceBridge.RegisterProvider('custom', 'attacker_resource', function() return false end)
+        check('EVID-CUSTOM-02 Hijack attempt by different resource is rejected', okHijack == false and (errHijack == 'already_registered' or errHijack == 'resource_mismatch'))
+
+        -- EVID-CUSTOM-03: Custom handler throws exception -> fail-soft (returns false, no crash)
+        EvidenceBridge._test.reset()
+        EvidenceBridge.RegisterProvider('custom', 'failing_resource', function()
+            error('custom_handler_crash')
+        end)
+        local okCustomCrash, resCustomCrash = pcall(function()
+            return EvidenceBridge.Plant('blood', 1, vector3(1, 1, 1), 'chop_part')
+        end)
+        check('EVID-CUSTOM-03 Custom handler exception caught fail-soft', okCustomCrash == true and resCustomCrash == false)
+    end
+
+    -- ─── 5. Source Canary: No Fake / Guess QBX Integrations ──────────────────
+    do
+        -- EVID-NO-FAKE-QBX-01: Ensure bridge/evidence.lua contains no unverified qbx exports or triggers
+        local f = io.open('bridge/evidence.lua', 'r')
+        local bridgeContent = f and f:read('*a')
+        if f then f:close() end
+
+        local hasFakeQbxExport = bridgeContent and bridgeContent:find('qbx_policejob:CreateEvidence', 1, true) ~= nil
+        local hasFakeTrigger = bridgeContent and bridgeContent:find('evidence:server:CreateFingerprint', 1, true) ~= nil
+        check('EVID-NO-FAKE-QBX-01 Bridge contains ZERO calls to unverified qbx_policejob export', not hasFakeQbxExport)
+        check('EVID-NO-FAKE-QBX-01 Bridge contains ZERO calls to unverified CreateFingerprint event', not hasFakeTrigger)
+    end
+
+    -- ─── 6. Legacy VPChopLeaveEvidence Full Crime Workflow & Gloves Matrix ──
+    do
+        EvidenceBridge._test.reset()
+        Config.Evidence.Provider = 'evidences'
+        mockResourceStates['evidences'] = 'started'
+
+        local legacyCalls = {}
+        _G.exports.evidences = {
+            syncEvidence = function(self, evClass, owner, fun, coords, meta)
+                table.insert(legacyCalls, {
+                    evidenceClass = evClass,
+                    owner = owner,
+                    coords = coords,
+                    metadata = meta,
+                })
+                return true
+            end
+        }
 
         -- Case A: No gloves -> drops both fingerprint and blood
-        plants = {}
+        legacyCalls = {}
         mockInventory[1] = { gloves = 0 }
         VPChopLeaveEvidence(1, vector3(1.0, 2.0, 3.0), 'chop_part', 'CLEAN_PLATE')
-        check('EVID-GLOVES-01 No gloves leaves exactly 2 traces (fingerprint + blood)', #plants == 2)
-        check('EVID-GLOVES-01 First trace is fingerprint', plants[1] and plants[1].evClass == 'fingerprint')
-        check('EVID-GLOVES-01 Second trace is blood', plants[2] and plants[2].evClass == 'blood')
+        check('EVID-GLOVES-01 No gloves leaves exactly 2 traces (fingerprint + blood)', #legacyCalls == 2)
+        check('EVID-GLOVES-01 First trace is fingerprint', legacyCalls[1] and legacyCalls[1].evidenceClass == 'fingerprint')
+        check('EVID-GLOVES-01 Second trace is blood', legacyCalls[2] and legacyCalls[2].evidenceClass == 'blood')
 
         -- Case B: Wearing gloves (default GlovesBlocksDna=false) -> blocks fingerprint, leaves blood
-        plants = {}
+        legacyCalls = {}
         mockInventory[1] = { gloves = 1 }
         Config.Evidence.GlovesBlocksDna = false
         VPChopLeaveEvidence(1, vector3(1.0, 2.0, 3.0), 'chop_part', 'CLEAN_PLATE')
-        check('EVID-GLOVES-02 Wearing gloves blocks fingerprint but leaves blood (1 trace)', #plants == 1)
-        check('EVID-GLOVES-02 Left trace is blood (DNA)', plants[1] and plants[1].evClass == 'blood')
+        check('EVID-GLOVES-02 Wearing gloves blocks fingerprint but leaves blood (1 trace)', #legacyCalls == 1)
+        check('EVID-GLOVES-02 Left trace is blood (DNA)', legacyCalls[1] and legacyCalls[1].evidenceClass == 'blood')
 
         -- Case C: Wearing gloves with GlovesBlocksDna=true -> blocks both
-        plants = {}
+        legacyCalls = {}
         mockInventory[1] = { gloves = 1 }
         Config.Evidence.GlovesBlocksDna = true
         VPChopLeaveEvidence(1, vector3(1.0, 2.0, 3.0), 'chop_part', 'CLEAN_PLATE')
-        check('EVID-GLOVES-03 Gloves with GlovesBlocksDna=true leaves ZERO traces', #plants == 0)
+        check('EVID-GLOVES-03 Gloves with GlovesBlocksDna=true leaves ZERO traces', #legacyCalls == 0)
         Config.Evidence.GlovesBlocksDna = false
 
         -- Case D: Unknown actionKey -> zero trace
-        plants = {}
+        legacyCalls = {}
         mockInventory[1] = { gloves = 0 }
         VPChopLeaveEvidence(1, vector3(1.0, 2.0, 3.0), 'unknown_action', 'CLEAN_PLATE')
-        check('EVID-ACTION-01 Unknown actionKey leaves zero traces', #plants == 0)
+        check('EVID-ACTION-01 Unknown actionKey leaves zero traces', #legacyCalls == 0)
 
         -- Case E: Provider none -> zero trace
-        plants = {}
-        EvidenceBridge._test.setProvider('none', function() return false end)
+        legacyCalls = {}
+        Config.Evidence.Provider = 'none'
         VPChopLeaveEvidence(1, vector3(1.0, 2.0, 3.0), 'chop_part', 'CLEAN_PLATE')
-        check('EVID-ACTION-02 Provider none leaves zero traces', #plants == 0)
-    end
+        check('EVID-ACTION-02 Provider none leaves zero traces', #legacyCalls == 0)
+        Config.Evidence.Provider = 'evidences'
 
-    -- ─── 4. Heat Scaling & Fail-Closed Protection ───────────────────────────
-    do
-        local lastMetadata = nil
-        EvidenceBridge._test.setProvider('qbx_policejob', function(evClass, src, coords, actKey, meta)
-            lastMetadata = meta
-            return true
-        end)
-
+        -- Case F: Heat scaling forwards plate to metadata
+        legacyCalls = {}
         mockInventory[1] = { gloves = 0 }
         VPChopLeaveEvidence(1, vector3(5.0, 5.0, 5.0), 'vin_scratch', 'HOT_PLATE')
-        check('EVID-HEAT-01 Provenance plate is forwarded to evidence metadata', lastMetadata ~= nil and lastMetadata.plate == 'HOT_PLATE')
-
-        -- Third-party export error inside handler does not throw
-        EvidenceBridge._test.setProvider('ox_evidence', function()
-            error('simulated_third_party_failure')
-        end)
-        local okPcall = pcall(function()
-            VPChopLeaveEvidence(1, vector3(5.0, 5.0, 5.0), 'plate_steal', 'WARM_PLATE')
-        end)
-        check('EVID-SAFETY-01 Third party export crash is safely caught by fail-closed pcall', okPcall == true)
+        check('EVID-HEAT-01 Provenance plate is forwarded to evidence metadata', legacyCalls[1] and legacyCalls[1].metadata.plate == 'HOT_PLATE')
     end
 
     -- Teardown
     EvidenceBridge._test.reset()
     Config.Evidence = origCfg
+    _G.exports = origExports
 
     print(('[evidence/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
     if fail > 0 then

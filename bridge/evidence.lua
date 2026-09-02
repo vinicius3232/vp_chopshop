@@ -2,11 +2,12 @@
 -- ═══════════════════════════════════════════════════════════════════════════════
 --  [v1.18 FORENSICS V2] EvidenceBridge — Multi-Framework Police Evidence Bridge
 --  Conector server-side modular para sistemas de vestígios e cena de crime.
---  Suporta: vp_crimescene, qbx_policejob, ox_evidence, evidences (CFX legacy), none.
+--  Suporta: evidences (noobsystems), vp_crimescene, custom, none.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 EvidenceBridge = EvidenceBridge or {}
 
+local _customProviders = {}
 local _mockHandler = nil
 local _mockProvider = nil
 local _lastPlant = nil
@@ -17,6 +18,7 @@ local function getEvidenceConfig()
     return Config.Evidence or {
         Enable = true,
         Provider = 'auto',
+        AutoOrder = { 'evidences', 'vp_crimescene' },
         GlovesItem = 'gloves',
         GlovesBlocksDna = false,
         DnaType = 'blood',
@@ -32,8 +34,44 @@ local function getEvidenceConfig()
     }
 end
 
---- Resolve o provedor de evidência ativo
----@return string provider ('vp_crimescene' | 'qbx_policejob' | 'ox_evidence' | 'evidences' | 'none')
+--- Registra um provedor de evidência customizado server-side
+---@param name string           identificador do provider (ex: 'custom' ou nome do resource)
+---@param resourceName string   nome do resource chamador
+---@param handler function      função que processa o vestígio (evidenceClass, src, coords, actionKey, meta)
+---@return boolean success, string|nil err
+function EvidenceBridge.RegisterProvider(name, resourceName, handler)
+    if type(name) ~= 'string' or name == '' then
+        return false, 'invalid_name'
+    end
+    if type(handler) ~= 'function' then
+        return false, 'invalid_handler'
+    end
+
+    local invoking = (GetInvokingResource and GetInvokingResource()) or resourceName or 'vp_chopshop'
+    if resourceName and invoking ~= resourceName and invoking ~= 'vp_chopshop' then
+        return false, 'resource_mismatch'
+    end
+
+    if _customProviders[name] and _customProviders[name].resource ~= invoking then
+        return false, 'already_registered'
+    end
+
+    _customProviders[name] = {
+        resource = invoking,
+        handler = handler,
+    }
+    return true
+end
+
+--- Export server-side para registro de provider custom
+if exports then
+    exports('RegisterEvidenceProvider', function(name, resourceName, handler)
+        return EvidenceBridge.RegisterProvider(name, resourceName, handler)
+    end)
+end
+
+--- Resolve o provedor de evidência ativo de forma segura e sem polling
+---@return string provider ('evidences' | 'vp_crimescene' | 'custom' | 'none')
 function EvidenceBridge.GetProvider()
     if _mockProvider then return _mockProvider end
 
@@ -43,18 +81,29 @@ function EvidenceBridge.GetProvider()
     local explicit = cfg.Provider
     if explicit and explicit ~= 'auto' then
         if explicit == 'none' then return 'none' end
-        if GetResourceState and GetResourceState(explicit) == 'started' then
-            return explicit
+        if explicit == 'custom' then
+            return (_customProviders['custom'] and 'custom') or 'none'
         end
+        if explicit == 'evidences' or explicit == 'vp_crimescene' then
+            if GetResourceState and GetResourceState(explicit) == 'started' then
+                return explicit
+            end
+            return 'none'
+        end
+        -- Provider desconhecido -> fallback seguro
         return 'none'
     end
 
-    -- Modo 'auto': probing ordenado dos recursos suportados
-    if GetResourceState then
-        if GetResourceState('vp_crimescene') == 'started' then return 'vp_crimescene' end
-        if GetResourceState('qbx_policejob') == 'started' then return 'qbx_policejob' end
-        if GetResourceState('ox_evidence') == 'started' then return 'ox_evidence' end
-        if GetResourceState('evidences') == 'started' then return 'evidences' end
+    -- Modo 'auto': probing ordenado conforme Config.Evidence.AutoOrder
+    local order = cfg.AutoOrder or { 'evidences', 'vp_crimescene' }
+    for _, provName in ipairs(order) do
+        if provName == 'custom' and _customProviders['custom'] then
+            return 'custom'
+        elseif (provName == 'evidences' or provName == 'vp_crimescene') and GetResourceState then
+            if GetResourceState(provName) == 'started' then
+                return provName
+            end
+        end
     end
 
     return 'none'
@@ -117,28 +166,27 @@ function EvidenceBridge.Plant(evidenceClass, src, coords, actionKey, metadata)
 
     local success = false
     pcall(function()
-        if provider == 'vp_crimescene' then
-            -- vp_crimescene modela vestígios via AddGroundEvidence
-            local evType = (evidenceClass == 'fingerprint' and 'fingerprint') or 'blood'
-            exports.vp_crimescene:AddGroundEvidence(evType, coords, src, meta)
-            success = true
-        elseif provider == 'qbx_policejob' then
-            if exports.qbx_policejob and exports.qbx_policejob.CreateEvidence then
-                exports.qbx_policejob:CreateEvidence(evidenceClass, coords, meta)
-                success = true
-            elseif TriggerEvent then
-                TriggerEvent('evidence:server:CreateFingerprint', coords, src)
-                success = true
-            end
-        elseif provider == 'ox_evidence' then
-            if exports.ox_evidence and exports.ox_evidence.addEvidence then
-                exports.ox_evidence:addEvidence(coords, evidenceClass, meta)
-                success = true
-            end
-        elseif provider == 'evidences' then
+        if provider == 'evidences' then
+            -- [UPSTREAM REFERENCE] https://github.com/noobsystems/evidences
+            -- server/evidences/api.lua: syncEvidence(evidenceClass, owner, fun, ...)
+            -- Invocado com functionName = 'atCoords' para posicionar no mundo
             if exports.evidences and exports.evidences.syncEvidence then
-                exports.evidences:syncEvidence(evidenceClass, coords, src, meta)
+                exports.evidences:syncEvidence(evidenceClass, src, 'atCoords', coords, meta)
                 success = true
+            end
+        elseif provider == 'vp_crimescene' then
+            -- vp_crimescene modela vestígios via AddGroundEvidence(evidenceType, coords, playerSrc, metadata)
+            if exports.vp_crimescene and exports.vp_crimescene.AddGroundEvidence then
+                exports.vp_crimescene:AddGroundEvidence(evidenceClass, coords, src, meta)
+                success = true
+            end
+        elseif provider == 'custom' then
+            local prov = _customProviders['custom']
+            if prov and prov.handler then
+                local okCustom, resCustom = pcall(prov.handler, evidenceClass, src, coords, actionKey, meta)
+                if okCustom and resCustom ~= false then
+                    success = true
+                end
             end
         end
     end)
@@ -194,9 +242,13 @@ EvidenceBridge._test = {
     getLastPlant = function()
         return _lastPlant
     end,
+    getCustomProviders = function()
+        return _customProviders
+    end,
     reset = function()
         _mockProvider = nil
         _mockHandler = nil
         _lastPlant = nil
+        _customProviders = {}
     end,
 }
