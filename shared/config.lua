@@ -1141,6 +1141,37 @@ Config.Evidence = {
 }
 
 -- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.18 P4.2] GPS Tracker & LoJack — Rastreamento Policial & Counterplay ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.Tracker = {
+    Enable = true,                 -- liga/desliga o sistema de rastreadores GPS
+    DefaultChance = 0.40,          -- chance base (0..1) se a classe não estiver listada
+    ClassChances = {
+        [0]  = 0.15,               -- Compacts
+        [1]  = 0.20,               -- Sedans
+        [2]  = 0.30,               -- SUVs
+        [3]  = 0.35,               -- Coupes
+        [4]  = 0.40,               -- Muscle
+        [5]  = 0.45,               -- Sports Classics
+        [6]  = 0.65,               -- Sports
+        [7]  = 0.85,               -- Super
+        [8]  = 0.25,               -- Motorcycles
+        [9]  = 0.30,               -- Off-road
+        [10] = 0.20,               -- Industrial
+        [11] = 0.20,               -- Utility
+        [12] = 0.20,               -- Vans
+    },
+    RequiredTool = 'pliers',       -- ferramenta primária para desarmar
+    ToolFallback = 'screwdriver',  -- ferramenta alternativa aceita
+    MinDurationMs = 7000,          -- tempo mínimo de remoção no servidor
+    MaxDistance = 3.5,             -- raio máximo de interação
+    PingIntervalSeconds = 15,      -- intervalo (s) entre pings de sinal para a polícia
+    BlipDurationSeconds = 10,      -- duração (s) do blip visual no mapa policial
+    PoliceJobs = { 'police', 'sheriff', 'bcso', 'state' },
+    RemovalEvidence = true,        -- deixa digital/DNA ao remover o rastreador
+}
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
 -- ║  [TYRE] Marcas de pneu — pista forense de FUGA (100% interna ao vp_chopshop) ║
 -- ╚══════════════════════════════════════════════════════════════════════════╝
 --- [TYRE] Conceito: após um crime do chopshop, o criminoso fica "armado" por uma
