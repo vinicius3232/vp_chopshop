@@ -53,6 +53,7 @@ client_scripts {
     'client/minigame/fallback.lua',
     'client/minigame/core.lua',
     'client/minigame/demo.lua',
+    'client/tracker.lua',       -- [v1.18 P4.2] interação de rastreador GPS / LoJack e beacon policial
     'client/main.lua',
 }
 
@@ -70,6 +71,8 @@ server_scripts {
     -- ANTES de db.lua/heat.lua/plates.lua/main.lua.
     'bridge/evidence.lua',
     'server/evidence_bridge_spec.lua', -- [v1.18 FORENSICS V2] self-gated (vp_chopshop_selftest 1)
+    'server/tracker.lua',              -- [v1.18 P4.2] autoridade de rastreador GPS / LoJack
+    'server/tracker_spec.lua',         -- [v1.18 P4.2] self-gated (vp_chopshop_selftest 1)
     'server/db.lua',
     'server/validate.lua',
     -- [v1.15 arch] ChopSession — fonte server-authoritative do estado de desmanche.

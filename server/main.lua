@@ -722,6 +722,18 @@ lib.callback.register('vp_chopshop:catalytic:start', function(source, netId)
     return { ok = true, token = token, durationMs = minDurationMs }
 end)
 
+--- Cancelamento defensivo de sessão de furto de catalisador
+lib.callback.register('vp_chopshop:catalytic:cancel', function(source, netId, token)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if type(token) ~= 'string' or token == '' then return { ok = false, err = 'invalid_token' } end
+    local theft = _catalyticThefts[source]
+    if not theft or theft.token ~= token then
+        return { ok = false, err = 'no_session' }
+    end
+    _catalyticThefts[source] = nil
+    return { ok = true }
+end)
+
 --- [v1.16 SEC-1.1 / SEC-1.2 / SEC-1.3 CAT-ACTION] Conclusão do furto de catalisador (Replay Idempotente + TTL + Token Identity)
 lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, token)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end

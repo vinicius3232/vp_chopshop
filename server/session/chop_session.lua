@@ -286,6 +286,12 @@ function ChopSession.Create(netId, src)
     local vsid, fp = mintVehicleIdentity(netId)
     fp.markerSet = EntityAPI.tag(ent, vsid) == true   -- [v1.15 #7] crava o marcador
     local now = os.time()
+
+    if rawget(_G, 'TrackerManager') and TrackerManager.ObserveVehicle then
+        pcall(function()
+            TrackerManager.ObserveVehicle(netId, 'chop_session_create')
+        end)
+    end
     local s = {
         id           = ('cs:%d'):format(_sidSeq),
         vehicle      = {

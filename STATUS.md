@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-02
-**Branch de trabalho:** `feat/v1.18-evidence-bridge-multi` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `ebcf8fb`)
+**Branch de trabalho:** `feat/v1.18-p4.2-gps-lojack` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `423fbfe`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1594 PASS / 0 FAIL / 1594 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1742 PASS / 0 FAIL / 1742 asserts**
 
 ---
 
@@ -30,7 +30,8 @@ BROKER-5.1 — NPC Context UI & Readiness Hardening   ✅ HOMOLOGADO & MERGED (P
 BROKER-6.2 — Static Gate Approved & Live QA Matrix ✅ HOMOLOGADO & MERGED (PR #47, merge SHA ebcf8fb)
 ─────────────────────────────────────────────────────────────────────────
 v1.18 Camada de Crime & Perícia Policial Profunda:
-P4.1.1     — EvidenceBridge Provider Hardening      🚧 EM VALIDAÇÃO (PR #48)
+P4.1.1     — EvidenceBridge Provider Hardening      ✅ HOMOLOGADO & MERGED (PR #48, merge SHA 423fbfe)
+P4.2       — GPS Tracker / LoJack & Minigame        🚧 EM VALIDAÇÃO (feat/v1.18-p4.2-gps-lojack)
 ─────────────────────────────────────────────────────────────────────────
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)

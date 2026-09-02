@@ -314,6 +314,24 @@ function InvCount(_, _) return 1 end
 function VPChopLeaveEvidence(_, _, _, _) end
 function VPChopArmTyreWindow(_, _) end
 function VPChopChopPartCommit(_, _, _) return { ok = true } end  -- overridden pelo spec de tyre
+function VPChopCatalyticShouldDispatch(chancePercent, rollPercent)
+    local chance = tonumber(chancePercent)
+    if not chance or chance ~= chance or chance == math.huge or chance == -math.huge then
+        chance = 30
+    end
+    chance = math.max(0, math.min(100, math.floor(chance)))
+    if chance <= 0 then return false end
+    if chance >= 100 then return true end
+
+    local roll = rollPercent
+    if roll == nil then
+        roll = math.random(1, 100)
+    else
+        roll = tonumber(roll) or 1
+        roll = math.max(1, math.min(100, math.floor(roll)))
+    end
+    return roll <= chance
+end
 
 -- [PR-D] Stubs de resource/export p/ bridge/server_vehicle.lua (discard ownership).
 _G.FAKE_RESOURCES = { qbx_core = 'started', qbx_vehicles = 'started' }
@@ -429,7 +447,15 @@ _G.Config = {
         Enable = true,
         BlockOwnVehicle = false,
         Bones = { 'exhaust', 'exhaust_2', 'chassis' },
-        PoliceAlertChance = 40,
+        Minigame = {
+            Enable = true,
+            Stages = 2,
+            Difficulty = { 'easy', 'medium' },
+            Inputs = { 'w', 'a', 's', 'd' },
+        },
+        SparksVfx = true,
+        PoliceAlertChance = 30,
+        PoliceAlertOnFail = 100,
         ProgressMs = 7000,
         Payout = { min = 1200, max = 2200 },
         BenchMaterials = {
@@ -729,6 +755,7 @@ dofile(base .. '/bridge/evidence.lua')                -- [v1.18 FORENSICS V2] pr
 dofile(base .. '/server/broker/market.lua')              -- [v1.17 BROKER-1] provê BrokerMarket
 dofile(base .. '/server/broker/contracts.lua')           -- [v1.17 BROKER-3] provê BrokerContracts
 dofile(base .. '/bridge/workshop.lua')                   -- [v1.17 BROKER-4] provê WorkshopBridge
+dofile(base .. '/server/tracker.lua')                  -- [v1.18 P4.2] provê TrackerManager
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
@@ -756,6 +783,7 @@ dofile(base .. '/server/broker/contracts_spec.lua')         -- [v1.17 BROKER-3]
 dofile(base .. '/server/broker/workshop_spec.lua')          -- [v1.17 BROKER-4]
 dofile(base .. '/server/broker/npc_context_spec.lua')       -- [v1.17 BROKER-5]
 dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS V2]
+dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]
 
 local anyFail = false
 for i = specStart, #threads do

@@ -881,10 +881,24 @@ Config.CatalyticTheft = {
     --- Bones no veículo onde a opção de cortar catalisador é exibida
     Bones = { 'exhaust', 'exhaust_2', 'chassis' },
 
-    --- Chance percentual (0 a 100) de disparar o alarme e chamar a polícia pelo ruído da serra
-    PoliceAlertChance = 40,
+    --- Minigame de corte duplo de escapamento (tubo dianteiro e tubo traseiro)
+    Minigame = {
+        Enable = true,
+        Stages = 2,
+        Difficulty = { 'easy', 'medium' },
+        Inputs = { 'w', 'a', 's', 'd' },
+    },
 
-    --- Tempo de corte do escapamento em milissegundos
+    --- Efeito visual de faíscas de serra durante o corte do escape
+    SparksVfx = true,
+
+    --- Chance percentual (0 a 100) de disparar o alarme e chamar a polícia em corte normal
+    PoliceAlertChance = 30,
+
+    --- Chance de alerta policial caso o jogador falhe no minigame (ruído súbito de metal/serra travando)
+    PoliceAlertOnFail = 100,
+
+    --- Tempo total de corte do escapamento em milissegundos (dividido entre as 2 etapas)
     ProgressMs = 7000,
 
     --- Animação de corte com serra
@@ -1137,7 +1151,39 @@ Config.Evidence = {
         plate_steal = { fingerprint = 0.60, dna = 0.10 },
         plate_forge = { fingerprint = 0.40, dna = 0.05 },
         plate_apply = { fingerprint = 0.50, dna = 0.08 },
+        tracker_removal = { fingerprint = 0.65, dna = 0.15 },
     },
+}
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.18 P4.2] GPS Tracker & LoJack — Rastreamento Policial & Counterplay ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.Tracker = {
+    Enable = true,                 -- liga/desliga o sistema de rastreadores GPS
+    DefaultChance = 0.40,          -- chance base (0..1) se a classe não estiver listada
+    ClassChances = {
+        [0]  = 0.15,               -- Compacts
+        [1]  = 0.20,               -- Sedans
+        [2]  = 0.30,               -- SUVs
+        [3]  = 0.35,               -- Coupes
+        [4]  = 0.40,               -- Muscle
+        [5]  = 0.45,               -- Sports Classics
+        [6]  = 0.65,               -- Sports
+        [7]  = 0.85,               -- Super
+        [8]  = 0.25,               -- Motorcycles
+        [9]  = 0.30,               -- Off-road
+        [10] = 0.20,               -- Industrial
+        [11] = 0.20,               -- Utility
+        [12] = 0.20,               -- Vans
+    },
+    RequiredTool = 'pliers',       -- ferramenta primária para desarmar
+    ToolFallback = 'screwdriver',  -- ferramenta alternativa aceita
+    MinDurationMs = 7000,          -- tempo mínimo de remoção no servidor
+    MaxDistance = 3.5,             -- raio máximo de interação
+    PingIntervalSeconds = 15,      -- intervalo (s) entre pings de sinal para a polícia
+    BlipDurationSeconds = 10,      -- duração (s) do blip visual no mapa policial
+    PoliceJobs = { 'police', 'sheriff', 'bcso', 'state' },
+    RemovalEvidence = true,        -- deixa digital/DNA ao remover o rastreador
 }
 
 -- ╔══════════════════════════════════════════════════════════════════════════╗
