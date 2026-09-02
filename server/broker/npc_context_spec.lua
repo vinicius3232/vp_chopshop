@@ -141,12 +141,48 @@ local function run()
         check('NPC-CTX-06 Trust 3: deliverCar capability ainda é false', resT3.capabilities.deliverCar == false)
     end
 
-    -- ─── NPC-CTX-07: Trust 4 Capabilities ───────────────────────────────────
+    -- ─── NPC-CTX-07: Trust 4 & Tier 4 Capabilities ─────────────────────────
     do
         mockTrustLevel = 4
+        mockProgression = { tier = 4, xp = 5000, nextXp = nil, totalChops = 50 }
         local resT4 = getContextCb(testSrc)
-        check('NPC-CTX-07 Trust 4: deliverCar capability é true', resT4.capabilities.deliverCar == true)
-        check('NPC-CTX-07 Trust 4: todas as capacidades comerciais ativas', resT4.capabilities.sellPart and resT4.capabilities.hotJob and resT4.capabilities.legacyOrder and resT4.capabilities.deliverCar)
+        check('NPC-CTX-07 Trust 4 + Tier 4: deliverCar capability é true', resT4.capabilities.deliverCar == true)
+        check('NPC-CTX-07 Trust 4 + Tier 4: todas as capacidades comerciais ativas', resT4.capabilities.sellPart and resT4.capabilities.hotJob and resT4.capabilities.legacyOrder and resT4.capabilities.deliverCar)
+        mockProgression = { tier = 1, xp = 150, nextXp = 500, totalChops = 5 }
+    end
+
+    -- ─── NPC-DELIVERCAR-01..04: deliverCar Capability Parity with Server Gate
+    do
+        -- NPC-DELIVERCAR-01: Trust 3, Tier 4 -> deliverCar == false
+        mockTrustLevel = 3
+        mockProgression = { tier = 4, xp = 5000, nextXp = nil, totalChops = 50 }
+        local resDeliv01 = getContextCb(testSrc)
+        check('NPC-DELIVERCAR-01 Trust 3 + Tier 4: deliverCar capability é false', resDeliv01.capabilities.deliverCar == false)
+
+        -- NPC-DELIVERCAR-02: Trust 4, Tier 3 -> deliverCar == false
+        mockTrustLevel = 4
+        mockProgression = { tier = 3, xp = 2500, nextXp = 5000, totalChops = 25 }
+        local resDeliv02 = getContextCb(testSrc)
+        check('NPC-DELIVERCAR-02 Trust 4 + Tier 3: deliverCar capability é false', resDeliv02.capabilities.deliverCar == false)
+
+        -- NPC-DELIVERCAR-03: Trust 4, Tier 4 -> deliverCar == true
+        mockTrustLevel = 4
+        mockProgression = { tier = 4, xp = 5000, nextXp = nil, totalChops = 50 }
+        local resDeliv03 = getContextCb(testSrc)
+        check('NPC-DELIVERCAR-03 Trust 4 + Tier 4: deliverCar capability é true', resDeliv03.capabilities.deliverCar == true)
+
+        -- NPC-DELIVERCAR-04: Reabertura após mudança de Tier 3 -> Tier 4
+        mockTrustLevel = 4
+        mockProgression = { tier = 3, xp = 2500, nextXp = 5000, totalChops = 25 }
+        local resBefore = getContextCb(testSrc)
+        check('NPC-DELIVERCAR-04 Antes do level-up (Tier 3): deliverCar é false', resBefore.capabilities.deliverCar == false)
+
+        mockProgression = { tier = 4, xp = 5000, nextXp = nil, totalChops = 50 }
+        local resAfter = getContextCb(testSrc)
+        check('NPC-DELIVERCAR-04 Após level-up (Tier 4): deliverCar é true', resAfter.capabilities.deliverCar == true)
+
+        -- Restore base progression mock
+        mockProgression = { tier = 1, xp = 150, nextXp = 500, totalChops = 5 }
     end
 
     -- ─── NPC-CTX-08: Fresh Server Context on Repeat Opens ───────────────────

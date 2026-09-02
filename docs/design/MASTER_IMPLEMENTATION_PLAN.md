@@ -1,117 +1,94 @@
-# MASTER_IMPLEMENTATION_PLAN — vp_chopshop v1.16-dev
+# MASTER_IMPLEMENTATION_PLAN — vp_chopshop
 
-**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 632 PASS / 0 FAIL
-**Progresso:** ver [`STATUS.md`](../../STATUS.md) na raiz. Este doc é o roadmap completo.
-
----
-
-## 1. Registro de decisão
-
-**2026-08-28 — o dono suspendeu o RC freeze.** Justificativa: a direção está
-decidida (chop shop modular + processamento de peça); manter a v1.15 congelada
-para a QA testar um código que já vai ser reescrito é desperdício de esforço de
-teste. **Novo alvo:** um build consolidado (`v1.16-dev`) que a equipe de teste
-valida como um todo, já moldado para o que se quer.
-
-**O que isto NÃO significa:** reescrever `ChopSession` / `ActionSession` /
-`discard` / `deliverCar` do zero. São 500+ asserts sobre a parte mais difícil de
-acertar (concorrência, idempotência, transação de dinheiro, netId reuse,
-fail-closed). **Esses primitivos são a fundação.** "Do zero" aqui = completar e
-consolidar tudo em volta deles; construir os elos que faltam (`Part Registry`,
-`interaction`, `vehicle_part`, `ProcessSession`, `VehicleSecurity`, contratos),
-não jogar fora o núcleo provado.
-
-**O que passa a valer:** GO ARQUITETURAL e GO DE RELEASE colapsam num só fluxo —
-cada sistema entra como PR em `pr-h`, com harness verde, revisão adversarial
-(OmniRoute `-Kind challenge`) e **GO explícito do dono por PR**. A QA testa `pr-h`;
-`main` fica em `v1.14.3` até a validação completa.
+**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 1545 PASS / 0 FAIL / 1545 asserts  
+**Progresso:** ver [`STATUS.md`](../../STATUS.md) na raiz. Este documento é o roadmap e plano mestre de implementação.
 
 ---
 
-## 2. Estratégia de branch
+## 1. Registro de Arquitetura & Diretrizes
 
-`pr-h` é a **branch de integração rolante**. Cada item (`Pn.x`) = uma branch
-`feat/v1.16-<id>` a partir de `pr-h`, PR com base `pr-h`, squash-merge em `pr-h`
-após o GO. `main` intocado.
-
-### Checklist por PR
-Ver [`AGENTS.md`](../../AGENTS.md) §4. Resumo: implementar → `lua tools/run_spec.lua .`
-verde → `luac -p` → OmniRoute challenge (conferir os achados) → commit pequeno →
-push → PR base `pr-h` → memória → **PARAR** para GO.
+1. **Server-Authoritative First:** Toda lógica de negócio, cotação, payout, quota de contrato, locks de peças e transações SAGA pertencem exclusivamente ao servidor.
+2. **Fail-Closed em Qualquer Falha:** Falha de DB, desconexão ou falha de inventário nunca duplica dinheiro nem gera replay indevido.
+3. **Pequenas PRs Empilhadas:** Cada etapa possui sua PR isolada contra `pr-h`, com 100% de cobertura de testes e validação estática.
 
 ---
 
-## 3. Sequência consolidada
+## 2. Histórico de Fases Consolidadas
 
-Funde: `PART_PROCESSING_RFC` + `ROADMAP_AUDIT` (#12→#26) + Part Registry spike
-(FASE A→F) + RC-FINDING-01 (minigame) + `docs/research/RESTART_RECOVERY_STUDY`.
+### ✅ FASE 0 — Base & Concorrência Server-Side (v1.15)
+- `ChopSession` e `ActionSession` com `VehicleSessionId` (`vsid`) autoritativo.
+- `CarcassLedger` persistente e proteção anti-re-discard pós-restart.
+- Terminalização atômica de `deliverCar` e `TyreEntitlement`.
 
-### FASE 0 — base + dores concretas da QA ✅ COMPLETA
+### ✅ FASE 1 — Part Registry Schema v2 (v1.16)
+- Registry autoritativo com schema v2 congelado (`shared/registry/parts.lua` e `tools.lua`).
+- Eliminação definitiva de tabelas de peças client-authoritative.
 
-| ID | O quê | PR |
-|---|---|---|
-| **P0.1** | Branch de integração + baseline. | — |
-| **P0.2** | **Minigame de placa** — `VPChopPlateBoltMinigame(vehicle, isRear)`: a face deixa de ser hardcoded na traseira (`client/plates.lua` resolve por `GetOffsetFromEntityGivenWorldCoords .y>0`); `runBoltSurface` endurecido (clamp de giro; degrada p/ skillCheck se nada projeta >2.5s). **Asset pago `stream/bolt.ydr`+`wheel_spacer.ytyp` removido**; `stream/` esvaziado (`nacelle.*`/`lr_supermod_*` = elevador morto). `Bolt3D.Enable=false` (skillCheck ativo). | **#14** |
-| **P0.3** | **chore M1+M2** — 4 notificações server hardcoded → `L()` (5 chaves × 5 idiomas); bloco morto de props de pneu removido de `client/fence.lua` (−215 linhas). Zero mudança de comportamento. | **#15** |
-| **P0.4** | **Restart recovery** — tabela `vp_chop_carcass` (PK net_id+model, TTL 1800s), `server/session/carcass_ledger.lua` (`VPChopCarcassLedger`, DB seam injetável, 32 asserts), barreira `alreadyProcessed` **antes** do pagamento do discard → `already_discarded`, `server/session/restart_recovery.lua` (sweep de boot, só re-deleta com match de `vsid` vivo). Fecha a dupe da Fase 20 do RC. Barreira do `deliverCar` **inalterada** (statebag `vpChopDeliveredMark`). `Config.RestartRecovery`. | **#16** |
+### ✅ FASE 2 & 3 — Gameplay Físico & Minigames 3D (v1.16)
+- Minigames contextuais de interação física (Rodas 5-bolt, Painéis, Motor com parafusadeira e Carcaça estrutural com maçarico de solda).
+- Carregamento físico de peças nos braços (`PartEntitlement`), drop no chão e desmanche integrado na bancada.
+- Dano dinâmico de motor (`EngineHealth`), furto de catalisadores e desmanche de peças em carros de jogadores com proteção anti-auto-farm (`BlockOwnVehicle`).
 
-### FASE 1 — Part Registry vira a autoridade ✅ COMPLETA
-
-| ID | O quê | PR |
-|---|---|---|
-| **P1.1** | `shared/registry/{tools,parts,registry_spec}.lua` (spike, schema v2 congelado, 28 asserts) trazidos INERTES. **DRIFT CHECK: zero drift** (P0.* não tocou ChopParts/Config.Tools/MinDurationMs/advanced_chop). | **#17** |
-| **P1.2** (FASE B) | `shared/chop_parts.lua` vira projeção de `VPChopPartRegistry.projectChopParts()` (byte-a-byte). | **#18** |
-| **P1.3** (FASE C) | `bonnet` valida via `registryValidate` (vertical slice); demais no hardcode. | **#19** |
-| **P1.4** (FASE D) | `adv_door`/`adv_engine`/`adv_carcass` validam via registry (`requires`/`toolClass`/`gates`); fallback hardcode por kind. | **#20** |
-| **P1.5** (FASE E) | Registry OBRIGATÓRIO (`error()` no load); fallbacks removidos. `Config.AdvancedChop.SawItem`/`ScrewdriverItem` mortos removidos. **Capability nova:** `enabled=false` por peça → `'part'` (inchopável). | **#21** |
-| **P1.6** (FASE F) | 11 sites server saem de `ChopParts[k].kind` → `VPChopPartGtaClass(k)`. | **#22** |
-| **P2.1** (enxuto) | 6 sites client saem de `ChopParts` → `VPChopPartRegistry.get()`. `chop_parts.lua` deletado → `shared/part_class.lua` (só `VPChopPartGtaClass`). **`ChopParts`/`ChopPartOrder` não existem mais.** | **#23** |
-
-### CHECKPOINT DE QA ⏸ — a bola está aqui
-
-`docs/audit/V116_INTEGRATION_QA.md` (**#24**). Deploy da `pr-h` num servidor QBox
-e rodar Q1–Q5. **Fase 2 só começa depois de Q1–Q4 sem FAIL P0/P1.**
-
-### FASE 2 — peça física + interação  *(AUDIT #14-17)* ⏸
-
-| ID | O quê |
-|---|---|
-| **P2.2** | **Wheels V2** — estados explícitos `AVAILABLE→LOCKED→REMOVING→REMOVED→CARRIED→STORED`; `bridge/minigames.lua` provider (lib.skillCheck / boii / bolt-v2). Transições server-side. |
-| **P2.3** | `server/vehicle_condition.lua` — `VehicleConditionSnapshot` 1×/ChopSession via `lib.getVehicleProperties`; client mede → server clampa → economia usa snapshot. |
-| **P2.4** | `vehicle_part{partType='engine'}` — motor deixa de ser 5× `car_parts`; vira peça com metadata server-only. **Aqui** entra o carry genérico (`PartEntitlement` estende `TyreEntitlement`, `PartStorage` estende `TruckStorage`) e o `client/interaction.lua` (resolve ponto por bone/offset). Não antes — sem peça não-pneu carregável, é churn. |
-
-### FASE 3 — processamento de peça  *(PART_PROCESSING_RFC #12-17)* ⏸
-
-`vehicle_part` genérico + `Config.PartProcessing` · `ProcessSession` (espelha
-ActionSession, sem veículo) + specs PROC1-20 · executor + quarentena · bench UX ·
-forense `processed` · contrato de oficina (`ConsumeCarParts`/`QueryCarParts` +
-`bridge/workshop.lua`). Ver `docs/design/PART_PROCESSING_RFC.md`.
-
-### FASE 4 — camada de crime  *(AUDIT #18-22)* ⏸
-
-Provenance V2 · `vehicle_security.lua` (alarm/immobilizer/tracker/ecuLock/vin/keys)
-· tracker gameplay (`ActionSession(kind=tracker)`) · `contract_session.lua` +
-Fence Contracts V2 · Heat V2 (0-100 probabilístico).
-
-### FASE 5 — polish + release ⏸
-
-Split visual do desmanche (não loop por-frame) · **CI gate** (`.github/workflows/spec.yml`
-— primeiro corrigir o exit code do harness: hoje `os.exit(1)` só em thread error,
-não em FAIL de asserção) · `Config.Debug` + níveis de log · hardening + soak.
+### ✅ FASE BROKER — Chop Broker, Dynamic Market & Workshop SAGA (v1.17)
+- **BROKER-1 / 2:** Motor de mercado dinâmico (`BrokerMarket`) com curva de oferta/demanda elástica persistida no banco de dados.
+- **BROKER-3:** Alta procura global rotativa e contratos pessoais sob medida (`BrokerContracts`).
+- **BROKER-4:** Barramento transacional distribuído para oficinas mecânicas (`WorkshopBridge` SAGA com journal durável e `stablePartIdentity`).
+- **BROKER-5 / 5.1:** Persona unificada do Intermediário com interface contextual `ox_lib` e paridade integral em 5 idiomas (`pt`, `en`, `es`, `fr`, `tr`).
+- **BROKER-6 / 6.2:** Release Candidate gate, checklist de Live QA ([`docs/BROKER-6_LIVE_QA.md`](../BROKER-6_LIVE_QA.md)) e 12 invariantes canônicos congelados ([`docs/BROKER-6_RELEASE_INVARIANTS.md`](../BROKER-6_RELEASE_INVARIANTS.md)).
 
 ---
 
-## 4. Sistemas KEEP (não tocar — já corretos)
+## 3. Roadmap de Implementação Futura (v1.18+)
 
-VehicleSessionId · ChopSession FSM · jackstand server-auth · invariante
-"tempo sozinho nunca destrói committed state" · identidade via `vsid` ·
-anti-exploit · concorrência (`LockPart`/`PinPartLock`/`OpenBySrc`) · 0 threads
-por-frame · bridges QBox-first. **IGNORE:** NUI de tuning, boss menu/society,
-engine swap real (só áudio), persistência de mods por placa.
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       ROADMAP PÓS-v1.17 (FASES FUTURAS)                     │
+├───────────────────┬─────────────────────────────────────────────────────────┤
+│ FASE 4 (v1.18)    │ Camada de Crime & Perícia Policial Profunda (Forense V2) │
+│ FASE 5 (v1.19)    │ Adaptadores Reais de Oficina Mecânica (Workshop Live)   │
+│ FASE 6 (v1.20)    │ Territórios de Gangue & Chop Zones (Gangs Integration)  │
+│ FASE 7 (v1.21)    │ Reconstrução Veicular & VIN Rebirth (Veículo Limpo)     │
+│ FASE 8 (v1.22)    │ Emboscadas V2, Sindicato Rival & Polish de Áudio/VFX    │
+└───────────────────┴─────────────────────────────────────────────────────────┘
+```
 
-## 5. Referências
+---
 
-Reuso de **conceito**, nunca de código (licenças: `docs/research/EXTERNAL_RESEARCH_MATRIX.md`).
-`qbx_core/vehicle-persistence` (padrão de P0.4) · `renzu_projectcars` (anti-exemplo
-client-authoritative) · `ox_inventory` metadata (P2.4/P3) · `renzu_engine`/`an-engineswap`
-(P2.4, quando houver adapter real).
+### 🎯 FASE 4 (v1.18) — Camada de Crime & Perícia Policial Profunda
+- **P4.1 — `EvidenceBridge` Unificado:** Bridge multi-framework com detecção dinâmica de `qbx_policejob`, `ox_evidence`, `evidences` (CFX) ou standalone inerte.
+- **P4.2 — Sistema de Rastreadores GPS / LoJack:** Veículos de alto valor com chance de rastreador ativo emitindo pings periódicos à polícia; minigame com ferramenta de corte para desativação física (`ActionSession(kind='tracker_removal')`).
+- **P4.3 — Scanner Policial & Séries Adulteradas:** Item policial `parts_scanner` para perícia forense de números de série gravados e forjados em inventários e veículos.
+- **P4.4 — Release Gate v1.18:** Specs de integração policial e checklist de Live QA forense.
+
+---
+
+### 🎯 FASE 5 (v1.19) — Adaptadores de Oficina Mecânica (Workshop Live)
+- **P5.1 — Adapter QBox Mechanics (`qbx_mechanics` / `qbx_customs`):** Conexão do provider SAGA real para abastecimento de peças clandestinas para oficinas de jogadores.
+- **P5.2 — Adapter QS-Mechanic / Renzu:** Integração por exports com sistemas populares da comunidade.
+- **P5.3 — Catálogo de Encomenda B2B:** Terminal de pedidos de oficinas para compra de peças raras com entrega via Broker.
+
+---
+
+### 🎯 FASE 6 (v1.20) — Territórios de Gangue & Chop Zones (`VP_GANGS`)
+- **P6.1 — Taxa Territorial de Desmanche:** Desmanchar em território controlado por facção deposita automaticamente uma porcentagem configurável no cofre da gangue.
+- **P6.2 — Bônus de Facção:** Gangues donas de setores industriais ganham bônus de cotação em contratos do Broker.
+- **P6.3 — Alerta de Invasão de Área:** Desmanche em território rival sem aliança emite alerta de rádio aos membros da facção local.
+
+---
+
+### 🎯 FASE 7 (v1.21) — Reconstrução Veicular & VIN Rebirth
+- **P7.1 — Salvage Title / Chassi Documentado:** Compra de carcaça legalizada no ferro-velho.
+- **P7.2 — Montagem Completa na Bancada:** Fusão de 4 portas, capô, motor e soldagem com peças serializadas legítimas.
+- **P7.3 — Registro Civil de Nova Placa:** Emissão de veículo civil limpo no banco QBox (`qbx_vehicles`), concluindo o ciclo do carro "esquentado".
+
+---
+
+### 🎯 FASE 8 (v1.22) — Emboscadas V2, Sindicato Rival & Polish
+- **P8.1 — Emboscadas Táticas por Heat:** NPCs de sindicatos rivais interceptam transportes de peças e veículos valiosos.
+- **P8.2 — Retaliação de Contrato:** Cobradores armados enviados contra jogadores que descumprem contratos de alta confiança.
+- **P8.3 — Polish Audiovisual:** Efeitos sonoros espaciais dedicados e partículas de corte/solda aprimoradas.
+
+---
+
+## 4. Sistemas KEEP (Fundação Permanente — Não Tocar)
+- VehicleSessionId · ChopSession FSM · Jackstand server-auth · ActionSession com `PinPartLock` · CarcassLedger persistente · Invariante "tempo sozinho nunca destrói committed state" · 100% SQL parametrizado · Bridges QBox-first.
