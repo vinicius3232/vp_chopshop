@@ -103,15 +103,15 @@ Os **rótulos dos itens** no `ox_inventory` (`installation/ox_items_snippet.txt`
 
 ### 2. Fases de desmanche (todas requerem macaco)
 
-| Fase | Peças | Ferramenta extra | Recompensa |
-|------|-------|-----------------|------------|
-| **1 — Básico** | Capô, porta-malas, rodas, portas | — | Materiais via `Config.CarPartRewards` |
-| **2 — Estrutural** | Portas / capô / porta-malas | Serra (`metal_saw`) | `car_parts` por peça |
-| **3 — Motor** | Motor | Chave de fenda (`screwdriver`) | 5× `car_parts` |
-| **4 — Carcaça** | Carcaça | Soldadora perto do veículo | Materiais recicláveis (chance) |
+| Fase | Peças | Ferramenta / Requisito | Mecânica & Recompensa |
+|------|-------|-----------------------|-----------------------|
+| **1 — Rodas** | `wheel_lf`, `wheel_rf`, `wheel_lr`, `wheel_rr` | Nenhuma ferramenta de inventário | Minigame de 5 parafusos (rotação física) → `chopshop_tyre` + logística |
+| **2 — Painéis** | Portas / capô / porta-malas | Serra (`saw_cheap` / `saw_pro`) | 3 pontos de corte interativos → `car_parts` seriada |
+| **3 — Motor** | Motor (`adv_engine`) | Parafusadeira (`mechanic_drill`) | 4 calços de fixação com furadeira elétrica → 5× `car_parts` seriadas |
+| **4 — Carcaça** | Carcaça (`adv_carcass`) | `chopshop_welder` no chão a $\le 8\text{m}$ (sem serra) | 5 linhas de corte estrutural com maçarico de solda → materiais recicláveis |
 
-> **Fase 3** requer o capô removido na Fase 2.
-> **Fase 4** requer o motor removido na Fase 3 e uma soldadora colocada no raio `Config.AdvancedChop.WelderRadius`.
+> **Fase 3** requer o capô removido na Fase 2 (`hood_first`).
+> **Fase 4** requer o motor removido na Fase 3 (`engine_first`) e uma soldadora colocada no raio `Config.AdvancedChop.WelderRadius`.
 
 ### 3. Alarme veicular
 
@@ -595,7 +595,16 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.14.3` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.15.0-rc1` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+
+> **v1.15.0-rc1** — **RELEASE CANDIDATE.** Refatoração server-authority em stack de 10 PRs
+> (#2→#11, nada mergeado até a validação runtime QBox passar): `ChopSession` (fonte única do
+> estado de desmanche), `ActionSession` (autorização temporal server-side), unified discard +
+> ownership gate QBox, tyre entitlement ledger, `fence:deliverCar` terminal hardening
+> (reserva de cooldown como autoridade + marcador `vpChopDeliveredMark`). Economia/heat/trust
+> **inalterados**. Harness estático 493/493. RC-FIX-2: minigame de parafusos 3D desligado
+> (geometria placeholder / câmera fixa / giro sem resposta) → cai em `lib.skillCheck`; rework
+> pós-RC. Plano em `docs/audit/V115_RELEASE_CANDIDATE.md`. Ver CHANGELOG.
 
 > **v1.14.3** — fix: registro do archetype `wheel_spacer.ytyp` (parafuso `bolt`) no fxmanifest;
 > o parafuso 3D do minigame volta a carregar (causa raiz do "minigame não entrava"). Marcador

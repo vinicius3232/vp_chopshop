@@ -174,12 +174,20 @@ local function spawnLocalMark(markId, coords)
                         VPChopNotify(L('notify_generic_error'), 'error')
                         return
                     end
-                    -- [TYRE] O servidor resolve o DISPLAY NAME do modelo (ex.: 'SULTANRS') a
-                    -- partir do netId (trust-no-client). A tradução do label (ex.: 'Sultan RS')
-                    -- é client-side: GetLabelText só existe/funciona no client. Fallback: usa o
-                    -- próprio display name se o label não estiver carregado.
-                    local pretty = GetLabelText(res.modelName)
-                    if not pretty or pretty == '' or pretty == 'NULL' then pretty = res.modelName end
+                    local rawModel = res.model or res.modelName
+                    local pretty = nil
+                    if res.model and tonumber(res.model) and tonumber(res.model) ~= 0 then
+                        local disp = GetDisplayNameFromVehicleModel(tonumber(res.model))
+                        if disp and disp ~= '' and disp ~= 'CARNOTFOUND' then
+                            local lbl = GetLabelText(disp)
+                            pretty = (lbl and lbl ~= '' and lbl ~= 'NULL') and lbl or disp
+                        end
+                    end
+                    if not pretty and res.modelName then
+                        local lbl = GetLabelText(res.modelName)
+                        pretty = (lbl and lbl ~= '' and lbl ~= 'NULL') and lbl or res.modelName
+                    end
+                    if not pretty or pretty == '' or pretty == 'CARMODEL' then pretty = L('tyre_vehicle_fallback') or 'Veículo' end
                     -- "Marcas de pneu de um %s (%s)" — modelo + classe. SEM placa.
                     VPChopNotify(L('tyre_examine_result_fmt', pretty, res.class or '?'), 'inform', 7000)
                 end,

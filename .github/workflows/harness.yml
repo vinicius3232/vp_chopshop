@@ -1,0 +1,75 @@
+name: harness
+
+# Transforma o self-test estático (tools/run_spec.lua) em check de CI.
+# Critério de sucesso = EXIT CODE do harness. O número de asserts (hoje 632)
+# NÃO é hardcoded — novas suites aumentam esse número naturalmente.
+# Nenhuma parte deste workflow toca runtime/gameplay FiveM.
+
+on:
+  pull_request:
+    branches:
+      - '**'
+  push:
+    branches:
+      - main
+      - 'pr-h/**'
+      - 'feat/**'
+      - 'fix/**'
+
+concurrency:
+  group: harness-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala Lua 5.4
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          lua5.4 -v
+          luac5.4 -v
+
+      - name: Sintaxe — luac -p
+        run: |
+          set -uo pipefail
+          fail=0; ok=0; cfx=0
+          while IFS= read -r f; do
+            if luac5.4 -p "$f" 2>/dev/null; then
+              ok=$((ok + 1))
+              continue
+            fi
+            # Falhou. Pode ser só a extensão sintática CfxLua: hash-literal com
+            # crase (`model_name` → joaat). Neutraliza APENAS os hash-literals
+            # numa cópia temporária e revalida — qualquer OUTRO erro de sintaxe
+            # (inclusive um segundo erro no mesmo arquivo) continua sendo FAIL.
+            tmp="$(mktemp)"
+            sed 's/`[^`]*`/0/g' "$f" > "$tmp"
+            if err=$(luac5.4 -p "$tmp" 2>&1); then
+              echo "ok (hash-literal CfxLua neutralizado): $f"
+              cfx=$((cfx + 1))
+            else
+              echo "SYNTAX FAIL: $f"
+              printf '%s\n' "$err"
+              fail=$((fail + 1))
+            fi
+            rm -f "$tmp"
+          done < <(find . -name '*.lua' -not -path './.git/*' | sort)
+          echo "luac -p: ${ok} ok, ${cfx} ok via neutralização CfxLua, ${fail} com erro"
+          [ "${fail}" -eq 0 ]
+
+      - name: Harness — tools/run_spec.lua
+        run: |
+          set -euo pipefail
+          if [ ! -f tools/run_spec.lua ]; then
+            echo "::notice::tools/run_spec.lua ausente neste branch — harness ainda não integrado aqui (esperado em PRs contra main antes do merge da pr-h)."
+            exit 0
+          fi
+          lua5.4 tools/run_spec.lua .

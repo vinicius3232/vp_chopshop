@@ -332,6 +332,29 @@ Config.Discard = {
     PayoutByModel = {},
 }
 
+--- ─────────────────────────────────────────────────────────────────────────────
+--- [v1.16 P0.4] RESTART RECOVERY — ledger persistente de carcaças (vp_chop_carcass)
+--- ─────────────────────────────────────────────────────────────────────────────
+--- A ChopSession (tombstone de discard) e o statebag vpChopDeliveredMark são
+--- in-memory / server-local. Depois de `ensure vp_chopshop`, a ChopSession some;
+--- sem o ledger, um jogador re-chopa a MESMA carcaça e descarta de novo (2º pgto).
+--- Este bloco liga a barreira de discard no DB + o sweep de boot que re-dirige o
+--- cleanup de carcaças presas no mundo (o retry timer morre no restart).
+Config.RestartRecovery = {
+    --- Barreira de discard no DB + sweep de boot. Kill-switch de segurança.
+    Enable = true,
+    --- Janela (s) em que uma linha do ledger conta como barreira e é varrida no
+    --- boot. Curta porque net_id é RECICLÁVEL — depois disso o retry já rodou ou
+    --- a carcaça já foi limpa. 1800 = 30 min.
+    CarcassTtlSeconds = 1800,
+    --- O sweep de boot pode RE-DELETAR carcaças pendentes (identidade = net_id +
+    --- model). É a retomada da operação já paga — não um delete novo. false = só
+    --- limpa linhas órfãs, não toca no mundo.
+    BootSweepDelete = true,
+    --- Espera (ms) após dbReady antes do sweep (deixa o OneSync popular o pool).
+    BootSweepDelayMs = 5000,
+}
+
 --- Sons durante o desmanche (requer xsound iniciado).
 Config.ChopSounds = {
     Enable = true,
@@ -351,10 +374,25 @@ Config.ChopAnimations = {
     door      = { dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1 },
 }
 
---- Integração de Dispatch (ex: ps-dispatch, cd_dispatch, qs-dispatch)
+--- [v1.18 P4.3 DISPATCH BRIDGE] Integração de Alertas Policiais Multi-Framework
+--- Provedores suportados: 'auto' | 'ps-dispatch' | 'cd_dispatch' | 'qs-dispatch' | 'op-dispatch' | 'core_dispatch' | 'custom' | 'none'
 Config.Dispatch = {
     Enable = true,
-    System = 'ps-dispatch', -- 'ps-dispatch' | 'cd_dispatch' | 'qs-dispatch'
+    Provider = 'auto',
+    AutoOrder = { 'ps-dispatch', 'cd_dispatch', 'qs-dispatch', 'op-dispatch', 'core_dispatch' },
+    Jobs = { 'police', 'sheriff', 'bcso' },
+    DefaultCode = '10-90',
+    DefaultTitle = '10-90 - Desmanche Ilegal',
+    DefaultMessage = 'Notícia de atividade de desmanche de veículo em andamento.',
+    Blip = {
+        sprite = 530,
+        scale = 1.0,
+        color = 1,
+        flashes = false,
+        text = '911 - Desmanche',
+        time = 5,
+        radius = 0,
+    },
 }
 
 --- Sistema de alarme veicular ao desmontar.
@@ -393,7 +431,6 @@ Config.Alarm = {
     DisarmDistance      = 6.0,  -- distância máxima (m) do ox_target de desarme
 
     --- Item necessário para iniciar o desarme do alarme.
-    --- Use o mesmo item de Config.AdvancedChop.ScrewdriverItem para consistência.
     DisarmItem = 'screwdriver',
 
     --- Minigame de desarme: lib.skillCheck. `false` = desligado (desarme instantâneo).
@@ -427,13 +464,20 @@ Config.Plates = {
         keys         = { 'e', 'e', 'e' },
     },
 
-    --- Minigame de parafusos 3D autoral (estilo "filo") ancorado na PLACA TRASEIRA:
-    --- câmera dedicada atrás do carro + cursor do mouse + girar segurando o botão
-    --- esquerdo. Tem prioridade sobre o SkillCheck acima quando Enable = true.
-    --- Fallback automático para o SkillCheck se o modelo `bolt` não carregar.
-    --- As medidas da placa são placeholders geométricos — calibrar in-game.
+    --- Minigame de parafusos 3D autoral (estilo "filo"): câmera dedicada na face da
+    --- placa que o jogador mira + cursor do mouse + girar segurando o botão esquerdo.
+    --- Tem prioridade sobre o SkillCheck acima quando Enable = true. Sempre roda em
+    --- MODO MARCADOR (DrawMarker) — não depende de asset pago. Degrada para o
+    --- SkillCheck automaticamente se a geometria/câmera não projetar os parafusos.
+    ---
+    --- [RC-FINDING-01 / P0.2] resolvido no código: o minigame agora é FRENTE/TRASEIRA-
+    --- aware (client/plates.lua resolve a face pela posição do jogador; câmera, normal
+    --- e heading base seguem a face). Asset pago bolt.ydr REMOVIDO. Continua DESLIGADO
+    --- (Enable=false) só até uma passada de calibração in-game dos offsets abaixo —
+    --- ligar, ajustar PlateZFrac / PlateYOffset{Front,Rear} / PlateHalf* olhando os
+    --- parafusos no carro, e então deixar Enable=true.
     Bolt3D = {
-        Enable          = true,
+        Enable          = false,
         --- 2 = parafusos no topo · 4 = um em cada canto da placa.
         Bolts           = 4,
         --- Voltas de mouse para soltar cada parafuso (placa pede menos que a roda).
@@ -441,15 +485,19 @@ Config.Plates = {
         --- Sensibilidade: graus por unidade de movimento do cursor (maior = mais rápido).
         Sensitivity     = 900.0,
         --- Raio (coords de tela 0..1) para o cursor "agarrar" um parafuso.
-        HoverRadius     = 0.06,
+        HoverRadius     = 0.09,
         --- Tempo máximo (ms) antes de falhar por timeout.
         Timeout         = 25000,
         --- Geometria da placa (calibrar in-game): altura na bounding box (0..1),
-        --- recuo traseiro (m), meia-largura e meia-altura do retângulo da placa (m).
+        --- meia-largura e meia-altura do retângulo da placa (m).
         PlateZFrac      = 0.30,
-        PlateYOffset    = 0.02,
         PlateHalfWidth  = 0.20,
         PlateHalfHeight = 0.07,
+        --- Recuo da placa para fora da bounding box (m), por face. PlateYOffset (legado)
+        --- é usado como fallback se a variante da face não estiver definida.
+        PlateYOffset      = 0.02,
+        PlateYOffsetFront = 0.02,
+        PlateYOffsetRear  = 0.02,
     },
 
     --- Ferramenta exigida (verificada no client p/ UX e no servidor como verdade).
@@ -594,6 +642,13 @@ Config.PartSerial = {
     --- Jobs policiais que podem inspecionar (reusa a lista das placas por padrão).
     PoliceJobs = Config.Plates and Config.Plates.PoliceJobs or { 'police', 'bcso', 'sheriff' },
 
+    --- [v1.18 P4.4] Perícia veicular avançada realizada pela polícia (chassi, VIN, catalisador, motor, rastreador)
+    VehicleInspection = {
+        Enable = true,
+        DurationMs = 5000,
+        Bones = { 'bonnet', 'engine', 'exhaust', 'chassis' },
+    },
+
     --- Vendedor LEGAL opcional (NPC fixo): vende car_parts 'legal' (série registrada no DB)
     --- por dinheiro. Cobra via BridgeRemoveCash e chama o export IssueLegalParts.
     LegalVendor = {
@@ -641,16 +696,16 @@ Config.Tools = {
         dispatchChance = 0.0,
         speedMult = 0.7,
         HandProp = {
-            model    = 'prop_tool_screwflt01',
-            offset   = { 0.10, 0.03, 0.0 },
-            rotation = { 10, 0, -30 },
+            model    = 'prop_tool_drill',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
         },
     },
 }
 
 --- Máquina de solda: objeto colocável (item do inventário). Obrigatória perto da bancada para
 --- craftear/entregar peças. Raio de detecção: WelderBenchRadius metros.
-Config.WelderModel       = `lr_smodd_cm_weldmachine_001`
+Config.WelderModel       = `prop_compressor_02`
 Config.WelderBenchRadius = 8.0
 Config.MinWelderSpacing  = 4.0
 
@@ -747,11 +802,10 @@ Config.TyreMission = {
 Config.AdvancedChop = {
     Enable = true,
 
-    --- Item necessário para desmontar portas/capô/porta-malas (Fase 2).
-    SawItem = 'metal_saw',
-
-    --- Item necessário para desmontar o motor (Fase 3).
-    ScrewdriverItem = 'screwdriver',
+    -- [v1.16 P1.5 / FASE E] SawItem/ScrewdriverItem REMOVIDOS — eram config morta
+    -- (só citados num comentário). A ferramenta exigida por peça vem do Part
+    -- Registry (shared/registry/parts.lua: toolClass 'cut'/'screw') e a checagem
+    -- real é VPChopHasTool, que itera Config.Tools (saw_cheap/saw_pro/mechanic_drill).
 
     --- Raio máximo (m) para detetar soldadora perto do veículo (Fase 4).
     WelderRadius = 8.0,
@@ -798,28 +852,123 @@ Config.AdvancedChop = {
         clip = 'fixing_a_player',
         flag = 1,
         prop = {
-            model    = 'prop_tool_screwflt01',
-            offset   = { 0.10, 0.03, 0.0 },
-            rotation = { 10, 0, -30 },
+            model    = 'prop_tool_wrench',
+            offset   = { 0.12, 0.04, -0.02 },
+            rotation = { -80.0, 0.0, 0.0 },
         },
     },
 
     --- Animação e prop da mão para corte da carcaça (Fase 4).
     --- flag 1 = ANIM_FLAG_REPEAT — mantém o loop enquanto a barra roda.
     CarcassAnim = {
-        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
-        clip = 'cutting_loop',
+        dict = 'amb@world_human_welding@male@base',
+        clip = 'base',
         flag = 1,
         prop = {
-            model    = 'v_ind_cs_powersaw',
-            offset   = { 0.10, 0.05, 0.0 },
-            rotation = { 15, 0, -55 },
+            model    = 'prop_weld_torch',
+            offset   = { 0.08, 0.03, 0.0 },
+            rotation = { 0, 0, 0 },
         },
     },
 }
 
+--- Carregamento físico de peças retiradas (portas, capô, porta-malas, motor) e processamento na bancada.
+Config.PhysicalCarry = {
+    Enable = true,
+
+    --- Mapeamento de props e offsets ao carregar a peça nos braços (bone 4089 / 28422)
+    Props = {
+        door_dside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_pside_f = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_dside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        door_pside_r = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        bonnet       = { model = 'prop_car_bonnet_01', offset = { 0.12, 0.18, 0.10 }, rotation = { 0.0, 10.0, 0.0 } },
+        boot         = { model = 'prop_car_door_01',   offset = { 0.10, 0.18, 0.15 }, rotation = { 0.0, -20.0, 90.0 } },
+        adv_engine          = { model = 'prop_car_engine_01',  offset = { 0.10, 0.22, 0.12 }, rotation = { 0.0, 0.0, 180.0 } },
+        catalytic_converter = { model = 'prop_car_exhaust_01', offset = { 0.10, 0.20, 0.12 }, rotation = { 0.0, 0.0, 90.0 } },
+    },
+
+    --- Animação enquanto carrega a peça pesada
+    CarryAnim = {
+        dict = 'anim@heists@box_carry@',
+        clip = 'idle',
+        flag = 49,
+    },
+}
+
+--- Sistema de Furto de Catalisador Automotivo (Street & Workshop Theft)
+Config.CatalyticTheft = {
+    Enable = true,
+
+    --- Bones no veículo onde a opção de cortar catalisador é exibida
+    Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+
+    --- Minigame de corte duplo de escapamento (tubo dianteiro e tubo traseiro)
+    Minigame = {
+        Enable = true,
+        Stages = 2,
+        Difficulty = { 'easy', 'medium' },
+        Inputs = { 'w', 'a', 's', 'd' },
+    },
+
+    --- Efeito visual de faíscas de serra durante o corte do escape
+    SparksVfx = true,
+
+    --- Chance percentual (0 a 100) de disparar o alarme e chamar a polícia em corte normal
+    PoliceAlertChance = 30,
+
+    --- Chance de alerta policial caso o jogador falhe no minigame (ruído súbito de metal/serra travando)
+    PoliceAlertOnFail = 100,
+
+    --- Tempo total de corte do escapamento em milissegundos (dividido entre as 2 etapas)
+    ProgressMs = 7000,
+
+    --- Animação de corte com serra
+    Anim = {
+        dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+        clip = 'cutting_loop',
+        flag = 1,
+    },
+
+    --- Recompensa em dinheiro ao vender o catalisador diretamente no Fence (Receptador)
+    Payout = { min = 1200, max = 2200 },
+
+    --- Bloqueia o jogador de roubar o catalisador do seu próprio carro pessoal (true = anti-auto-farm em produção; false = desativa para QA local)
+    BlockOwnVehicle = true,
+
+    --- [v1.18 P4.4] Inutilização veicular: corte do catalisador impede o motor de ligar até reparo mecânico
+    DisableVehicle = true,
+
+    --- Materiais recebidos caso o jogador decida desmanchar o catalisador na bancada
+    BenchMaterials = {
+        copper     = { amount = 4, chance = 1.0 },
+        metalscrap = { amount = 6, chance = 1.0 },
+        steel      = { amount = 2, chance = 1.0 },
+        car_parts  = { amount = 1, chance = 1.0 },
+    },
+}
+
+--- Sistema de dano físico e escala de recompensas (motor e pneus).
+Config.DamageScaling = {
+    Enable = true,
+
+    --- Vida mínima do motor (0.0 a 1000.0) para permitir reaproveitamento como peças.
+    --- Se estiver abaixo deste valor, o motor é considerado destruído/fundido.
+    MinEngineHealthToChop = 150.0,
+
+    --- Escala as peças de motor (car_parts) proporcionalmente à integridade do motor (1000 HP = 100%).
+    --- A diferença é convertida em sucata de metal (metalscrap).
+    ScaleEngineRewards = true,
+
+    --- Se falso, impede roubar pneus estourados/furados como item intacto de revenda.
+    AllowBurstTyreTheft = false,
+}
+
 Config.Jackstand = {
     Enable = true,
+
+    --- Bloqueia o jogador de levantar e desmanchar seu próprio carro pessoal (true = anti-auto-farm em produção; false = desativa para QA local)
+    BlockOwnVehicle = true,
 
     --- Item do inventário que acciona o macaco.
     Item = 'chopshop_jackstand',
@@ -839,12 +988,10 @@ Config.Jackstand = {
     --- Duração da barra "A retirar macacos..." (ms).
     LowerProgressMs = 5000,
 
-    --- Animação ao COLOCAR o macaco.
-    --- amb@world_human_vehicle_mechanic@male@base/base = ped ajoelha de lado e trabalha
-    --- ao nível do chão (idêntico ao wheel_theft). Mais realista que mini@repair.
+    --- Animação ao COLOCAR o macaco (ped ajoelha naturalmente ao lado do chassi).
     RaiseAnim = {
-        dict = 'amb@world_human_vehicle_mechanic@male@base',
-        clip = 'base',
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
         flag = 1,
         prop = {
             model    = 'prop_tool_wrench',
@@ -855,8 +1002,8 @@ Config.Jackstand = {
 
     --- Animação ao RETIRAR o macaco.
     LowerAnim = {
-        dict = 'amb@world_human_vehicle_mechanic@male@base',
-        clip = 'base',
+        dict = 'mini@repair',
+        clip = 'fixing_a_player',
         flag = 1,
         prop = {
             model    = 'prop_tool_wrench',
@@ -895,11 +1042,15 @@ Config.Jackstand = {
 
         --- Minigame de parafusos 3D autoral (estilo "filo": câmera dedicada + cursor do
         --- mouse + girar segurando o botão esquerdo). NÃO precisa de boii_minigames nem
-        --- de NUI; usa o modelo `bolt.ydr` (já incluído no stream/). Tem prioridade sobre
-        --- o boii/skill_circle quando Enable = true. Fallback automático para lib.skillCheck
-        --- se o modelo/bone da roda não carregar.
+        --- de NUI nem de asset pago — roda em MODO MARCADOR (DrawMarker). Tem prioridade
+        --- sobre o boii/skill_circle quando Enable = true. Degrada para lib.skillCheck
+        --- automaticamente se a geometria/câmera não projetar os parafusos.
+        --- [RC-FINDING-01 / P0.2] núcleo (runBoltSurface) endurecido: clamp de giro e
+        --- degradação automática se nenhum parafuso projeta por >2.5 s. Asset pago
+        --- bolt.ydr REMOVIDO. Continua DESLIGADO só até calibração in-game da geometria
+        --- da roda (radius/outOff em client/main.lua) — então Enable=true.
         Bolt3D = {
-            Enable        = true,
+            Enable        = false,
             --- Quantidade de parafusos por roda.
             Bolts         = 5,
             --- Voltas de mouse necessárias para soltar cada parafuso (2.0 = duas voltas).
@@ -907,7 +1058,7 @@ Config.Jackstand = {
             --- Sensibilidade: graus de giro por unidade de movimento do cursor (maior = mais rápido).
             Sensitivity   = 900.0,
             --- Raio (em coords de tela 0..1) para o cursor "agarrar" um parafuso.
-            HoverRadius   = 0.06,
+            HoverRadius   = 0.09,
             --- Tempo máximo (ms) antes de falhar por timeout.
             Timeout       = 30000,
         },
@@ -927,6 +1078,9 @@ Config.Fence = {
     WholeCarCooldownMin = 20,
     --- Cash base ao entregar carro inteiro.
     WholeCarBasePayout  = 8000,
+    --- [v1.15 PR-H] Política p/ carro OWNED/persistido na entrega inteira.
+    --- 'deny' (default, release-safe): entrega NEGADA. 'destroy' não implementado.
+    DeliverCarOwnedPolicy = 'deny',
     --- Dias sem aparecer antes de perder 1 nível de trust.
     TrustDecayDays      = 7,
     --- XP de trust ganho por entrega concluída.
@@ -998,27 +1152,63 @@ Config.Progression = {
 --- ─────────────────────────────────────────────────────────────────────────────
 --- [EVIDENCE] INTEGRAÇÃO FORENSE — resource `evidences` (Advanced FiveM evidence)
 --- ─────────────────────────────────────────────────────────────────────────────
---- Toda ação de crime do chopshop pode deixar VESTÍGIO no local (digital + DNA),
---- vinculado biometricamente ao criminoso. A polícia coleta e identifica via o
---- próprio resource `evidences`. Esta feature é 100% server-side e CONSOME a API
---- do evidences (export `syncEvidence`). Se o resource não estiver `started`,
---- ela se auto-desativa sem quebrar nenhuma ação de crime.
+--- [v1.18 FORENSICS V2] EvidenceBridge — Vestígios e Perícia Policial Multi-Framework
+--- Toda ação de crime do chopshop pode deixar vestígios no local (digital + DNA),
+--- vinculado biometricamente ao criminoso. O EvidenceBridge conecta de forma modular
+--- e fail-soft a scripts forenses externos (ex.: noobsystems/evidences, vp_crimescene).
+--- Se nenhum resource estiver iniciado ou Provider='none', a feature opera em modo inerte.
 Config.Evidence = {
-    Enable = true,                 -- [EVIDENCE] liga/desliga; auto-desativa se 'evidences' não estiver started
-    GlovesItem = 'gloves',         -- [EVIDENCE] item que, no inventário, BLOQUEIA digitais (checado server-side)
-    GlovesBlocksDna = false,       -- [EVIDENCE] luvas bloqueiam digital; DNA ainda cai (true = luvas bloqueiam tudo)
-    DnaType = 'blood',             -- [EVIDENCE] classe de DNA plantada: 'blood' | 'saliva'
-    HeatScaling = true,            -- [EVIDENCE] mais heat na placa = mais chance de vestígio
-    HeatFactor = 0.5,              -- [EVIDENCE] intensidade do scaling (chance_final = base * (1 + heat/100 * HeatFactor))
-    -- [EVIDENCE] chance base 0..1 por ação (fingerprint e dna independentes).
-    -- Digital com chance MAIOR (toca tudo); DNA com chance MENOR (corte/suor pontual).
+    Enable = true,                 -- liga/desliga a ponte de evidência
+    Provider = 'auto',             -- 'auto' | 'evidences' | 'vp_crimescene' | 'custom' | 'none'
+    AutoOrder = {                  -- ordem de preferência quando Provider='auto'
+        'evidences',
+        'vp_crimescene',
+    },
+    GlovesItem = 'gloves',         -- item que, no inventário, BLOQUEIA digitais (checado server-side)
+    GlovesBlocksDna = false,       -- luvas bloqueiam digital; DNA ainda cai (true = luvas bloqueiam tudo)
+    DnaType = 'blood',             -- classe de DNA plantada: 'blood' | 'saliva'
+    HeatScaling = true,            -- mais heat na placa = mais chance de vestígio
+    HeatFactor = 0.5,              -- intensidade do scaling (chance_final = base * (1 + heat/100 * HeatFactor))
+    -- chance base 0..1 por ação (fingerprint e dna independentes).
     Actions = {
         chop_part   = { fingerprint = 0.50, dna = 0.12 },
         vin_scratch = { fingerprint = 0.70, dna = 0.15 },
         plate_steal = { fingerprint = 0.60, dna = 0.10 },
         plate_forge = { fingerprint = 0.40, dna = 0.05 },
         plate_apply = { fingerprint = 0.50, dna = 0.08 },
+        tracker_removal = { fingerprint = 0.65, dna = 0.15 },
     },
+}
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.18 P4.2] GPS Tracker & LoJack — Rastreamento Policial & Counterplay ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.Tracker = {
+    Enable = true,                 -- liga/desliga o sistema de rastreadores GPS
+    DefaultChance = 0.40,          -- chance base (0..1) se a classe não estiver listada
+    ClassChances = {
+        [0]  = 0.15,               -- Compacts
+        [1]  = 0.20,               -- Sedans
+        [2]  = 0.30,               -- SUVs
+        [3]  = 0.35,               -- Coupes
+        [4]  = 0.40,               -- Muscle
+        [5]  = 0.45,               -- Sports Classics
+        [6]  = 0.65,               -- Sports
+        [7]  = 0.85,               -- Super
+        [8]  = 0.25,               -- Motorcycles
+        [9]  = 0.30,               -- Off-road
+        [10] = 0.20,               -- Industrial
+        [11] = 0.20,               -- Utility
+        [12] = 0.20,               -- Vans
+    },
+    RequiredTool = 'pliers',       -- ferramenta primária para desarmar
+    ToolFallback = 'screwdriver',  -- ferramenta alternativa aceita
+    MinDurationMs = 7000,          -- tempo mínimo de remoção no servidor
+    MaxDistance = 3.5,             -- raio máximo de interação
+    PingIntervalSeconds = 15,      -- intervalo (s) entre pings de sinal para a polícia
+    BlipDurationSeconds = 10,      -- duração (s) do blip visual no mapa policial
+    PoliceJobs = { 'police', 'sheriff', 'bcso', 'state' },
+    RemovalEvidence = true,        -- deixa digital/DNA ao remover o rastreador
 }
 
 -- ╔══════════════════════════════════════════════════════════════════════════╗
@@ -1098,5 +1288,183 @@ Config.TyreMarks = {
         [20] = 'Comercial',
         [21] = 'Trem',
         [22] = 'Animal/Outro',
+    },
+}
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- [v1.17] CHOP BROKER & DYNAMIC MARKET ENGINE
+-- ─────────────────────────────────────────────────────────────────────────────
+
+Config.Broker = {
+    Enable = true,
+    Debug = false, -- Logs de auditoria do mercado (default off em produção)
+
+    NPC = {
+        Alias = 'O Intermediário',
+    },
+
+    Market = {
+        DemandFloor = 0.40,      -- Demanda mínima (40% de saturação máxima)
+        DemandCeiling = 1.30,    -- Demanda máxima (130% em alta procura)
+        PriceFloor = 0.40,       -- Floor multiplicador sobre basePrice para transações elegíveis
+        PriceCeiling = 2.50,     -- Teto absoluto multiplicador sobre basePrice
+        Jitter = 0.03,           -- Jitter de negociação (+/- 3%)
+        FlushIntervalSec = 300,  -- Intervalo de flush do mercado para DB (5 min)
+    },
+
+    Commodities = {
+        catalytic_converter = {
+            basePrice = 1600,
+            salePressure = 0.04,     -- 4% queda de demanda por unidade
+            recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
+        },
+        adv_engine = {
+            basePrice = 2500,
+            salePressure = 0.05,     -- 5% queda de demanda por unidade
+            recoveryPerHour = 0.12,  -- 12% recuperação por hora rumo a 1.0
+        },
+        tyre = {
+            basePrice = 400,
+            salePressure = 0.015,    -- 1.5% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+        stolen_plate = {
+            basePrice = 250,
+            salePressure = 0.03,     -- 3% queda de demanda por unidade
+            recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
+        },
+        body_panel = {
+            basePrice = 600,
+            salePressure = 0.03,     -- 3% queda de demanda por unidade
+            recoveryPerHour = 0.15,  -- 15% recuperação por hora rumo a 1.0
+        },
+        metalscrap = {
+            basePrice = 80,
+            salePressure = 0.002,    -- 0.2% queda de demanda por unidade
+            recoveryPerHour = 0.25,  -- 25% recuperação por hora rumo a 1.0
+        },
+        steel = {
+            basePrice = 100,
+            salePressure = 0.003,    -- 0.3% queda de demanda por unidade
+            recoveryPerHour = 0.25,  -- 25% recuperação por hora rumo a 1.0
+        },
+        aluminum = {
+            basePrice = 130,
+            salePressure = 0.004,    -- 0.4% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+        copper = {
+            basePrice = 150,
+            salePressure = 0.005,    -- 0.5% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+        car_parts = {
+            basePrice = 400,
+            salePressure = 0.004,    -- 0.4% queda de demanda por unidade
+            recoveryPerHour = 0.20,  -- 20% recuperação por hora rumo a 1.0
+        },
+    },
+
+    Integration = {
+        ItemToCommodity = {
+            metalscrap    = 'metalscrap',
+            steel         = 'steel',
+            aluminum      = 'aluminum',
+            copper        = 'copper',
+            car_parts     = 'car_parts',
+            stolen_plate  = 'stolen_plate',
+            chopshop_tyre = 'tyre',
+        },
+
+        PhysicalPartToCommodity = {
+            catalytic_converter = 'catalytic_converter',
+            adv_engine          = 'adv_engine',
+            bonnet              = 'body_panel',
+            boot                = 'body_panel',
+            door_dside_f        = 'body_panel',
+            door_pside_f        = 'body_panel',
+            door_dside_r        = 'body_panel',
+            door_pside_r        = 'body_panel',
+        },
+
+        LegacyStaticItems = {
+            rubber  = true,
+            plastic = true,
+            glass   = true,
+        },
+    },
+
+    Contracts = {
+        Enable = true,
+        MinTrust = 3,            -- Gate padrão para contratos especiais / pessoais (alinhado a ordens especiais)
+        GlobalSlots = 3,         -- Quantidade de janelas públicas simultâneas
+        PersonalSlots = 3,       -- Máximo de contratos pessoais ativos por jogador
+        GlobalTTL = 7200,        -- 2h de duração para contratos globais
+        PersonalTTL = 3600,      -- 1h de duração para contratos pessoais
+        RewardMultMin = 1.05,    -- Multiplicador mínimo de recompensa (1.05x)
+        RewardMultMax = 1.80,    -- Multiplicador máximo de recompensa (1.80x)
+        BonusCashMax = 15000,    -- Bônus máximo de conclusão de contrato
+        HighValueTargets = {
+            adv_engine          = true,
+            catalytic_converter = true,
+        },
+        VehicleClasses = {
+            [0]  = 'compacts',
+            [1]  = 'sedans',
+            [2]  = 'suvs',
+            [3]  = 'coupes',
+            [4]  = 'muscle',
+            [5]  = 'sports_classics',
+            [6]  = 'sports',
+            [7]  = 'super',
+            [8]  = 'motorcycles',
+            [9]  = 'offroad',
+            [10] = 'industrial',
+            [11] = 'utility',
+            [12] = 'vans',
+            [13] = 'cycles',
+            [14] = 'boats',
+            [15] = 'helicopters',
+            [16] = 'planes',
+            [17] = 'service',
+            [18] = 'emergency',
+            [19] = 'military',
+            [20] = 'commercial',
+            [21] = 'trains',
+            [22] = 'open_wheel',
+        },
+        Pools = {
+            part_type = {
+                { key = 'adv_engine', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+                { key = 'catalytic_converter', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 1800 },
+                { key = 'body_panel', minTrust = 1, minQty = 2, maxQty = 6, mult = 1.15, bonus = 1000 },
+            },
+            model = {
+                { key = 'sultan', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.35, bonus = 3000 },
+                { key = 'bison', minTrust = 1, minQty = 1, maxQty = 2, mult = 1.20, bonus = 2000 },
+                { key = 'baller', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.25, bonus = 2200 },
+                { key = 'banshee', minTrust = 3, minQty = 1, maxQty = 1, mult = 1.40, bonus = 4000 },
+            },
+            class = {
+                { key = 'sports', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.30, bonus = 3000 },
+                { key = 'suvs', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 2000 },
+                { key = 'muscle', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+                { key = 'coupes', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.15, bonus = 1800 },
+            },
+            high_value = {
+                { key = 'adv_engine', minTrust = 3, minQty = 1, maxQty = 2, mult = 1.50, bonus = 5000 },
+                { key = 'catalytic_converter', minTrust = 3, minQty = 2, maxQty = 3, mult = 1.45, bonus = 4500 },
+            },
+        },
+    },
+    Workshop = {
+        Enable = true,
+        Provider = 'none',
+        ProviderResource = nil,
+        MaxPrice = 50000,
+        PrepareMaxTtlSec = 60,
+        ReconcileIntervalSec = 15,
+        MaxReconcileAttempts = 4,
+        Debug = false,
     },
 }

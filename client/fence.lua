@@ -1,12 +1,10 @@
 -- client/fence.lua
--- Blip rotativo, targets ox_target no NPC fence, props de pneu no chão,
--- sistema de carry de pneu no ombro e carregamento em pickup truck.
+-- Blip rotativo, targets ox_target no NPC fence, menus de interação do fence.
+-- (O fluxo vivo de pneu→ombro→truck está em client/main.lua.)
 
 local FenceNpcEnt    = nil ---@type integer|nil
 local FenceBlip      = nil ---@type integer|nil
 local CurrentLocIdx  = 1
-local TyrePropList   = {} ---@type table<integer, {prop:integer, timer:integer}>  [propHandle] = dados
-local CarryingTyre   = nil ---@type {prop:integer}|nil
 
 -- Cache de hashes de modelo de truck (calculado uma vez, não por-frame)
 local TruckModelHashes = nil
@@ -46,6 +44,29 @@ function VPChopIsTruckNearby()
     return _truckNearCache
 end
 
+function VPChopFindNearestTruck(radius)
+    local maxDist = radius or 5.0
+    local ppos = GetEntityCoords(PlayerPedId())
+    local hashes = getTruckHashes()
+    local nearest, minDist = nil, maxDist
+    for _, veh in ipairs(GetGamePool('CVehicle')) do
+        if DoesEntityExist(veh) then
+            local dist = #(ppos - GetEntityCoords(veh))
+            if dist < minDist then
+                local model = GetEntityModel(veh)
+                for _, h in ipairs(hashes) do
+                    if model == h then
+                        nearest = veh
+                        minDist = dist
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return nearest
+end
+
 -- ─── Blip ─────────────────────────────────────────────────────────────────────
 
 local function removeFenceBlip()
@@ -69,6 +90,41 @@ local function setFenceBlip(coords, precise)
     BeginTextCommandSetBlipName('STRING')
     AddTextComponentString(precise and 'Fence' or '?')
     EndTextCommandSetBlipName(FenceBlip)
+end
+
+-- ─── Venda Direta de Peça Carregada ──────────────────────────────────────────
+
+local physicalPartKeys = {
+    catalytic_converter = true,
+    adv_engine          = true,
+    bonnet              = true,
+    boot                = true,
+    door_dside_f        = true,
+    door_pside_f        = true,
+    door_dside_r        = true,
+    door_pside_r        = true,
+}
+
+local function sellCarriedPart()
+    if not VPChopCarryingPart or not physicalPartKeys[VPChopCarryingPart.partKey] then return end
+    local entId = VPChopCarryingPart.entitlementId
+    if not entId then
+        VPChopNotify(L('notify_generic_error'), 'error')
+        return
+    end
+
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellCarriedPart', false, entId)
+    if not cbOk or not res or not res.ok then
+        if res and res.terminalConsumed then
+            VPChopDropCarryPart()
+        end
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
+        return
+    end
+
+    VPChopDropCarryPart()
+    local payout = res.payout or 0
+    VPChopNotify(L('fence_part_sold_fmt', payout), 'success')
 end
 
 -- ─── Setup NPC ───────────────────────────────────────────────────────────────
@@ -97,9 +153,12 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
             TaskStartScenarioInPlace(ent, locCfg.scenario, 0, true)
         end
 
-        -- Buscar nível de trust (callback separado — getProgression NÃO retorna trust)
+        -- Buscar nível de trust e progressão (callbacks de setup inicial)
         local ok, trust = pcall(lib.callback.await, 'vp_chopshop:fence:getTrust', false)
         trust = (ok and type(trust) == 'number') and trust or 0
+
+        local pOk, prog = pcall(lib.callback.await, 'vp_chopshop:getProgression', false)
+        local tier = (pOk and type(prog) == 'table' and prog.tier) or 1
 
         -- Blip baseado em trust
         local locs = Config.Fence and Config.Fence.Locations
@@ -114,87 +173,31 @@ RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
             end
         end
 
-        -- Montar targets
+        -- Montar targets: UMA interação principal com o Intermediário + deliverCar em veículo
         local options = {}
 
-        -- [FIX L-2] Labels via L() para respeitar o sistema de locales (pt/en/es/fr/tr)
-        if trust == 0 then
-            options[#options+1] = {
-                name='vp_fence_introduce', label=L('fence_target_introduce'),
-                icon='fa-solid fa-handshake', distance=2.5,
-                onSelect=function()
-                    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:introduce', false)
-                    if cbOk and res and res.ok then
-                        lib.notify({ description=L('fence_notify_introduced'), type='success' })
-                    else
-                        lib.notify({ description=L('fence_notify_no_referral'), type='error' })
-                    end
+        options[#options + 1] = {
+            name     = 'vp_broker_talk',
+            label    = L('broker_target_talk'),
+            icon     = 'fa-solid fa-comments',
+            distance = 2.5,
+            onSelect = function()
+                openBrokerMainMenu()
+            end,
+        }
+
+        if trust >= 4 and tier >= 4 then
+            options[#options + 1] = {
+                name        = 'vp_fence_deliver_car',
+                label       = L('fence_target_deliver_car'),
+                icon        = 'fa-solid fa-car-burst',
+                distance    = 4.5,
+                canInteract = function()
+                    return IsPedInAnyVehicle(PlayerPedId(), false)
                 end,
-            }
-        end
-
-        if trust >= 1 then
-            options[#options+1] = {
-                name='vp_fence_sell_items', label=L('fence_target_sell_items'),
-                icon='fa-solid fa-boxes-stacked', distance=2.5,
-                onSelect=function() openSellMenu() end,
-            }
-            options[#options+1] = {
-                name='vp_fence_sell_tyres', label=L('fence_target_sell_tyres'),
-                icon='fa-solid fa-circle-dot', distance=2.5,
-                onSelect=function() sellTyres() end,
-            }
-            -- [M3 FIX] Only register the contract target when the feature is actually
-            -- enabled. When disabled the stub body shows "Erro." — hide instead.
-            if Config.TyreMission and Config.TyreMission.Enable then
-                options[#options+1] = {
-                    name='vp_fence_tyre_contract', label=L('fence_target_tyre_contract'),
-                    icon='fa-solid fa-file-contract', distance=2.5,
-                    onSelect=function() TyreMissionStart() end,
-                }
-            end
-        end
-
-        if trust >= 2 then
-            options[#options+1] = {
-                name='vp_fence_hot_job', label=L('fence_target_hot_job'),
-                icon='fa-solid fa-skull-crossbones', distance=2.5,
-                onSelect=function() tryNpcMission() end,
-            }
-            -- [LIMPEZA] Só mostra "comprar bancada" se a loja estiver ligada — senão o
-            -- callback retorna err='disabled' e o jogador via uma notificação de erro.
-            if Config.NPC and Config.NPC.Shop and Config.NPC.Shop.Enable then
-                options[#options+1] = {
-                    name='vp_fence_buy_bench', label=L('fence_target_buy_bench'),
-                    icon='fa-solid fa-toolbox', distance=2.5,
-                    onSelect=function() tryNpcBuy('bench') end,
-                }
-            end
-            options[#options+1] = {
-                name='vp_fence_status', label=L('fence_target_status'),
-                icon='fa-solid fa-chart-line', distance=2.5,
-                onSelect=function() showStatus() end,
-            }
-        end
-
-        if trust >= 3 then
-            options[#options+1] = {
-                name='vp_fence_order', label=L('fence_target_order'),
-                icon='fa-solid fa-clipboard-list', distance=2.5,
-                onSelect=function() showOrder() end,
-            }
-            options[#options+1] = {
-                name='vp_fence_fulfill', label=L('fence_target_fulfill'),
-                icon='fa-solid fa-box-open', distance=2.5,
-                onSelect=function() fulfillOrder() end,
-            }
-        end
-
-        if trust >= 4 then
-            options[#options+1] = {
-                name='vp_fence_deliver_car', label=L('fence_target_deliver_car'),
-                icon='fa-solid fa-car-burst', distance=2.5,
-                onSelect=function() deliverCar() end,
+                onSelect    = function()
+                    deliverCar()
+                end,
             }
         end
 
@@ -285,15 +288,459 @@ function tryNpcBuy(kind)
     end
 end
 
+-- ─── Broker Context UI (v1.17 BROKER-5) ──────────────────────────────────────
+
+-- Helper testável e puro para particionamento de contratos
+function VPChopPartitionContracts(contractsList)
+    local globals = {}
+    local personals = {}
+    for _, c in ipairs(contractsList or {}) do
+        if c.isGlobal == true then
+            globals[#globals + 1] = c
+        else
+            personals[#personals + 1] = c
+        end
+    end
+    return globals, personals
+end
+
+-- Helper testável para cálculo de countdown de contrato
+function VPChopContractRemainingSeconds(expiresAt, serverNow)
+    return math.max(0, (expiresAt or 0) - (serverNow or 0))
+end
+
+local function fetchBrokerContext()
+    local ok, res = pcall(lib.callback.await, 'vp_chopshop:broker:getNpcContext', false)
+    if not ok or not res or not res.ok then
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
+        return nil
+    end
+    return res
+end
+
+function openBrokerMainMenu()
+    local ctx = fetchBrokerContext()
+    if not ctx then return end
+
+    local trustLvl = (ctx.trust and ctx.trust.level) or 0
+    local greetingKey = 'broker_greeting_trust_' .. tostring(math.min(4, math.max(0, trustLvl)))
+    local greeting = L(greetingKey)
+    local alias = (ctx.broker and ctx.broker.alias) or L('broker_menu_main_title')
+    local cap = ctx.capabilities or {}
+
+    local options = {}
+
+    -- Introdução (Trust 0)
+    if cap.introduce then
+        options[#options + 1] = {
+            title       = L('fence_target_introduce'),
+            description = greeting,
+            icon        = 'fa-solid fa-handshake',
+            onSelect    = function()
+                local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:fence:introduce', false)
+                if cbOk and res and res.ok then
+                    lib.notify({ description = L('fence_notify_introduced'), type = 'success' })
+                    openBrokerMainMenu()
+                else
+                    lib.notify({ description = L('fence_notify_no_referral'), type = 'error' })
+                end
+            end,
+        }
+    else
+        -- Cabeçalho / Cartão de Persona
+        options[#options + 1] = {
+            title       = alias .. ' — ' .. L('fence_trust_level_' .. tostring(trustLvl)),
+            description = greeting,
+            readOnly    = true,
+            icon        = 'fa-solid fa-user-secret',
+            metadata    = {
+                { label = L('fence_status_profile'), value = L('tier_label_' .. (ctx.progression and ctx.progression.tier or 1)) },
+                { label = L('broker_profile_location_label'), value = (ctx.broker and ctx.broker.locationLabel) or L('broker_default_location') },
+            },
+        }
+
+        -- Vender (peça carregada, materiais, pneus)
+        if cap.sellPart or cap.sellItems or cap.sellTyres then
+            options[#options + 1] = {
+                title       = L('broker_menu_sell'),
+                description = L('broker_menu_sell_desc'),
+                icon        = 'fa-solid fa-hand-holding-dollar',
+                onSelect    = function()
+                    openBrokerSellMenu(ctx)
+                end,
+            }
+        end
+
+        -- Procura & Contratos
+        if cap.contracts then
+            options[#options + 1] = {
+                title       = L('broker_menu_contracts'),
+                description = L('broker_menu_contracts_desc'),
+                icon        = 'fa-solid fa-file-contract',
+                onSelect    = function()
+                    openBrokerContractsMenu()
+                end,
+            }
+        end
+
+        -- Trabalhos / Missões
+        if cap.hotJob then
+            options[#options + 1] = {
+                title       = L('broker_menu_jobs'),
+                description = L('broker_menu_jobs_desc'),
+                icon        = 'fa-solid fa-skull-crossbones',
+                onSelect    = function()
+                    tryNpcMission()
+                end,
+            }
+        end
+
+        -- Serviços / Loja de Bancada
+        if cap.buyBench then
+            options[#options + 1] = {
+                title       = L('broker_menu_services'),
+                description = L('broker_menu_services_desc'),
+                icon        = 'fa-solid fa-toolbox',
+                onSelect    = function()
+                    tryNpcBuy('bench')
+                end,
+            }
+        end
+
+        -- Meu Perfil
+        if cap.status then
+            options[#options + 1] = {
+                title       = L('broker_menu_profile'),
+                description = L('broker_menu_profile_desc'),
+                icon        = 'fa-solid fa-id-card',
+                onSelect    = function()
+                    openBrokerProfileMenu(ctx)
+                end,
+            }
+        end
+
+        -- Encomenda Especial (Legacy Order)
+        if cap.legacyOrder then
+            options[#options + 1] = {
+                title       = L('broker_menu_legacy_order'),
+                description = L('broker_menu_legacy_order_desc'),
+                icon        = 'fa-solid fa-clipboard-list',
+                onSelect    = function()
+                    openBrokerLegacyOrderMenu(ctx)
+                end,
+            }
+        end
+
+        -- Entregar Veículo Inteiro (Trust 4)
+        if cap.deliverCar then
+            options[#options + 1] = {
+                title       = L('broker_menu_deliver_car'),
+                description = L('broker_menu_deliver_car_desc'),
+                icon        = 'fa-solid fa-car-burst',
+                onSelect    = function()
+                    deliverCar()
+                end,
+            }
+        end
+    end
+
+    lib.registerContext({
+        id      = 'vp_broker_main',
+        title   = alias,
+        options = options,
+    })
+    lib.showContext('vp_broker_main')
+end
+
+function openBrokerSellMenu(ctx)
+    local cap = ctx and ctx.capabilities or {}
+    local options = {}
+
+    -- Vender peça física que está nos braços
+    if cap.sellPart and VPChopCarryingPart and physicalPartKeys[VPChopCarryingPart.partKey] then
+        local pKey = VPChopCarryingPart.partKey
+        options[#options + 1] = {
+            title       = L('fence_sell_part_label') .. ' (' .. (L('part_' .. pKey) or pKey) .. ')',
+            description = L('fence_sell_price_dynamic'),
+            icon        = 'fa-solid fa-hand-holding-dollar',
+            onSelect    = function()
+                sellCarriedPart()
+                openBrokerMainMenu()
+            end,
+        }
+    end
+
+    if cap.sellItems then
+        options[#options + 1] = {
+            title       = L('fence_target_sell_items'),
+            description = L('broker_menu_sell_desc'),
+            icon        = 'fa-solid fa-boxes-stacked',
+            onSelect    = function()
+                openSellMenu()
+            end,
+        }
+    end
+
+    if cap.sellTyres then
+        options[#options + 1] = {
+            title       = L('fence_target_sell_tyres'),
+            description = L('broker_menu_sell_tyres_desc'),
+            icon        = 'fa-solid fa-circle-dot',
+            onSelect    = function()
+                sellTyres()
+            end,
+        }
+    end
+
+    options[#options + 1] = {
+        title    = L('broker_menu_back'),
+        icon     = 'fa-solid fa-arrow-left',
+        onSelect = function()
+            openBrokerMainMenu()
+        end,
+    }
+
+    lib.registerContext({
+        id      = 'vp_broker_sell',
+        title   = L('broker_menu_sell'),
+        menu    = 'vp_broker_main',
+        options = options,
+    })
+    lib.showContext('vp_broker_sell')
+end
+
+function openBrokerContractsMenu()
+    local ok, res = pcall(lib.callback.await, 'vp_chopshop:broker:getContracts', false)
+    if not ok or not res or not res.ok then
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
+        return
+    end
+
+    local globals, personals = VPChopPartitionContracts(res.contracts)
+    local serverNow = res.serverNow or os.time()
+
+    local options = {}
+
+    -- ─── SEÇÃO: ALTA PROCURA GLOBAL ───
+    options[#options + 1] = {
+        title    = '─── ' .. L('broker_contracts_global_title') .. ' ───',
+        readOnly = true,
+        icon     = 'fa-solid fa-globe',
+    }
+
+    if #globals == 0 then
+        options[#options + 1] = {
+            title    = L('broker_contract_no_contracts'),
+            readOnly = true,
+        }
+    else
+        for _, c in ipairs(globals) do
+            local remSec = VPChopContractRemainingSeconds(c.expiresAt, serverNow)
+            local mins = math.floor(remSec / 60)
+            local targetName = L('part_' .. tostring(c.targetKey))
+            if targetName == 'part_' .. tostring(c.targetKey) then targetName = tostring(c.targetKey) end
+
+            local meta = {
+                { label = L('broker_contract_remaining_label'), value = string.format('%d / %d', c.remaining or 0, c.quantity or 0) },
+                { label = L('broker_contract_reward_label'), value = string.format('%.2fx', c.rewardMult or 1.0) .. (c.bonusCash and c.bonusCash > 0 and (' +$' .. c.bonusCash) or '') },
+                { label = L('broker_contract_time_label'), value = L('broker_contract_mins_fmt', mins) },
+            }
+
+            local canFulfill = VPChopCarryingPart and VPChopCarryingPart.entitlementId
+            options[#options + 1] = {
+                title       = targetName,
+                description = L('broker_contract_desc_fmt', c.contractType or 'part', c.remaining or 0, c.quantity or 0),
+                icon        = 'fa-solid fa-fire',
+                metadata    = meta,
+                onSelect    = function()
+                    if canFulfill then
+                        local entId = VPChopCarryingPart.entitlementId
+                        local fOk, fRes = pcall(lib.callback.await, 'vp_chopshop:broker:fulfillContract', false, c.id, entId)
+                        if fOk and fRes and fRes.ok then
+                            VPChopDropCarryPart()
+                            lib.notify({
+                                description = L('broker_contract_fulfilled_notify', fRes.payout or 0, fRes.bonus or 0),
+                                type        = 'success',
+                                duration    = 7000,
+                            })
+                        else
+                            if fRes and fRes.terminalConsumed then VPChopDropCarryPart() end
+                            VPChopNotify(VPChopLocaleErr(fRes and fRes.err) or L('notify_generic_error'), 'error')
+                        end
+                        openBrokerContractsMenu()
+                    else
+                        lib.notify({ description = L('broker_contract_prompt_carry_global'), type = 'inform' })
+                    end
+                end,
+            }
+        end
+    end
+
+    -- ─── SEÇÃO: CONTRATOS PESSOAIS ───
+    options[#options + 1] = {
+        title    = '─── ' .. L('broker_contracts_personal_title') .. ' ───',
+        readOnly = true,
+        icon     = 'fa-solid fa-user-tag',
+    }
+
+    if #personals == 0 then
+        options[#options + 1] = {
+            title    = L('broker_contract_no_contracts'),
+            readOnly = true,
+        }
+    else
+        for _, c in ipairs(personals) do
+            local remSec = VPChopContractRemainingSeconds(c.expiresAt, serverNow)
+            local mins = math.floor(remSec / 60)
+            local targetName = L('part_' .. tostring(c.targetKey))
+            if targetName == 'part_' .. tostring(c.targetKey) then targetName = tostring(c.targetKey) end
+
+            local isAccepted = (c.state == 'ACCEPTED')
+            local stateBadge = isAccepted and (' [' .. L('broker_contract_accepted_badge') .. ']') or (' [' .. L('broker_contract_available_badge') .. ']')
+
+            local meta = {
+                { label = L('broker_contract_status_label'), value = isAccepted and L('broker_contract_in_progress') or L('broker_contract_waiting_accept') },
+                { label = L('broker_contract_remaining_label'), value = string.format('%d / %d', c.remaining or 0, c.quantity or 0) },
+                { label = L('broker_contract_mult_label'), value = string.format('%.2fx', c.rewardMult or 1.0) .. (c.bonusCash and c.bonusCash > 0 and (' +$' .. c.bonusCash) or '') },
+                { label = L('broker_contract_time_label'), value = L('broker_contract_mins_fmt', mins) },
+            }
+
+            options[#options + 1] = {
+                title       = targetName .. stateBadge,
+                description = isAccepted and L('broker_contract_click_fulfill') or L('broker_contract_click_accept'),
+                icon        = isAccepted and 'fa-solid fa-circle-check' or 'fa-solid fa-handshake-simple',
+                metadata    = meta,
+                onSelect    = function()
+                    if not isAccepted then
+                        -- Aceitar contrato
+                        local aOk, aRes = pcall(lib.callback.await, 'vp_chopshop:broker:acceptContract', false, c.id)
+                        if aOk and aRes and aRes.ok then
+                            lib.notify({ description = L('broker_contract_accepted_notify'), type = 'success', duration = 6000 })
+                        else
+                            VPChopNotify(VPChopLocaleErr(aRes and aRes.err) or L('notify_generic_error'), 'error')
+                        end
+                        openBrokerContractsMenu()
+                    else
+                        -- Entregar peça para o contrato aceito
+                        if VPChopCarryingPart and VPChopCarryingPart.entitlementId then
+                            local entId = VPChopCarryingPart.entitlementId
+                            local fOk, fRes = pcall(lib.callback.await, 'vp_chopshop:broker:fulfillContract', false, c.id, entId)
+                            if fOk and fRes and fRes.ok then
+                                VPChopDropCarryPart()
+                                lib.notify({
+                                    description = L('broker_contract_fulfilled_notify', fRes.payout or 0, fRes.bonus or 0),
+                                    type        = 'success',
+                                    duration    = 7000,
+                                })
+                            else
+                                if fRes and fRes.terminalConsumed then VPChopDropCarryPart() end
+                                VPChopNotify(VPChopLocaleErr(fRes and fRes.err) or L('notify_generic_error'), 'error')
+                            end
+                            openBrokerContractsMenu()
+                        else
+                            lib.notify({ description = L('broker_contract_prompt_carry_personal'), type = 'inform' })
+                        end
+                    end
+                end,
+            }
+        end
+    end
+
+    options[#options + 1] = {
+        title    = L('broker_menu_back'),
+        icon     = 'fa-solid fa-arrow-left',
+        onSelect = function()
+            openBrokerMainMenu()
+        end,
+    }
+
+    lib.registerContext({
+        id      = 'vp_broker_contracts',
+        title   = L('broker_menu_contracts'),
+        menu    = 'vp_broker_main',
+        options = options,
+    })
+    lib.showContext('vp_broker_contracts')
+end
+
+function openBrokerProfileMenu(ctx)
+    local tLvl = ctx and ctx.trust and ctx.trust.level or 0
+    local prog = ctx and ctx.progression or {}
+
+    lib.registerContext({
+        id      = 'vp_broker_profile',
+        title   = L('broker_menu_profile'),
+        menu    = 'vp_broker_main',
+        options = {
+            {
+                title    = L('fence_status_profile'),
+                readOnly = true,
+                metadata = {
+                    { label = L('broker_profile_trust_label'), value = L('fence_trust_level_' .. tostring(tLvl)) .. ' (' .. L('broker_profile_level_fmt', tLvl, 4) .. ')' },
+                    { label = L('fence_tier_label'), value = L('tier_label_' .. (prog.tier or 1)) },
+                    { label = L('fence_xp_label'),   value = (prog.xp or 0) .. (prog.nextXp and (' / ' .. prog.nextXp) or (' (' .. L('broker_profile_max_label') .. ')')) },
+                    { label = L('fence_chops_label'),value = tostring(prog.totalChops or 0) },
+                },
+            },
+            {
+                title    = L('broker_menu_back'),
+                icon     = 'fa-solid fa-arrow-left',
+                onSelect = function()
+                    openBrokerMainMenu()
+                end,
+            }
+        }
+    })
+    lib.showContext('vp_broker_profile')
+end
+
+function openBrokerLegacyOrderMenu(ctx)
+    lib.registerContext({
+        id      = 'vp_broker_legacy_order',
+        title   = L('broker_menu_legacy_order'),
+        menu    = 'vp_broker_main',
+        options = {
+            {
+                title       = L('fence_target_order'),
+                description = L('broker_menu_order_view_desc'),
+                icon        = 'fa-solid fa-clipboard-list',
+                onSelect    = function()
+                    showOrder()
+                end,
+            },
+            {
+                title       = L('fence_target_fulfill'),
+                description = L('broker_menu_order_fulfill_desc'),
+                icon        = 'fa-solid fa-box-open',
+                onSelect    = function()
+                    fulfillOrder()
+                end,
+            },
+            {
+                title    = L('broker_menu_back'),
+                icon     = 'fa-solid fa-arrow-left',
+                onSelect = function()
+                    openBrokerMainMenu()
+                end,
+            }
+        }
+    })
+    lib.showContext('vp_broker_legacy_order')
+end
+
 -- ─── Menus de interação ───────────────────────────────────────────────────────
 
 function openSellMenu()
     local sellable = {}
     local prices   = Config.Fence and Config.Fence.BasePrices or {}
+    local isBrokerEnabled = (Config.Broker and Config.Broker.Enable ~= false)
+    local itemMap  = (Config.Broker and Config.Broker.Integration and Config.Broker.Integration.ItemToCommodity) or {}
+
     for item, _ in pairs(prices) do
         local count = exports.ox_inventory:Search('count', item)
         if count and count > 0 then
-            sellable[#sellable+1] = { name=item, amount=count, unitPrice=prices[item] }
+            local isDynamic = isBrokerEnabled and (itemMap[item] ~= nil)
+            sellable[#sellable+1] = { name=item, amount=count, unitPrice=prices[item], isDynamic=isDynamic }
         end
     end
     if #sellable == 0 then
@@ -302,9 +749,10 @@ function openSellMenu()
     -- Montar context menu com todos os itens vendáveis
     local opts = {}
     for _, s in ipairs(sellable) do
+        local priceLabel = s.isDynamic and (L('fence_sell_price_dynamic') or 'Preço variável de mercado') or ('$'..s.unitPrice..' un.')
         opts[#opts+1] = {
             title    = s.name .. ' ×' .. s.amount,
-            metadata = {{ label=L('fence_sell_price_label'), value='$'..s.unitPrice..' un.' }},
+            metadata = {{ label=L('fence_sell_price_label'), value=priceLabel }},
             onSelect = function()
                 local ok, res = pcall(lib.callback.await, 'vp_chopshop:fence:sellItems', false, {{name=s.name, amount=s.amount}})
                 if ok and res and res.ok then
@@ -420,214 +868,15 @@ function deliverCar()
     elseif res and res.err == 'cooldown' then
         local mins = math.ceil(res.wait / 60)
         lib.notify({ description=L('fence_car_wait_fmt', mins), type='error' })
+    elseif res and (res.err == 'owned' or res.err == 'already_delivered' or res.err == 'identity') then
+        lib.notify({ description=L('err_' .. res.err), type='error' })
+    elseif res and res.err == 'cooldown_race' then
+        lib.notify({ description=L('err_cooldown'), type='error' })
+    elseif res and res.err == 'payment' then
+        lib.notify({ description=L('err_payment'), type='error' })
     else
         lib.notify({ description=L('fence_car_refused'), type='error' })
     end
-end
-
--- ─── Props de pneu no chão ────────────────────────────────────────────────────
--- [v1.15] NOTA: o bloco abaixo (VPChopSpawnTyreProp / VPChopPickUpTyre / VPChopDropTyre /
--- VPChopLoadTyreInTruck / VPChopLoadTyreInTruckFromCarry) é CÓDIGO MORTO — sem call site
--- externo. O fluxo vivo de pneu→truck está em client/main.lua (VPChopCarryingPart.isTyre
--- → 'vp_chopshop:tyre:loadToTruck'). Marcado para remoção num commit 'chore:' separado;
--- os TriggerServerEvent aqui foram repontados só para não referenciar evento inexistente.
-
---- Spawna prop de pneu no chão na posição indicada.
----@param position vector3
----@return integer  propHandle
-function VPChopSpawnTyreProp(position)
-    local model = `prop_cs_wheel_01`
-    RequestModel(model)
-    -- [FIX M-5] Wait(100) em vez de Wait(10): sub-frame polling desperdiça wakeups
-    local t = GetGameTimer() + 4000
-    while not HasModelLoaded(model) and GetGameTimer() < t do Wait(100) end
-    if not HasModelLoaded(model) then return 0 end
-
-    local prop = CreateObjectNoOffset(model, position.x, position.y, position.z, false, false, false)
-    SetModelAsNoLongerNeeded(model)
-    if not prop or prop == 0 then return 0 end
-
-    PlaceObjectOnGroundProperly(prop)
-
-    local despawnMs = (Config.Fence and Config.Fence.TyrePropDespawnMs) or 600000
-    local spawnTime = GetGameTimer()
-
-    -- Target no prop
-    exports.ox_target:addLocalEntity(prop, {
-        {
-            name     = 'vp_tyre_pick_' .. tostring(prop),
-            label    = L('fence_tyre_pick_label'),
-            icon     = 'fa-solid fa-hand',
-            distance = 2.0,
-            onSelect = function() VPChopPickUpTyre(prop) end,
-        },
-        {
-            name     = 'vp_tyre_load_' .. tostring(prop),
-            label    = L('fence_tyre_load_label'),
-            icon     = 'fa-solid fa-truck',
-            distance = 2.0,
-            canInteract = VPChopIsTruckNearby,  -- [M1 FIX] cache 500ms; evita GetGamePool por frame
-            onSelect = function() VPChopLoadTyreInTruck(prop) end,
-        },
-    })
-
-    TyrePropList[prop] = { prop=prop, timer=spawnTime }
-
-    -- Auto-despawn
-    CreateThread(function()
-        Wait(despawnMs)
-        VPChopRemoveTyreProp(prop)
-    end)
-
-    return prop
-end
-
---- Remove prop de pneu do mundo.
----@param propHandle integer
-function VPChopRemoveTyreProp(propHandle)
-    if not TyrePropList[propHandle] then return end
-    exports.ox_target:removeLocalEntity(propHandle)
-    if DoesEntityExist(propHandle) then DeleteObject(propHandle) end
-    TyrePropList[propHandle] = nil
-end
-
---- Pega pneu do chão e carrega no ombro.
----@param propHandle integer
-function VPChopPickUpTyre(propHandle)
-    if CarryingTyre then
-        lib.notify({ description=L('fence_already_carrying_tyre'), type='error' }); return
-    end
-    VPChopRemoveTyreProp(propHandle)
-
-    local model = `prop_cs_wheel_01`
-    RequestModel(model)
-    -- [FIX M-5] Wait(100)
-    local t = GetGameTimer() + 3000
-    while not HasModelLoaded(model) and GetGameTimer() < t do Wait(100) end
-    if not HasModelLoaded(model) then return end
-
-    local ped  = PlayerPedId()
-    local prop = CreateObjectNoOffset(model, 0, 0, 0, false, false, false)
-    SetModelAsNoLongerNeeded(model)
-    AttachEntityToEntity(prop, ped, GetPedBoneIndex(ped, 60309),
-        0.15, 0.05, 0.0,  -- offset
-        0.0, 90.0, 0.0,   -- rotation
-        true, true, false, true, 1, true)
-
-    CarryingTyre = { prop=prop }
-    lib.notify({ description=L('fence_tyre_carrying_hint'), type='inform', duration=4000 })
-
-    -- Thread para E/X enquanto carrega
-    CreateThread(function()
-        while CarryingTyre do
-            Wait(100)  -- [AUDIT M6] 50→100ms: polling de input; humano não percebe a diferença
-            -- X = largar no chão
-            if IsControlJustReleased(0, 73) then  -- X
-                VPChopDropTyre()
-                return
-            end
-            -- E = carregar no truck próximo
-            if IsControlJustReleased(0, 38) then  -- E
-                local ppos = GetEntityCoords(ped)
-                local hashes = getTruckHashes()
-                for _, veh in ipairs(GetGamePool('CVehicle')) do
-                    if DoesEntityExist(veh) and #(ppos - GetEntityCoords(veh)) < 4.0 then
-                        local vm = GetEntityModel(veh)
-                        for _, h in ipairs(hashes) do
-                            if vm == h then
-                                VPChopLoadTyreInTruckFromCarry(veh)
-                                return
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
-
---- Larga pneu no chão.
-function VPChopDropTyre()
-    if not CarryingTyre then return end
-    local prop = CarryingTyre.prop
-    CarryingTyre = nil
-    if DoesEntityExist(prop) then
-        DetachEntity(prop, true, true)
-        local pos = GetEntityCoords(PlayerPedId())
-        VPChopSpawnTyreProp(pos)
-        DeleteObject(prop)
-    end
-end
-
---- Carrega pneu no truck (a partir de prop no chão).
----@param propHandle integer
-function VPChopLoadTyreInTruck(propHandle)
-    local ped   = PlayerPedId()
-    local ppos  = GetEntityCoords(ped)
-    -- [FIX M-1] Usar getTruckHashes() (cache) em vez de joaat(m) por iteração
-    local hashes = getTruckHashes()
-    local truck = nil
-    for _, veh in ipairs(GetGamePool('CVehicle')) do
-        if DoesEntityExist(veh) and #(ppos - GetEntityCoords(veh)) < 5.0 then
-            local vm = GetEntityModel(veh)
-            for _, h in ipairs(hashes) do
-                if vm == h then truck = veh; break end
-            end
-        end
-        if truck then break end
-    end
-    if not truck then lib.notify({ description=L('fence_no_pickup_nearby'), type='error' }); return end
-
-    local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
-    local cur = math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0)
-    if cur >= max then lib.notify({ description=L('fence_truck_full'), type='error' }); return end
-
-    -- [v1.15 #1] Código morto (ver nota no topo do bloco), mas mantido contract-correct:
-    -- loadToTruck agora é lib.callback (request/response). Só age em ok==true.
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
-        NetworkGetNetworkIdFromEntity(truck))
-    if not cbOk or not res or not res.ok then
-        lib.notify({ description=L('fence_no_pickup_nearby'), type='error' }); return
-    end
-    VPChopRemoveTyreProp(propHandle)
-    lib.notify({ description=L('fence_tyre_loaded_fmt', res.count, res.max or max), type='success', duration=2500 })
-end
-
---- Retorna o handle do truck mais próximo dentro do raio indicado, ou nil se não houver.
----@param radius number  raio máximo em metros (padrão 5.0)
----@return integer|nil
-function VPChopFindNearestTruck(radius)
-    local hashes = getTruckHashes()
-    local ppos   = GetEntityCoords(PlayerPedId())
-    for _, veh in ipairs(GetGamePool('CVehicle')) do
-        if DoesEntityExist(veh) and #(ppos - GetEntityCoords(veh)) <= (radius or 5.0) then
-            local vm = GetEntityModel(veh)
-            for _, h in ipairs(hashes) do
-                if vm == h then return veh end
-            end
-        end
-    end
-    return nil
-end
-
---- Carrega pneu no truck a partir do carry.
----@param truck integer
-function VPChopLoadTyreInTruckFromCarry(truck)
-    if not CarryingTyre then return end
-    local max = (Config.TyreSelling and Config.TyreSelling.MaxTyresInTruck) or 4
-    local cur = math.floor(tonumber(Entity(truck).state.chopTyreCount) or 0)
-    if cur >= max then lib.notify({ description=L('fence_truck_full'), type='error' }); return end
-
-    -- [v1.15 #1] Código morto, mantido contract-correct: loadToTruck é lib.callback.
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:tyre:loadToTruck', false,
-        NetworkGetNetworkIdFromEntity(truck))
-    if not cbOk or not res or not res.ok then
-        lib.notify({ description=L('fence_no_pickup_nearby'), type='error' }); return
-    end
-    local prop = CarryingTyre.prop
-    CarryingTyre = nil
-    if DoesEntityExist(prop) then DeleteObject(prop) end
-    lib.notify({ description=L('fence_tyre_loaded_fmt', res.count, res.max or max), type='success', duration=2500 })
 end
 
 -- ─── Cleanup ──────────────────────────────────────────────────────────────────
@@ -636,10 +885,4 @@ AddEventHandler('onResourceStop', function(res)
     if res ~= GetCurrentResourceName() then return end
     removeFenceBlip()
     if FenceNpcEnt then exports.ox_target:removeLocalEntity(FenceNpcEnt) end
-    if CarryingTyre and DoesEntityExist(CarryingTyre.prop) then DeleteObject(CarryingTyre.prop) end
-    for handle, _ in pairs(TyrePropList) do
-        exports.ox_target:removeLocalEntity(handle)
-        if DoesEntityExist(handle) then DeleteObject(handle) end
-    end
-    TyrePropList = {}
 end)

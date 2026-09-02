@@ -74,6 +74,14 @@ local function doForge()
     end
 end
 
+function VPChopSerialDoScratch()
+    doScratch()
+end
+
+function VPChopSerialDoForge()
+    doForge()
+end
+
 --- [SERIAL] Devolve as opções de ox_target da bancada relativas à série. Chamada por
 --- client/bench.lua (VPChopUpsertBench) ao montar os targets. canInteract consulta o
 --- servidor (benchAvailability) para só mostrar quando há peça elegível + tier suficiente.
@@ -140,19 +148,39 @@ local function playerIsPolice()
     return job ~= nil and policeSet[job] == true
 end
 
+--- [SERIAL] Resolve o nome de exibição legível de um modelo a partir de hash ou string de display.
+---@param rawModel string|number|nil
+---@return string|nil
+local function resolveModelDisplayName(rawModel)
+    if not rawModel or rawModel == '' or rawModel == 'CARMODEL' then return nil end
+    local num = tonumber(rawModel)
+    if num and num ~= 0 then
+        local disp = GetDisplayNameFromVehicleModel(num)
+        if disp and disp ~= '' and disp ~= 'CARNOTFOUND' then
+            local lbl = GetLabelText(disp)
+            if lbl and lbl ~= '' and lbl ~= 'NULL' then return lbl end
+            return disp
+        end
+    end
+    if type(rawModel) == 'string' then
+        local lbl = GetLabelText(rawModel)
+        if lbl and lbl ~= '' and lbl ~= 'NULL' then return lbl end
+        return rawModel
+    end
+    return nil
+end
+
 --- [SERIAL] Traduz uma linha de veredito do servidor em texto exibível. O servidor manda
---- só o display name do modelo (ex.: 'SULTANRS'); o GetLabelText (client) o deixa bonito.
---- NUNCA há placa em nenhuma linha.
+--- o identificador técnico/display do modelo; o GetDisplayNameFromVehicleModel e GetLabelText
+--- (client) o deixam amigável. NUNCA há placa em nenhuma linha.
 ---@param line { verdict: string, model: string|nil, count: number }
 ---@return string
 local function formatInspectLine(line)
     local n = tonumber(line.count) or 1
     if line.verdict == 'stolen' then
-        local pretty = line.model
+        local pretty = resolveModelDisplayName(line.model)
         if pretty then
-            local lbl = GetLabelText(pretty)
-            if not lbl or lbl == '' or lbl == 'NULL' then lbl = pretty end
-            return L('serial_inspect_stolen_model_fmt', n, lbl)
+            return L('serial_inspect_stolen_model_fmt', n, pretty)
         end
         return L('serial_inspect_stolen_fmt', n)
     elseif line.verdict == 'scratched' then
@@ -188,7 +216,132 @@ local function showInspectResult(res)
     lib.showContext('vp_chop_serial_inspect')
 end
 
--- ox_target GLOBAL em jogadores. canInteract gate por job (UX); servidor revalida.
+--- [v1.18 P4.4.1] Abre o resultado da perícia veicular num context menu (ox_lib)
+local function showVehicleInspectResult(res)
+    if not res or not res.data then
+        VPChopNotify(L('serial_generic_error'), 'error')
+        return
+    end
+    local d = res.data
+    local options = {}
+
+    -- 1. Status do Bloco do Motor
+    if d.engineMissing then
+        options[#options + 1] = {
+            title = L('forensic_engine_missing'),
+            description = L('forensic_engine_missing_desc'),
+            icon = 'fa-solid fa-triangle-exclamation',
+            iconColor = '#ff4444',
+            readOnly = true,
+        }
+    else
+        local desc
+        if d.serial then
+            desc = L('forensic_engine_ok_desc', d.serial, d.sourceModel or 'N/A')
+        else
+            desc = L('forensic_engine_no_serial_desc', d.sourceModel or 'N/A')
+        end
+        options[#options + 1] = {
+            title = L('forensic_engine_ok'),
+            description = desc,
+            icon = 'fa-solid fa-check',
+            iconColor = '#44ff44',
+            readOnly = true,
+        }
+    end
+
+    -- 2. Status do Catalisador
+    if d.catalyticStolen then
+        options[#options + 1] = {
+            title = L('forensic_catalytic_stolen'),
+            description = L('forensic_catalytic_stolen_desc'),
+            icon = 'fa-solid fa-fire',
+            iconColor = '#ff4444',
+            readOnly = true,
+        }
+    else
+        options[#options + 1] = {
+            title = L('forensic_catalytic_ok'),
+            description = L('forensic_catalytic_ok_desc'),
+            icon = 'fa-solid fa-check',
+            iconColor = '#44ff44',
+            readOnly = true,
+        }
+    end
+
+    -- 3. Status do VIN / Chassi
+    if d.vinStatus == 'scratched' then
+        options[#options + 1] = {
+            title = L('forensic_vin_scratched'),
+            description = L('forensic_vin_scratched_desc'),
+            icon = 'fa-solid fa-ban',
+            iconColor = '#ff4444',
+            readOnly = true,
+        }
+    elseif d.vinStatus == 'unknown' then
+        options[#options + 1] = {
+            title = L('forensic_vin_unknown'),
+            description = L('forensic_vin_unknown_desc'),
+            icon = 'fa-solid fa-circle-question',
+            iconColor = '#aaaaaa',
+            readOnly = true,
+        }
+    else
+        options[#options + 1] = {
+            title = L('forensic_vin_ok'),
+            description = L('forensic_vin_ok_desc', d.plate or 'N/A'),
+            icon = 'fa-solid fa-check',
+            iconColor = '#44ff44',
+            readOnly = true,
+        }
+    end
+
+    -- 4. Disfarce de Placa
+    if d.plateDisguised then
+        options[#options + 1] = {
+            title = L('forensic_plate_disguised', d.plateOriginal or 'UNKNOWN'),
+            description = L('forensic_plate_disguised_desc'),
+            icon = 'fa-solid fa-mask',
+            iconColor = '#ffaa00',
+            readOnly = true,
+        }
+    end
+
+    -- 5. Status do Rastreador GPS
+    if d.trackerStatus == 'active' then
+        options[#options + 1] = {
+            title = L('forensic_tracker_active'),
+            description = L('forensic_tracker_active_desc'),
+            icon = 'fa-solid fa-tower-broadcast',
+            iconColor = '#3399ff',
+            readOnly = true,
+        }
+    elseif d.trackerStatus == 'cut' then
+        options[#options + 1] = {
+            title = L('forensic_tracker_cut'),
+            description = L('forensic_tracker_cut_desc'),
+            icon = 'fa-solid fa-scissors',
+            iconColor = '#ffaa00',
+            readOnly = true,
+        }
+    else
+        options[#options + 1] = {
+            title = L('forensic_tracker_none'),
+            description = L('forensic_tracker_none_desc'),
+            icon = 'fa-solid fa-circle-info',
+            readOnly = true,
+        }
+    end
+
+    lib.registerContext({
+        id      = 'vp_chop_vehicle_forensic',
+        title   = L('forensic_report_title'),
+        options = options,
+    })
+    lib.showContext('vp_chop_vehicle_forensic')
+end
+
+-- ox_target GLOBAL em jogadores e veículos. canInteract gate por job (UX); servidor revalida.
 CreateThread(function()
     -- Espera ox_target estar pronto (mesmo padrão de client/main.lua).
     local tries = 0
@@ -232,6 +385,60 @@ CreateThread(function()
             end,
         },
     })
+
+    -- [v1.18 P4.4.1] ox_target em veículos para perícia policial (gate por VehicleInspection.Enable)
+    if PS.VehicleInspection and PS.VehicleInspection.Enable then
+        exports.ox_target:addGlobalVehicle({
+            {
+                name     = 'vp_chopshop:inspectVehicle',
+                label    = L('forensic_target_inspect'),
+                icon     = 'fa-solid fa-clipboard-check',
+                distance = 3.0,
+                canInteract = function()
+                    return playerIsPolice()
+                end,
+                onSelect = function(data)
+                    local veh = data and data.entity
+                    if not veh or veh == 0 or not DoesEntityExist(veh) then
+                        VPChopNotify(L('err_vehicle'), 'error')
+                        return
+                    end
+                    local netId = NetworkGetNetworkIdFromEntity(veh)
+                    if not netId or netId <= 0 then
+                        VPChopNotify(L('err_vehicle'), 'error')
+                        return
+                    end
+
+                    local progressOk = lib.progressBar({
+                        duration     = (PS.VehicleInspection and PS.VehicleInspection.DurationMs) or 5000,
+                        label        = L('forensic_inspecting'),
+                        useWhileDead = false,
+                        canCancel    = true,
+                        disable      = { move = true, car = true, combat = true },
+                        anim         = { dict = 'amb@world_human_clipboard@male@base', clip = 'base', flag = 1 },
+                    })
+                    if not progressOk then return end
+
+                    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:inspectVehicle', false, netId)
+                    if not cbOk or not res then
+                        VPChopNotify(L('serial_generic_error'), 'error')
+                        return
+                    end
+                    if not res.ok then
+                        local errKey = ({
+                            not_police = 'serial_inspect_not_police',
+                            no_tool    = 'serial_inspect_no_scanner',
+                            range      = 'serial_too_far',
+                            cooldown   = 'serial_cooldown',
+                        })[res.err or ''] or 'serial_generic_error'
+                        VPChopNotify(L(errKey), 'error')
+                        return
+                    end
+                    showVehicleInspectResult(res)
+                end,
+            },
+        })
+    end
 end)
 
 -- ─────────────────────────────────────────────────────────────────────────────

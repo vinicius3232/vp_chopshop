@@ -74,6 +74,10 @@ local EntityAPI = {
         local ok, v = pcall(function() return Entity(ent).state.vpChopVsid end)
         return ok and v or nil
     end,
+    carcassDone = function(ent)
+        local ok, v = pcall(function() return Entity(ent).state.vpChopCarcassDone end)
+        return ok and v == true
+    end,
 }
 
 -- ─── Estado em memória ──────────────────────────────────────────────────────────
@@ -259,10 +263,35 @@ function ChopSession.Create(netId, src)
     local ent = EntityAPI.get(netId)
     if not EntityAPI.exists(ent) then return nil, 'vehicle' end
 
+    -- [v1.16 SEC-1.2] Barreira imediata: statebag do veículo (independe de DB/ledger)
+    if EntityAPI.carcassDone and EntityAPI.carcassDone(ent) then
+        return nil, 'carcass_consumed'
+    end
+    if rawget(_G, 'Entity') then
+        local okSb, val = pcall(function() return Entity(ent).state.vpChopCarcassDone end)
+        if okSb and val == true then
+            return nil, 'carcass_consumed'
+        end
+    end
+
+    -- [v1.16 SEC-1.1] Barreira persistente anti-rechop pós restart
+    if VPChopCarcassLedger and VPChopCarcassLedger.alreadyProcessed then
+        local model = EntityAPI.model(ent)
+        if model and VPChopCarcassLedger.alreadyProcessed(netId, model) then
+            return nil, 'carcass_consumed'
+        end
+    end
+
     _sidSeq = _sidSeq + 1
     local vsid, fp = mintVehicleIdentity(netId)
     fp.markerSet = EntityAPI.tag(ent, vsid) == true   -- [v1.15 #7] crava o marcador
     local now = os.time()
+
+    if rawget(_G, 'TrackerManager') and TrackerManager.ObserveVehicle then
+        pcall(function()
+            TrackerManager.ObserveVehicle(netId, 'chop_session_create')
+        end)
+    end
     local s = {
         id           = ('cs:%d'):format(_sidSeq),
         vehicle      = {
@@ -687,7 +716,7 @@ end)
 -- lua executor server-side não pode apagar sessões nem injetar veículos falsos.
 if GetConvar('vp_chopshop_selftest', '0') == '1' then
     ChopSession._test = {
-        setEntityAPI = function(tbl) for k, v in pairs(tbl) do EntityAPI[k] = v end end,
+        setEntityAPI = function(tbl) if tbl then for k, v in pairs(tbl) do EntityAPI[k] = v end end end,
         reset = function()
             Sessions, ByVehicleNetId = {}, {}
             _vsidSeq, _sidSeq = 0, 0

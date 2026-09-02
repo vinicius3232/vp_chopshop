@@ -57,6 +57,9 @@ local function fresh()
     ChopSession._test.setEntityAPI(ENTITY_API); ChopSession._test.reset()
     ActionSession._test.setEntityAPI(ENTITY_API); ActionSession._test.reset()
     TyreEntitlement._test.reset()
+    if VPChopCarcassLedger and VPChopCarcassLedger.clear then
+        VPChopCarcassLedger.clear(10, nil)
+    end
     for k in pairs(FAKE_VEH) do FAKE_VEH[k] = nil end
     CLK, domainCalls = 0, 0
     _G._TOOL_CONSUMED, _G._REWARD_COUNT, _G._PART_CHOPPED = 0, 0, 0
@@ -69,6 +72,8 @@ local function fresh()
     Config.ActionSession.RequireBaseTyres = true
     Config.ActionSession.RequireAdvanced = true
     Config.AdvancedChop.Enable = true
+    if Config.PhysicalCarry then Config.PhysicalCarry.Enable = false end
+    if Config.PartSerial then Config.PartSerial.Enable = false end
     if VPChopAdv_test then VPChopAdv_test.clearCooldown() end
 end
 
@@ -94,9 +99,8 @@ end
 
 -- Espelha o gate do callback legacy vp_chopshop:chopPart (server/main.lua).
 local function legacyTyreGate(partKey)
-    if VPChopActionModeTyre() then
-        local pdef = ChopParts and ChopParts[partKey]
-        if pdef and pdef.kind == 'tyre' then return 'action_required' end
+    if VPChopActionModeTyre() and VPChopPartGtaClass(partKey) == 'tyre' then
+        return 'action_required'
     end
     return nil
 end
@@ -380,7 +384,7 @@ CreateThread(function()
 
     -- ADV8 · carcass com engine + welder → COMPLETE ok
     local a8, a8Id = advFlow(1, sid, 'adv_carcass')
-    check('ADV8 carcass com engine+welder → ok', a8.ok == true and ChopSession.GetPartState(sid, 'adv_carcass') == 'REMOVED')
+    check('ADV8 carcass com engine+welder → ok', a8.ok == true and a8.result and a8.result.part == 'adv_carcass')
 
     -- ADV9 · door sem serra → no_saw
     fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
@@ -430,6 +434,68 @@ CreateThread(function()
     local a16 = ActionSession.StartAdvanced(1, sid, 'bonnet'); CLK = CLK + 2000
     check('ADV16 door completou', ActionSession.Complete(1, a16.actionId).ok == true)
     check('ADV16 START advanced imediato → processing (cooldown)', ActionSession.StartAdvanced(1, sid, 'boot').err == 'processing')
+
+    -- ═══ [P1.4 / FASE D] TODAS as peças avançadas validam via Part Registry ══════
+    -- Paridade byte-a-byte com o hardcode legado — a bateria ADV1..ADV16 já cobre
+    -- adv_door/adv_engine/adv_carcass; estes ADV-D fixam os casos novos.
+    -- ADV-D1 · bonnet sem serra → no_saw (registry toolClass='cut'). Antes só `boot`.
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
+    check('ADV-D1 bonnet sem serra → no_saw (registry)', ActionSession.StartAdvanced(1, sid, 'bonnet').err == 'no_saw')
+    _G.HAS_TOOL = true
+
+    -- ADV-D2 · door_pside_r (variante que nunca teve teste dedicado) → no_saw via registry
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1); _G.HAS_TOOL = false
+    check('ADV-D2 door_pside_r sem serra → no_saw (registry)', ActionSession.StartAdvanced(1, sid, 'door_pside_r').err == 'no_saw')
+    _G.HAS_TOOL = true
+
+    -- ADV-D3 · o registry TEM defs p/ adv_engine/adv_carcass (peças sintéticas) →
+    -- withRegistry realmente roteia por registryValidate (não é sempre fallback)
+    check('ADV-D3 registry cobre adv_engine + adv_carcass',
+        VPChopPartRegistry.isEnabled('adv_engine') == true and VPChopPartRegistry.isEnabled('adv_carcass') == true)
+
+    -- ADV-D3b · adv_engine via registry: sem bonnet → hood_first (requires=[bonnet])
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    check('ADV-D3b adv_engine sem capô → hood_first (registry)', ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'hood_first')
+
+    -- ADV-D4 · adv_carcass via registry: engine ok mas sem welder → no_welder_adv (gates.welder)
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    ChopSession.MarkPart(sid, 'bonnet', 1, { origin = 'advanced' })
+    ChopSession.MarkPart(sid, 'adv_engine', 1, { origin = 'advanced' })
+    _G.WELDER_NEAR = false
+    check('ADV-D4 adv_carcass sem welder → no_welder_adv (registry)', ActionSession.StartAdvanced(1, sid, 'adv_carcass').err == 'no_welder_adv')
+    _G.WELDER_NEAR = true
+
+    -- ADV-E1 · [FASE E] peça DESLIGADA no registry (enabled=false) → 'part'.
+    -- Sem mais fallback hardcoded: desligar a peça no registry a torna inchopável.
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    VPChopPartRegistry.defs.adv_engine.enabled = false
+    check('ADV-E1 adv_engine desligado no registry → part',
+        ActionSession.StartAdvanced(1, sid, 'adv_engine').err == 'part')
+    VPChopPartRegistry.defs.adv_engine.enabled = true
+
+    -- ADV-E2 · bonnet desligado no registry → 'part' (guard de tipo passa; registryValidate barra)
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    VPChopPartRegistry.defs.bonnet.enabled = false
+    check('ADV-E2 bonnet desligado no registry → part',
+        ActionSession.StartAdvanced(1, sid, 'bonnet').err == 'part')
+    VPChopPartRegistry.defs.bonnet.enabled = true
+
+    -- ADV-E3 · reativar → volta a funcionar normalmente
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    local ae3 = ActionSession.StartAdvanced(1, sid, 'bonnet')
+    check('ADV-E3 bonnet reativado → START ok',
+        ae3.ok == true and ActionSession._test._all()[ae3.actionId].kind == 'adv_door')
+
+    -- ═══ [P1.6 / FASE F] VPChopPartGtaClass — acessor legado que os consumidores server usam ══
+    check('ADV-F1 gtaClass door', VPChopPartGtaClass('bonnet') == 'door' and VPChopPartGtaClass('door_pside_r') == 'door')
+    check('ADV-F2 gtaClass tyre', VPChopPartGtaClass('wheel_lf') == 'tyre' and VPChopPartGtaClass('wheel_rr') == 'tyre')
+    check('ADV-F3 gtaClass nil p/ sintética / desconhecida',
+        VPChopPartGtaClass('adv_engine') == nil and VPChopPartGtaClass('adv_carcass') == nil
+            and VPChopPartGtaClass('nope') == nil)
+    -- roteamento por gtaClass (sem ChopParts direto no código de produção):
+    fresh(); spawn(10, 111); sid = legitRaise(10, 1)
+    check('ADV-F4 StartBaseTyre rejeita não-tyre via gtaClass', ActionSession.StartBaseTyre(1, sid, 'bonnet').err == 'part')
+    check('ADV-F5 StartAdvanced rejeita não-door/engine via gtaClass', ActionSession.StartAdvanced(1, sid, 'wheel_lf').err == 'part')
 
     -- ═══ RATE-LIMIT REAL (500ms) NÃO QUEBRA REPLAY ════════════════════════════
     Config.ActionSession.StartRateLimitMs = 500

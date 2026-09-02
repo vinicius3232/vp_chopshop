@@ -2,6 +2,91 @@
 
 ---
 
+## [1.16.0] — 2026-09-01 — Physical Interaction Minigames, Workshop Carrying, Damage Scaling & Catalytic Converter Theft
+
+Validação completa em runtime FiveM / QBox. Harness de teste estático: **1031 asserts / 0 fail** (`lua tools/run_spec.lua .`).
+
+### Added / Gameplay Features
+- **Physical Minigames Stack (UX-A → UX-F):**
+  - **Wheel 5-Bolt:** Rotação física de 5 parafusos por roda com primitive `rotate` e física de mouse/torque.
+  - **Body Panels:** Desmanche de portas, capô e porta-malas com serra circular (`prop_tool_consaw`) e primitive `cut`.
+  - **Engine Removal:** Desacoplamento dos calços do motor com chave inglesa/boca (`prop_tool_wrench`) e primitive `drill`.
+  - **Carcass Structural Trace:** Corte estrutural de carcaça com maçarico de solda (`prop_weld_torch`), primitive `trace`, auto-avanço fluido de câmera 3D entre seções e isolamento de linhas de corte ativas.
+  - **Collision Damage Bypass:** Veículos que chegam sem capô ou portas por batidas têm os pré-requisitos liberados automaticamente.
+- **Physical Part Carrying & Workshop Processing:**
+  - Peças retiradas (`door`, `bonnet`, `boot`, `adv_engine`, `catalytic_converter`) surgem fisicamente nos braços do jogador com animação pesada (`anim@heists@box_carry@`).
+  - `[E]` ou `[X]` coloca a peça no chão com alinhamento Z e target `ox_target` para pegar de volta (`part_pickup`).
+  - Desmanche na bancada: `ox_target` na `chopshop_bench` permite processar a peça carregada, gerando materiais brutos e `car_parts`.
+- **Dynamic Vehicle Damage Scaling (`GetVehicleEngineHealth`):**
+  - Integridade do motor influencia diretamente a quantidade de `car_parts` entregues. Peças perdidas são convertidas em sucata de metal (`metalscrap`).
+  - Motores fundidos / destruídos ($< 150$ HP) bloqueiam o reaproveitamento como peças mecânicas funcionais.
+  - Pneus furados / estourados durante perseguições não podem ser furtados como pneus intactos.
+- **Catalytic Converter & Wheel Theft on Player Vehicles:**
+  - Alvo `ox_target` no escapamento/chassi (`exhaust`, `exhaust_2`, `chassis`) de qualquer veículo parado na rua.
+  - Permite desmanchar rodas e furtar catalisadores de **veículos pertencentes a outros jogadores**.
+  - **Proteção Anti-Auto-Farm (`BlockOwnVehicle`):** `BridgeIsPlayerVehicleOwner` bloqueia o jogador de depenar ou roubar peças do seu próprio carro pessoal para dupe/farm.
+  - 40% de chance de disparo de alarme e alerta policial devido ao ruído da serra.
+  - Carregamento físico do escapamento/catalisador (`prop_car_exhaust_01`).
+  - Escolha do jogador: desmanchar na bancada para extrair metais raros (`copper`, `metalscrap`, `car_parts`) ou vender diretamente ao NPC Fence por dinheiro limpo.
+
+---
+
+## [1.15.0-rc1] — 2026-08-27 — Server-authority + ChopSession + ActionSession (RELEASE CANDIDATE)
+
+Refatoração arquitetural em stack de 10 PRs (#2→#11, **nenhuma mergeada** até a validação
+runtime QBox passar). Harness de teste estático: **493 asserts / 0 fail** (`lua tools/run_spec.lua .`).
+Auditoria 4-dimensões: 0 CRITICAL, 0 HIGH, 1 MEDIUM (i18n). Plano de validação e estado em
+`docs/audit/V115_RELEASE_CANDIDATE.md`. **CODE FREEZE** a partir daqui.
+
+### Security / Architecture
+- **P0 hotfix (#2):** truck storage sem lastro, `sellTyres` sem validação, `jackstandTyreStolen`
+  dead-grant, `discardVehicle` double-payout — fechados.
+- **ChopSession (#3):** fonte server-authoritative única do estado de desmanche. VehicleSessionId
+  (netId+model+ownedId + marcador server-local `vpChopVsid` write+readback). Jackstand deixa de
+  ser verdade client-side. **INVARIANT:** enquanto o veículo é válido, tempo sozinho nunca apaga
+  estado commitado — sem TTL destrutivo.
+- **adv_gate (#4):** os 3 callbacks `adv:*` exigem ChopSession ativa + `raised` + participante.
+- **base/advanced chop → ChopSession (#5,#6):** `ChoppedByNetId` / `AdvState` / `AdvMutex`
+  removidos; estado de peça vive em `session.parts[k]` com `origin='base'|'advanced'`.
+- **Unified discard (#7):** `discardVehicle` vira transação terminal. Contagem unificada
+  base+advanced. `bridge/server_vehicle.lua`: ownership por QBox (`state.vehicleid` + lookup
+  `qbx_vehicles`, fail-closed), `BridgeDeleteWorldVehicle({expectedFramework})` (DisablePersistence
+  confirmado). `Config.Discard.OwnedPolicy='deny'`. Quarentena econômica em falha de compensação.
+- **Tyre entitlement (#8):** `PlayerTyreStock` removido. Ledger `TyreEntitlement` independente da
+  ChopSession (`te:<n>`, ciclo REMOVED→STORED→SOLD/LOST). `TruckStorage` com identidade própria
+  (`ts:<n>` + marcador write+readback). Contagem derivada; `chopTyreCount` só UX.
+- **ActionSession (#9,#10):** autorização temporal server-authoritative para ações físicas
+  (START→OPEN→COMMITTING→COMPLETED). Replay = zero side-effect. Migrados base tyre + advanced
+  (door/engine/carcass). COMMITTING fail-closed (`PinPartLock`). Kill-switches exclusivos
+  (`Config.ActionSession.RequireBaseTyres` / `RequireAdvanced`).
+- **fence:deliverCar terminal hardening (#11):** deixa de usar `DeleteEntity` direto. Ownership
+  gate → **reserva de cooldown condicional** (`affectedRows==1`, autoridade, ANTES do dinheiro) →
+  marcador `vpChopDeliveredMark` (write+readback, barreira de entrada, sobrevive a resource
+  restart) → `BridgeAddCash` → `BridgeDeleteWorldVehicle` → retry por identidade estrita
+  (`deliver_car_util.lua`, sem timer). RC-FIX-1a: rollback só confirma com `affectedRows==1`.
+  RC-FIX-1b: `clearMark` no payment-fail é observável (log SEVERE, fail-closed).
+
+### Fixed (RC runtime)
+- **RC-FIX-2 (`Config.Plates.Bolt3D.Enable=false`, `Config.Jackstand.Minigame.Bolt3D.Enable=false`):**
+  o minigame de parafusos 3D (`runBoltSurface`) roda com geometria placeholder nunca calibrada
+  (parafusos fora da placa), câmera fixa na traseira mesmo roubando a placa da frente, e a
+  orientação/giro não responde. Desligado → cai em `lib.skillCheck` (Config.Plates.SkillCheck /
+  Jackstand.Minigame.SkillCheck*). O rework do minigame 3D (front/rear-aware, calibração, giro,
+  remoção do asset pago `bolt.ydr`) é tarefa pós-RC — ver `docs/audit/V115_RELEASE_CANDIDATE.md` §7.
+
+### Notes
+- Economia, payout, heat, trust, tier, XP, cooldowns: **INALTERADOS** em toda a stack.
+- Limitação conhecida: ChopSession / TyreEntitlement / TruckStorage / ActionSession são in-memory
+  — resource restart perde o ledger (documentado; decisão de persistência = v1.15 vs v1.16 depende
+  da Fase 20 do RC).
+- Pendências não-bloqueantes: i18n — 4 notificações player-facing hardcoded em pt-BR no servidor
+  (`server/main.lua:330`, `server/advanced_chop.lua:101/187`, `server/ambush.lua:160`); ~160
+  linhas de código morto em `client/fence.lua` (props de pneu legados). Ambas → chore pós-RC.
+- Assets `stream/bolt.ydr` + `stream/wheel_spacer.ytyp` (pacote pago `ls_bolt_minigame`): remover/
+  substituir antes de release público.
+
+---
+
 ## [1.14.3] — 2026-06-27 — Parafuso 3D do minigame volta a carregar (registro do .ytyp)
 
 ### Fixed

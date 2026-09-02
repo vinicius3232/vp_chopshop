@@ -118,6 +118,106 @@ function VPChopDbInit()
                     PRIMARY KEY (`serial`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [v1.16 P0.4] Ledger de carcaças processadas (discard / deliverCar).
+            -- A ChopSession (tombstone de discard) e o statebag vpChopDeliveredMark
+            -- são in-memory / server-local → não sobrevivem a `ensure vp_chopshop`
+            -- se a entidade continua no mundo. Sem este ledger, um jogador re-chopa
+            -- a MESMA carcaça pós-restart e descarta de novo (2º pagamento).
+            -- PK (net_id, model): uma entidade é uma coisa só. TTL (lido no lookup)
+            -- porque net_id é reciclável.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_carcass` (
+                    `net_id`          INT UNSIGNED NOT NULL,
+                    `model`           BIGINT       NOT NULL,
+                    `vsid`            VARCHAR(24)  DEFAULT NULL,
+                    `op`              VARCHAR(12)  NOT NULL,
+                    `paid_to`         VARCHAR(60)  DEFAULT NULL,
+                    `cleanup_pending` TINYINT(1)   NOT NULL DEFAULT 1,
+                    `processed_at`    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`net_id`, `model`),
+                    INDEX `idx_carcass_pending` (`cleanup_pending`, `processed_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
+            -- [v1.17 BROKER] Snapshot dinâmico de mercado do Broker.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_broker_market` (
+                    `commodity`     VARCHAR(64)          NOT NULL,
+                    `demand_index`  DECIMAL(5, 4)        NOT NULL DEFAULT 1.0000,
+                    `recent_volume` INT UNSIGNED         NOT NULL DEFAULT 0,
+                    `last_recovery` TIMESTAMP            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`commodity`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
+            -- [v1.17 BROKER-3] Contratos & Janelas de Alta Demanda (Broker Contracts).
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_broker_contracts` (
+                    `id`             INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+                    `for_identifier` VARCHAR(60)       NULL DEFAULT NULL,
+                    `contract_type`  VARCHAR(30)       NOT NULL DEFAULT 'part_type',
+                    `target_key`     VARCHAR(50)       NOT NULL,
+                    `quantity`       SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    `remaining`      SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    `reward_mult`    DECIMAL(4, 2)     NOT NULL DEFAULT 1.00,
+                    `bonus_cash`     INT UNSIGNED      NOT NULL DEFAULT 0,
+                    `min_trust`      TINYINT UNSIGNED  NOT NULL DEFAULT 1,
+                    `created_at`     TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `expires_at`     TIMESTAMP         NOT NULL,
+                    `fulfilled_at`   TIMESTAMP         NULL DEFAULT NULL,
+                    `state`          VARCHAR(20)       NOT NULL DEFAULT 'AVAILABLE',
+                    PRIMARY KEY (`id`),
+                    INDEX `idx_contracts_lookup` (`for_identifier`, `state`, `expires_at`),
+                    INDEX `idx_contracts_global` (`for_identifier`, `state`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
+            -- [v1.17 BROKER-4] Workshop Bridge & Persistent SAGA Journal.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_workshop_journal` (
+                    `txn_id`          VARCHAR(80)       NOT NULL,
+                    `provider`        VARCHAR(40)       NOT NULL,
+                    `player_key`      VARCHAR(60)       NOT NULL,
+                    `asset_kind`      VARCHAR(24)       NOT NULL,
+                    `entitlement_id`  VARCHAR(96)       NULL DEFAULT NULL,
+                    `stable_part_id`  VARCHAR(128)      NOT NULL,
+                    `part_key`        VARCHAR(50)       NOT NULL,
+                    `price`           INT UNSIGNED      NOT NULL,
+                    `state`           VARCHAR(20)       NOT NULL,
+                    `reconcile_count` TINYINT UNSIGNED  NOT NULL DEFAULT 0,
+                    `metadata`        TEXT              NULL DEFAULT NULL,
+                    `created_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`txn_id`),
+                    INDEX `idx_workshop_state` (`state`),
+                    INDEX `idx_workshop_stable` (`stable_part_id`),
+                    INDEX `idx_workshop_player` (`player_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
+            -- Migração idempotente e não-destrutiva para tabelas criadas em rascunhos anteriores
+            pcall(function()
+                local cols = MySQL.query.await([[
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'vp_chop_workshop_journal'
+                      AND TABLE_SCHEMA = DATABASE()
+                ]])
+                if cols and type(cols) == 'table' and #cols > 0 then
+                    local colMap = {}
+                    for _, c in ipairs(cols) do
+                        if c.COLUMN_NAME then colMap[c.COLUMN_NAME] = true end
+                    end
+                    if not colMap['asset_kind'] then
+                        MySQL.query.await([[
+                            ALTER TABLE `vp_chop_workshop_journal`
+                            ADD COLUMN `asset_kind` VARCHAR(24) NULL DEFAULT NULL AFTER `player_key`
+                        ]])
+                    end
+                    if not colMap['stable_part_id'] then
+                        MySQL.query.await([[
+                            ALTER TABLE `vp_chop_workshop_journal`
+                            ADD COLUMN `stable_part_id` VARCHAR(128) NULL DEFAULT NULL AFTER `entitlement_id`
+                        ]])
+                    end
+                end
+            end)
             VPChopDBReady = true
             TriggerEvent('vp_chopshop:server:dbReady')
         end)
@@ -368,4 +468,85 @@ function VPChopDbWhichSerialsLegit(serials)
         end
     end
     return set
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+--  [v1.16 P0.4] Ledger de carcaças processadas — vp_chop_carcass.
+--  Wired em VPChopCarcassLedger._setDb (server/session/carcass_ledger.lua).
+--  Todas as funções fazem pcall: erro de DB NÃO derruba o fluxo de discard/deliver.
+--  Barreira fail-OPEN por design: um blip de MySQL não deve bloquear TODO discard;
+--  a dupe que isto fecha (re-discard da MESMA carcaça pós-restart de resource) é rara.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+local function carcassTtl()
+    return math.floor(tonumber((Config.RestartRecovery or {}).CarcassTtlSeconds) or 1800)
+end
+
+---@return boolean ok
+function VPChopDbCarcassMark(netId, model, vsid, op, paidTo, cleanupPending)
+    if not VPChopDBReady then return false end
+    local ok = pcall(function()
+        MySQL.query.await([[
+            INSERT INTO `vp_chop_carcass` (net_id, model, vsid, op, paid_to, cleanup_pending)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE vsid = VALUES(vsid), op = VALUES(op), paid_to = VALUES(paid_to),
+                cleanup_pending = VALUES(cleanup_pending), processed_at = CURRENT_TIMESTAMP
+        ]], { math.floor(netId), math.floor(model), vsid, op, paidTo, cleanupPending == 1 and 1 or 0 })
+    end)
+    return ok
+end
+
+--- Linha dentro do TTL? Fora do TTL ⇒ nil (e limpa a linha stale). Erro ⇒ nil (fail-open).
+---@return { op:string, vsid:string|nil, cleanup_pending:integer, age:integer }|nil
+function VPChopDbCarcassLookup(netId, model)
+    if not VPChopDBReady then return nil end
+    local ttl, rows = carcassTtl(), nil
+    local ok = pcall(function()
+        rows = MySQL.query.await([[
+            SELECT vsid, op, cleanup_pending,
+                   TIMESTAMPDIFF(SECOND, processed_at, CURRENT_TIMESTAMP) AS age
+            FROM `vp_chop_carcass` WHERE net_id = ? AND model = ? LIMIT 1
+        ]], { math.floor(netId), math.floor(model) })
+    end)
+    if not ok or type(rows) ~= 'table' or not rows[1] then return nil end
+    local r = rows[1]
+    local age = tonumber(r.age) or 0
+    if age > ttl then
+        pcall(function()
+            MySQL.query.await('DELETE FROM `vp_chop_carcass` WHERE net_id = ? AND model = ?',
+                { math.floor(netId), math.floor(model) })
+        end)
+        return nil
+    end
+    return { op = r.op, vsid = r.vsid, cleanup_pending = tonumber(r.cleanup_pending) or 0, age = age }
+end
+
+--- Remove a linha. `model` nil ⇒ remove todas as linhas do net_id (uso no entityRemoved).
+---@return boolean ok
+function VPChopDbCarcassClear(netId, model)
+    if not VPChopDBReady then return false end
+    local ok = pcall(function()
+        if model == nil then
+            MySQL.query.await('DELETE FROM `vp_chop_carcass` WHERE net_id = ?', { math.floor(netId) })
+        else
+            MySQL.query.await('DELETE FROM `vp_chop_carcass` WHERE net_id = ? AND model = ?',
+                { math.floor(netId), math.floor(model) })
+        end
+    end)
+    return ok
+end
+
+--- Carcaças com cleanup_pending=1 dentro do TTL — para o sweep de boot.
+---@return table[]
+function VPChopDbCarcassLoadPending()
+    if not VPChopDBReady then return {} end
+    local rows
+    local ok = pcall(function()
+        rows = MySQL.query.await([[
+            SELECT net_id, model, vsid, op FROM `vp_chop_carcass`
+            WHERE cleanup_pending = 1 AND TIMESTAMPDIFF(SECOND, processed_at, CURRENT_TIMESTAMP) <= ?
+        ]], { carcassTtl() })
+    end)
+    if not ok or type(rows) ~= 'table' then return {} end
+    return rows
 end

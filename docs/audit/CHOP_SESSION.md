@@ -418,8 +418,59 @@ Total harness **436**.
 **Depois:** aguardar revisão. Próximos candidatos: plate steal / VIN scratch → ActionSession
 (quando desejado); Part Registry / Tool Registry (refactor maior).
 
-**RELEASE DEBT** (registrada, não puxar p/ estas PRs): `vp_chopshop:fence:deliverCar`
-usa `DeleteEntity` direto — precisa do hardening terminal da PR D (ownership gate +
-`BridgeDeleteWorldVehicle` + payment-result + transação idempotente).
+**PR H — `fence:deliverCar` terminal hardening.** ✅ **FEITO** (PR #11).
+`vp_chopshop:fence:deliverCar` (entrega de carro inteiro Tier4/trust4) deixa de usar
+`DeleteEntity` direto + pay-after-delete.
+- **Ownership gate:** `BridgeResolveVehiclePersistence` → `owned`|`unknown` ⇒ DENY
+  `owned` (fail-closed). `Config.Fence.DeliverCarOwnedPolicy='deny'`.
+- **Ordem transacional** (revisão PR #11 — a RESERVA de cooldown é a autoridade
+  terminal e vem **ANTES** do dinheiro): guards → entity/range → **marcador
+  (barreira de entrada)** → ownership gate → cooldown SELECT (só p/ `wait` + `prev_ts`)
+  → **RESERVA de cooldown condicional** (`MySQL.update.await` UPDATE ... `WHERE`
+  cooldown liberado; `affectedRows==1` obrigatório; erro/nil/≠1 ⇒ NÃO paga:
+  `cooldown_race`|`db`) → **marcador `writeMark` (write+readback)** (falha ⇒
+  rollback da reserva + `identity`, sem ter pago) → **`BridgeAddCash`** (falha ⇒
+  `clearMark` + rollback da reserva + `payment`, dinheiro não entrou) → tombstone →
+  `BridgeDeleteWorldVehicle({expectedFramework})` → trust → `FENCE_DELIVERY 'car'` 1×
+  → `existsAfter` ⇒ `{ ok=true, cleanupPending=true }` + `scheduleCarDeleteRetry`.
+- **Marcador `vpChopDeliveredMark`** (statebag server-local) é a **autoridade de
+  identidade** da entidade viva: `readMark` distinguível (leitura falha ⇒ `identity`
+  fail-closed; presente ⇒ `already_delivered`; ausente ⇒ segue). Sobrevive a
+  **resource restart** enquanto a carcaça não some — outro jogador não revende.
+  `DeliveredTombstone` deixa de bloquear por `model` (netId reciclado = identidade
+  nova); serve só p/ retry-tracking/cleanupPending/`entityRemoved`.
+- **Retry** `VPChopDeliverCar.tryDeleteCleanupOnce` (novo módulo
+  `server/session/deliver_car_util.lua`) — UMA tentativa, **sem timer**, testável
+  direto; identidade estrita por marcador (mismatch/unreadable ⇒ aborta).
+  `scheduleCarDeleteRetry` só a agenda via `SetTimeout` + reagenda (5×).
+- **`DeliverCarQuarantine` REMOVIDO** — nesta ordem o dinheiro só entra depois de
+  reserva + marcador confirmados; não há mais estado "pago sem barreira", logo não
+  há quarentena econômica de deliverCar. Rollback de cooldown que falha ⇒ fail-closed
+  (cooldown fica setado) + log SEVERE, **sem perda monetária**.
+- **Guards:** `DeliveryBusy[playerKey]` + `DeliverCarBusy[netId]`. `entityRemoved`
+  limpa guard+tombstone.
+- Economia/payout/heat/trust/tier/`WholeCarCooldownMin` **INALTERADOS**.
+- **RC-FIX-1a:** `rollbackCooldown()` só confirma com `affectedRows==1` (não só
+  `pcall==true`); erro/nil/false/0/>1 ⇒ fail-closed, sem 2ª tentativa econômica.
+- **RC-FIX-1b:** `clearMark()` no payment-fail tem retorno checado + `LogSuspicious`
+  SEVERE; veículo fica fail-closed como `already_delivered`, sem perda econômica,
+  sem limpeza forçada.
+- `deliver_car_spec` **57 asserts** (DCAR1-24, inclui reserva-antes-do-payout,
+  marker gate, resource-restart sim, same-model netId reuse, retry REAL, rollback
+  affectedRows, clearMark failure seam). Total harness **493**.
+
+**Estado:** HEAD `99371e4` (branch `pr-h/v1.15-delivercar-terminal-hardening`,
+base `pr-g/...` = `46c1713`). PR #11 aberta, mergeável, **NÃO mergeada**.
+Aprovada estruturalmente + RC-FIX-1a/1b. Merge condicionado à validação runtime
+(ver `V115_RELEASE_CANDIDATE.md`).
+
+---
+
+## v1.15 — CODE FREEZE
+
+A partir de `99371e4` a fase de implementação arquitetural v1.15 está **ENCERRADA**.
+Stack #2→#11, nada mergeado. Não iniciar feature nova; não fazer hardening
+especulativo. Próximo movimento = RELEASE CANDIDATE / REAL QBOX INTEGRATION
+VALIDATION (`V115_RELEASE_CANDIDATE.md`).
 
 Não avançar automaticamente — cada PR passa por revisão.
