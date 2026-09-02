@@ -118,12 +118,59 @@ local function run()
         releaseConfig.Broker.Workshop.MaxReconcileAttempts == 4)
 
     local contractsCfg = releaseConfig.Broker.Contracts
-    local poolsOk = type(contractsCfg.Pools) == 'table' and
-                    type(contractsCfg.Pools.part_type) == 'table' and
-                    type(contractsCfg.Pools.model) == 'table' and
-                    type(contractsCfg.Pools.class) == 'table' and
-                    type(contractsCfg.Pools.high_value) == 'table'
-    check('V118-RC-ECON-03: Broker Contracts constants & pools match frozen baseline (MinTrust 3, Slots 3/3, 5 pools)',
+    local frozenPools = {
+        part_type = {
+            { key = 'adv_engine', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+            { key = 'catalytic_converter', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 1800 },
+            { key = 'body_panel', minTrust = 1, minQty = 2, maxQty = 6, mult = 1.15, bonus = 1000 },
+        },
+        model = {
+            { key = 'sultan', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.35, bonus = 3000 },
+            { key = 'bison', minTrust = 1, minQty = 1, maxQty = 2, mult = 1.20, bonus = 2000 },
+            { key = 'baller', minTrust = 2, minQty = 1, maxQty = 2, mult = 1.25, bonus = 2200 },
+            { key = 'banshee', minTrust = 3, minQty = 1, maxQty = 1, mult = 1.40, bonus = 4000 },
+        },
+        class = {
+            { key = 'sports', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.30, bonus = 3000 },
+            { key = 'suvs', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.20, bonus = 2000 },
+            { key = 'muscle', minTrust = 2, minQty = 1, maxQty = 3, mult = 1.25, bonus = 2500 },
+            { key = 'coupes', minTrust = 1, minQty = 2, maxQty = 4, mult = 1.15, bonus = 1800 },
+        },
+        high_value = {
+            { key = 'adv_engine', minTrust = 3, minQty = 1, maxQty = 2, mult = 1.50, bonus = 5000 },
+            { key = 'catalytic_converter', minTrust = 3, minQty = 2, maxQty = 3, mult = 1.45, bonus = 4500 },
+        },
+    }
+
+    local poolsOk = type(contractsCfg.Pools) == 'table'
+    local totalPoolCount = 0
+    if poolsOk then
+        for poolName, frozenList in pairs(frozenPools) do
+            totalPoolCount = totalPoolCount + 1
+            local realList = contractsCfg.Pools[poolName]
+            if type(realList) ~= 'table' or #realList ~= #frozenList then
+                poolsOk = false
+            else
+                for idx, expEntry in ipairs(frozenList) do
+                    local actEntry = realList[idx]
+                    if not actEntry or
+                       actEntry.key ~= expEntry.key or
+                       actEntry.minTrust ~= expEntry.minTrust or
+                       actEntry.minQty ~= expEntry.minQty or
+                       actEntry.maxQty ~= expEntry.maxQty or
+                       actEntry.mult ~= expEntry.mult or
+                       actEntry.bonus ~= expEntry.bonus then
+                        poolsOk = false
+                    end
+                end
+            end
+        end
+        local realPoolCount = 0
+        for _ in pairs(contractsCfg.Pools) do realPoolCount = realPoolCount + 1 end
+        if realPoolCount ~= totalPoolCount then poolsOk = false end
+    end
+
+    check('V118-RC-ECON-03: Broker Contracts constants & deep pool contents match frozen baseline (4 pools, 13 entries)',
         contractsCfg.Enable == true and
         contractsCfg.MinTrust == 3 and
         contractsCfg.GlobalSlots == 3 and
@@ -131,20 +178,38 @@ local function run()
         contractsCfg.RewardMultMin == 1.05 and
         contractsCfg.RewardMultMax == 1.80 and
         contractsCfg.BonusCashMax == 15000 and
-        poolsOk)
+        poolsOk == true)
+
+    local frozenCommodities = {
+        catalytic_converter = { basePrice = 1600, salePressure = 0.04,  recoveryPerHour = 0.15 },
+        adv_engine          = { basePrice = 2500, salePressure = 0.05,  recoveryPerHour = 0.12 },
+        tyre                = { basePrice = 400,  salePressure = 0.015, recoveryPerHour = 0.20 },
+        stolen_plate        = { basePrice = 250,  salePressure = 0.03,  recoveryPerHour = 0.15 },
+        body_panel          = { basePrice = 600,  salePressure = 0.03,  recoveryPerHour = 0.15 },
+        metalscrap          = { basePrice = 80,   salePressure = 0.002, recoveryPerHour = 0.25 },
+        steel               = { basePrice = 100,  salePressure = 0.003, recoveryPerHour = 0.25 },
+        aluminum            = { basePrice = 130,  salePressure = 0.004, recoveryPerHour = 0.20 },
+        copper              = { basePrice = 150,  salePressure = 0.005, recoveryPerHour = 0.20 },
+        car_parts           = { basePrice = 400,  salePressure = 0.004, recoveryPerHour = 0.20 },
+    }
 
     local com = releaseConfig.Broker.Commodities
-    local comOk = com.catalytic_converter and com.catalytic_converter.basePrice == 1600 and com.catalytic_converter.salePressure == 0.04 and
-                  com.adv_engine and com.adv_engine.basePrice == 2500 and com.adv_engine.salePressure == 0.05 and
-                  com.tyre and com.tyre.basePrice == 400 and com.tyre.salePressure == 0.015 and
-                  com.stolen_plate and com.stolen_plate.basePrice == 250 and com.stolen_plate.salePressure == 0.03 and
-                  com.body_panel and com.body_panel.basePrice == 600 and com.body_panel.salePressure == 0.03 and
-                  com.metalscrap and com.metalscrap.basePrice == 80 and com.metalscrap.salePressure == 0.002 and
-                  com.steel and com.steel.basePrice == 100 and com.steel.salePressure == 0.003 and
-                  com.aluminum and com.aluminum.basePrice == 130 and com.aluminum.salePressure == 0.004 and
-                  com.copper and com.copper.basePrice == 150 and com.copper.salePressure == 0.005 and
-                  com.car_parts and com.car_parts.basePrice == 400 and com.car_parts.salePressure == 0.004
-    check('V118-RC-ECON-04: All 10 Broker Commodities match exact frozen base prices and sale pressures',
+    local comCount = 0
+    local comOk = type(com) == 'table'
+    if comOk then
+        for comKey, expCom in pairs(frozenCommodities) do
+            local actCom = com[comKey]
+            if not actCom or
+               actCom.basePrice ~= expCom.basePrice or
+               actCom.salePressure ~= expCom.salePressure or
+               actCom.recoveryPerHour ~= expCom.recoveryPerHour then
+                comOk = false
+            end
+        end
+        for _ in pairs(com) do comCount = comCount + 1 end
+        if comCount ~= 10 then comOk = false end
+    end
+    check('V118-RC-ECON-04: Exactly 10 Broker Commodities match frozen base prices, sale pressures, and recovery rates',
         comOk == true)
 
     local integ = releaseConfig.Broker.Integration
@@ -213,11 +278,11 @@ local function run()
     end
 
     -- Track ObserveVehicle calls if hook exists
-    if TrackerManager and TrackerManager.ObserveVehicle then
-        local origObserve = TrackerManager.ObserveVehicle
+    local origObserveVehicle = TrackerManager and TrackerManager.ObserveVehicle
+    if origObserveVehicle then
         TrackerManager.ObserveVehicle = function(...)
             observeCalls = observeCalls + 1
-            return origObserve(...)
+            return origObserveVehicle(...)
         end
     end
 
@@ -455,6 +520,9 @@ local function run()
     _G.VPChopMDT = origVPChopMDT
     _G.MySQL.scalar = origMySQLScalar
     _G.GetEntityCoords = origGetEntityCoords
+    if TrackerManager and origObserveVehicle then
+        TrackerManager.ObserveVehicle = origObserveVehicle
+    end
     _G._MOCK_ENTITY_TYPES = nil
 
     -- =========================================================================
@@ -475,23 +543,33 @@ local function run()
     check('V118-RC-EVIDENCE-01: Zero legacy fake evidence adapter calls in bridge/evidence.lua',
         not evHasLegacy1 and not evHasLegacy2 and not evHasLegacy3 and not evHasLegacy4)
 
-    -- Behavioral test: adapter throwing exception is safely caught by pcall (fail-soft)
-    EvidenceBridge.RegisterProvider('exploding_test_provider', 'exploding_res', function()
+    -- Behavioral test: custom provider throwing exception is safely caught by pcall (fail-soft)
+    local explodingHandlerCalls = 0
+    local regOk, regErr = EvidenceBridge.RegisterProvider('custom', 'release_gate_test_res', function(evidenceClass, src, coords, actionKey, meta)
+        explodingHandlerCalls = explodingHandlerCalls + 1
         error('Exploding provider test')
     end)
     local prevEvCfg2 = Config.Evidence
-    Config.Evidence = { Enable = true, Provider = 'exploding_test_provider', Actions = { chop_part = { fingerprint = 1.0, dna = 0.0 } } }
-    local explodeOk, explodeRes = pcall(function()
+    Config.Evidence = { Enable = true, Provider = 'custom', Actions = { chop_part = { fingerprint = 1.0, dna = 0.0 } } }
+    local plantOk, plantRes = pcall(function()
         return EvidenceBridge.Plant('fingerprint', 1, { x = 0, y = 0, z = 0 }, 'chop_part', { plate = 'T' })
     end)
-    check('V118-RC-EVIDENCE-02: EvidenceBridge fail-soft catches adapter runtime errors via pcall without throwing',
-        explodeOk and explodeRes == false)
+    check('V118-RC-EVIDENCE-02A: Custom evidence provider handler executed exactly 1 time during Plant',
+        explodingHandlerCalls == 1)
+    check('V118-RC-EVIDENCE-02B: EvidenceBridge.Plant caught handler runtime error via pcall without throwing to caller',
+        plantOk == true)
+    check('V118-RC-EVIDENCE-02C: EvidenceBridge.Plant returned false on handler failure (fail-soft)',
+        plantRes == false)
     Config.Evidence = prevEvCfg2
 
-    -- Re-register duplicate provider by different resource rejected with already_registered
-    local dupRegOk, dupRegErr = EvidenceBridge.RegisterProvider('exploding_test_provider', 'other_res', function() end)
-    check('V118-RC-EVIDENCE-03: Duplicate provider registration rejected safely with already_registered',
+    -- Anti-hijack: Re-register duplicate custom provider from a different resource is rejected with already_registered
+    local dupRegOk, dupRegErr = EvidenceBridge.RegisterProvider('custom', 'attacker_res', function() end)
+    check('V118-RC-EVIDENCE-03: Duplicate custom provider registration from different resource rejected with already_registered',
         dupRegOk == false and dupRegErr == 'already_registered')
+
+    if EvidenceBridge._test and EvidenceBridge._test.reset then
+        EvidenceBridge._test.reset()
+    end
 
     -- =========================================================================
     -- GROUP 9: V118-RC-DISPATCH — Dispatch Release Contract

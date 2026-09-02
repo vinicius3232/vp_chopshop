@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-02
 **Branch de trabalho:** `feat/v1.18-rc-forensics-gate` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `7ba20804cfb4bdffeeadda9b569b610c6fe83586`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **2036 PASS / 0 FAIL / 2036 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **2038 PASS / 0 FAIL / 2038 asserts**
 
 ---
 
