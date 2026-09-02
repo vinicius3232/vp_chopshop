@@ -207,26 +207,16 @@ local function getPlayerTool(requiredType)
     return bestName, bestCfg
 end
 
-function VPChopTriggerDispatch(veh)
-    if not Config.Dispatch or not Config.Dispatch.Enable then return end
-    local sys = Config.Dispatch.System
-    if sys == 'ps-dispatch' then
-        pcall(function() exports['ps-dispatch']:SuspiciousActivity() end)
-    elseif sys == 'cd_dispatch' then
-        pcall(function()
-            local data = exports['cd_dispatch']:GetPlayerInfo()
-            -- [L2 FIX] Use vehicle coords when available — player may have fled the scene.
-            local pos = (veh and DoesEntityExist(veh)) and GetEntityCoords(veh) or data.coords
-            TriggerServerEvent('cd_dispatch:AddNotification', {
-                job_table = {'police', 'sheriff', 'bcso'},
-                coords = pos,
-                title = '10-90 - Desmanche Ilegal',
-                message = 'Notícia de desmanche de veículo em andamento.',
-                flash = 0, unique_id = data.unique_id, sound = 1,
-                blip = { sprite = 530, scale = 1.0, color = 1, flashes = false, text = '911 - Desmanche', time = 5, radius = 0 }
-            })
-        end)
-    end
+--- [v1.18 P4.3] Ponto de entrada unificado para disparo de alertas policiais via DispatchBridge
+---@param veh number|nil Handle da entidade do veículo
+---@param alertType string|nil Tipo do alerta ('chopshop', 'alarm', 'catalytic', 'plate')
+---@param customMeta table|nil Metadados adicionais opcionais
+function VPChopTriggerDispatch(veh, alertType, customMeta)
+    if not DispatchBridge or not DispatchBridge.SendAlert then return end
+    local meta = customMeta or {}
+    meta.veh = veh or meta.veh
+    meta.type = alertType or meta.type or 'chopshop'
+    DispatchBridge.SendAlert(meta)
 end
 
 --- [v1.18 P4.2.4] Resolve de forma pura a decisão de alerta policial para furto de catalisador (sem dupla probabilidade)

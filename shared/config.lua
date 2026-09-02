@@ -374,10 +374,25 @@ Config.ChopAnimations = {
     door      = { dict = 'anim@scripted@heist@ig16_glass_cut@male@', clip = 'cutting_loop', flag = 1 },
 }
 
---- Integração de Dispatch (ex: ps-dispatch, cd_dispatch, qs-dispatch)
+--- [v1.18 P4.3 DISPATCH BRIDGE] Integração de Alertas Policiais Multi-Framework
+--- Provedores suportados: 'auto' | 'ps-dispatch' | 'cd_dispatch' | 'qs-dispatch' | 'op-dispatch' | 'core_dispatch' | 'custom' | 'none'
 Config.Dispatch = {
     Enable = true,
-    System = 'ps-dispatch', -- 'ps-dispatch' | 'cd_dispatch' | 'qs-dispatch'
+    Provider = 'auto',
+    AutoOrder = { 'ps-dispatch', 'cd_dispatch', 'qs-dispatch', 'op-dispatch', 'core_dispatch' },
+    Jobs = { 'police', 'sheriff', 'bcso' },
+    DefaultCode = '10-90',
+    DefaultTitle = '10-90 - Desmanche Ilegal',
+    DefaultMessage = 'Notícia de atividade de desmanche de veículo em andamento.',
+    Blip = {
+        sprite = 530,
+        scale = 1.0,
+        color = 1,
+        flashes = false,
+        text = '911 - Desmanche',
+        time = 5,
+        radius = 0,
+    },
 }
 
 --- Sistema de alarme veicular ao desmontar.
