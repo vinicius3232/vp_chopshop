@@ -1,14 +1,14 @@
 -- server/tracker.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.18 P4.2.2] GPS Tracker & LoJack Domain Authority
---  Server-authoritative vehicle state machine, lifecycle validation,
---  strict removal transaction, and server-filtered police beacon broadcast.
+--  [v1.18 P4.2.3] GPS Tracker & LoJack Domain Authority
+--  Strict netId type normalization, pre-auth observation gates,
+--  lifecycle validation, and server-filtered police beacon broadcast.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 TrackerManager = TrackerManager or {}
 
 local _trackers = {}          -- trackerId -> { trackerId, netId, model, modelClass, markerSet, canonicalPlate, state, lastPing, created }
-local _netToTracker = {}      -- netId -> trackerId
+local _netToTracker = {}      -- canonicalNetId -> trackerId
 local _activeRemovals = {}    -- src -> { token, trackerId, netId, model, markerSet, startedAt, expiresAt }
 local _bootNonce = tostring(os.time()) .. ':' .. tostring(math.random(1000, 9999))
 local _seq = 0
@@ -21,10 +21,22 @@ end
 
 local function getRandomRoll()
     if _mockRoll ~= nil then
-        local r = _mockRoll
-        return r
+        return _mockRoll
     end
     return math.random()
+end
+
+--- Normaliza estritamente o netId para número inteiro positivo finito
+---@param netId any
+---@return number|nil
+local function normalizeNetId(netId)
+    if type(netId) ~= 'number' then
+        return nil
+    end
+    if netId ~= netId or netId == math.huge or netId == -math.huge or netId <= 0 or math.floor(netId) ~= netId then
+        return nil
+    end
+    return netId
 end
 
 --- Normaliza string de placa removendo espaços em branco nas extremidades
@@ -72,24 +84,24 @@ local function mintRemovalToken(src)
 end
 
 --- Prova que a entidade resolvida pelo netId é um veículo válido no servidor
----@param netId number
----@return number|table|nil ent, string|nil err
+---@param netId any
+---@return number|table|nil ent, string|nil err, number|nil canonNetId
 local function resolveTrackerVehicle(netId)
-    netId = tonumber(netId)
-    if not netId or netId <= 0 or math.floor(netId) ~= netId then
-        return nil, 'invalid_net'
+    local canonNetId = normalizeNetId(netId)
+    if not canonNetId then
+        return nil, 'invalid_net', nil
     end
-    if not NetworkGetEntityFromNetworkId then
-        return nil, 'api_unavailable'
+    if not NetworkGetEntityFromNetworkId or not GetEntityType then
+        return nil, 'api_unavailable', canonNetId
     end
-    local ent = NetworkGetEntityFromNetworkId(netId)
+    local ent = NetworkGetEntityFromNetworkId(canonNetId)
     if not ent or ent == 0 or not DoesEntityExist or not DoesEntityExist(ent) then
-        return nil, 'entity_not_found'
+        return nil, 'entity_not_found', canonNetId
     end
-    if GetEntityType and GetEntityType(ent) ~= 2 then
-        return nil, 'not_vehicle'
+    if GetEntityType(ent) ~= 2 then
+        return nil, 'not_vehicle', canonNetId
     end
-    return ent
+    return ent, nil, canonNetId
 end
 
 --- Resolve a classe GTA do veículo server-side (compatível com runtime FiveM / QBox)
@@ -181,7 +193,7 @@ local function validateTrackerLifecycle(trk)
 end
 
 --- Resolve e atribui o estado de rastreador para um veículo de forma server-authoritative
----@param netId number
+---@param netId any
 ---@param reason string|nil
 ---@param forcedChance number|nil (apenas para testes)
 ---@return table trackerRecord
@@ -191,7 +203,7 @@ function TrackerManager.ObserveVehicle(netId, reason, forcedChance)
         return { trackerId = 'none', state = 'NONE', hasTracker = false }
     end
 
-    local ent, err = resolveTrackerVehicle(netId)
+    local ent, err, canonNetId = resolveTrackerVehicle(netId)
     if not ent then
         return { trackerId = 'none', state = 'NONE', hasTracker = false, err = err or 'not_vehicle' }
     end
@@ -199,7 +211,7 @@ function TrackerManager.ObserveVehicle(netId, reason, forcedChance)
     local model = (GetEntityModel and GetEntityModel(ent)) or 0
 
     -- Se já possui tracker associado a este netId, verifica integridade do lifecycle
-    local existingId = _netToTracker[netId]
+    local existingId = _netToTracker[canonNetId]
     if existingId and _trackers[existingId] then
         local trk = _trackers[existingId]
         local okLife = validateTrackerLifecycle(trk)
@@ -244,7 +256,7 @@ function TrackerManager.ObserveVehicle(netId, reason, forcedChance)
 
     local record = {
         trackerId = trackerId,
-        netId = netId,
+        netId = canonNetId,
         model = model,
         modelClass = modelClass,
         markerSet = markerSet,
@@ -257,7 +269,7 @@ function TrackerManager.ObserveVehicle(netId, reason, forcedChance)
     }
 
     _trackers[trackerId] = record
-    _netToTracker[netId] = trackerId
+    _netToTracker[canonNetId] = trackerId
     return record
 end
 
@@ -269,15 +281,17 @@ function TrackerManager.GetByTrackerId(trackerId)
 end
 
 --- Retorna registro pelo netId (se ainda ativo)
----@param netId number
+---@param netId any
 ---@return table|nil
 function TrackerManager.GetByNetId(netId)
-    local tid = _netToTracker[netId]
+    local canonNetId = normalizeNetId(netId)
+    if not canonNetId then return nil end
+    local tid = _netToTracker[canonNetId]
     return tid and _trackers[tid]
 end
 
 --- Verifica se o veículo possui um rastreador ativo no momento
----@param netId number
+---@param netId any
 ---@return boolean
 function TrackerManager.IsActive(netId)
     local trk = TrackerManager.GetByNetId(netId)
@@ -286,7 +300,7 @@ end
 
 --- Inicia o processo de remoção do rastreador com validações estritas de segurança
 ---@param src number
----@param netId number
+---@param netId any
 ---@return table { ok: boolean, err?: string, removalToken?: string, minDurationMs?: number }
 function TrackerManager.StartRemoval(src, netId)
     local cfg = getTrackerConfig()
@@ -298,29 +312,16 @@ function TrackerManager.StartRemoval(src, netId)
         return { ok = false, err = 'invalid_source' }
     end
 
-    local ent, err = resolveTrackerVehicle(netId)
+    if type(ServerPlayerIsReady) == 'function' and not ServerPlayerIsReady(src) then
+        return { ok = false, err = 'player_not_ready' }
+    end
+
+    local ent, err, canonNetId = resolveTrackerVehicle(netId)
     if not ent then
         return { ok = false, err = err or 'invalid_entity' }
     end
 
-    local trk = TrackerManager.ObserveVehicle(netId, 'removal_start')
-    if trk.state == 'REMOVED' then
-        return { ok = false, err = 'already_removed' }
-    end
-    if trk.state ~= 'ACTIVE' then
-        return { ok = false, err = 'not_found' }
-    end
-
-    -- Validação de ferramenta necessária
-    if cfg.RequiredTool and type(InvCount) == 'function' then
-        local hasPrimary = InvCount(src, cfg.RequiredTool) > 0
-        local hasFallback = cfg.ToolFallback and (InvCount(src, cfg.ToolFallback) > 0)
-        if not hasPrimary and not hasFallback then
-            return { ok = false, err = 'no_tool' }
-        end
-    end
-
-    -- Validação estrita de distância física (sem margem oculta)
+    -- 1. Validação estrita de distância física ANTES de criar/observar estado
     if GetPlayerPed and GetEntityCoords then
         local ped = GetPlayerPed(src)
         local pCoords = GetEntityCoords(ped)
@@ -331,13 +332,31 @@ function TrackerManager.StartRemoval(src, netId)
         end
     end
 
+    -- 2. Validação de ferramenta necessária ANTES de criar/observar estado
+    if cfg.RequiredTool and type(InvCount) == 'function' then
+        local hasPrimary = InvCount(src, cfg.RequiredTool) > 0
+        local hasFallback = cfg.ToolFallback and (InvCount(src, cfg.ToolFallback) > 0)
+        if not hasPrimary and not hasFallback then
+            return { ok = false, err = 'no_tool' }
+        end
+    end
+
+    -- 3. SOMENTE AGORA observa o veículo legitimamente (gates de distância e ferramenta validados)
+    local trk = TrackerManager.ObserveVehicle(canonNetId, 'removal_start')
+    if trk.state == 'REMOVED' then
+        return { ok = false, err = 'already_removed' }
+    end
+    if trk.state ~= 'ACTIVE' then
+        return { ok = false, err = 'not_found' }
+    end
+
     local token = mintRemovalToken(src)
     local minDur = cfg.MinDurationMs or 7000
 
     _activeRemovals[src] = {
         token = token,
         trackerId = trk.trackerId,
-        netId = netId,
+        netId = canonNetId,
         model = trk.model,
         markerSet = trk.markerSet,
         startedAt = nowMs(),
@@ -375,7 +394,7 @@ end
 
 --- Finaliza a remoção do rastreador com revalidação integral de segurança
 ---@param src number
----@param netId number
+---@param netId any
 ---@param removalToken string
 ---@return table { ok: boolean, err?: string }
 function TrackerManager.CompleteRemoval(src, netId, removalToken)
@@ -388,6 +407,12 @@ function TrackerManager.CompleteRemoval(src, netId, removalToken)
         return { ok = false, err = 'invalid_source' }
     end
 
+    local canonNetId = normalizeNetId(netId)
+    if not canonNetId then
+        -- Não consome a sessão ativa se o payload de netId for malformado
+        return { ok = false, err = 'invalid_net' }
+    end
+
     local session = _activeRemovals[src]
     if not session then
         return { ok = false, err = 'no_session' }
@@ -397,7 +422,7 @@ function TrackerManager.CompleteRemoval(src, netId, removalToken)
         return { ok = false, err = 'invalid_token' }
     end
 
-    if session.netId ~= netId then
+    if session.netId ~= canonNetId then
         return { ok = false, err = 'vehicle_mismatch' }
     end
 

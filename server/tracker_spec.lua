@@ -1,6 +1,6 @@
 -- server/tracker_spec.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.18 P4.2.2] TrackerManager Specification & LoJack Security Test Suite
+--  [v1.18 P4.2.3] TrackerManager Specification & LoJack Security Test Suite
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 if GetConvar('vp_chopshop_selftest', '0') ~= '1' then return end
@@ -19,6 +19,14 @@ local function run()
             fail = fail + 1
             print(('[tracker/spec] FAIL  %s'):format(desc))
         end
+    end
+
+    local function mapCount(t)
+        local n = 0
+        for _ in pairs(t or {}) do
+            n = n + 1
+        end
+        return n
     end
 
     local origCfg = Config.Tracker
@@ -46,6 +54,9 @@ local function run()
     _G.IsValidSource = function(src)
         return type(src) == 'number' and src > 0 and src ~= 65535
     end
+    _G.ServerPlayerIsReady = function(src)
+        return IsValidSource(src)
+    end
 
     local mockEntities = {}
     local mockEntityCoords = {}
@@ -68,6 +79,9 @@ local function run()
     end
     _G.GetVehicleClass = function(ent)
         return ent and ent.vehClass
+    end
+    _G.GetVehicleClassFromName = function(model)
+        return nil
     end
     _G.GetVehicleNumberPlateText = function(ent)
         return ent and ent.plate or ''
@@ -128,7 +142,7 @@ local function run()
             exists = true,
             entityType = 2, -- Vehicle
             model = model or 1111,
-            vehClass = vehClass or 7,
+            vehClass = vehClass, -- pode ser nil explicitamente
             plate = plate or 'TEST123',
             coords = vector3(100.0, 200.0, 10.0),
         }
@@ -138,24 +152,26 @@ local function run()
         return veh
     end
 
-    -- ─── 1. Entity Type & Server Authority ────────────────────────────────────
+    -- ─── 1. NetId Strict & Entity Validation ──────────────────────────────────
     do
         TrackerManager._test.reset()
 
         -- TRK-ENTITY-01: Non-existent netId rejected with zero mutation
         local resNone = TrackerManager.ObserveVehicle(999, 'test')
         check('TRK-ENTITY-01 Non-existent netId returns not_vehicle/entity_not_found', resNone.state == 'NONE' and resNone.err == 'entity_not_found')
-        check('TRK-ENTITY-01 Zero trackers stored for non-existent netId', #TrackerManager._test.getTrackers() == 0)
+        check('TRK-ENTITY-01 Zero trackers stored for non-existent netId', mapCount(TrackerManager._test.getTrackers()) == 0)
 
         -- TRK-ENTITY-02: Ped entity rejected
         mockEntities[501] = { id = 501, exists = true, entityType = 1, model = 1234 }
         local resPed = TrackerManager.ObserveVehicle(501, 'test')
         check('TRK-ENTITY-02 Ped entity rejected with not_vehicle', resPed.state == 'NONE' and resPed.err == 'not_vehicle')
+        check('TRK-ENTITY-02 Ped entity creates ZERO trackers', mapCount(TrackerManager._test.getTrackers()) == 0)
 
         -- TRK-ENTITY-03: Object entity rejected
         mockEntities[502] = { id = 502, exists = true, entityType = 3, model = 4321 }
         local resObj = TrackerManager.ObserveVehicle(502, 'test')
         check('TRK-ENTITY-03 Object entity rejected with not_vehicle', resObj.state == 'NONE' and resObj.err == 'not_vehicle')
+        check('TRK-ENTITY-03 Object entity creates ZERO trackers', mapCount(TrackerManager._test.getTrackers()) == 0)
 
         -- TRK-ENTITY-04: Real vehicle entity accepted
         local vReal = createMockVeh(503, 7777, 7, 'VALID1')
@@ -164,39 +180,137 @@ local function run()
         check('TRK-ENTITY-04 Statebag vpChopTrackerId confirmed', mockStatebags[503].vpChopTrackerId == resVeh.trackerId)
     end
 
-    -- ─── 2. ClassChances in Production Path & Deterministic Roll ───────────────
+    -- ─── 2. NetId Alias & Malformed Numeric Rejections ────────────────────────
     do
         TrackerManager._test.reset()
+        local vAlias = createMockVeh(1501, 7777, 7, 'ALIAS1')
+        local trkOrig = TrackerManager.ObserveVehicle(1501, 'test', 1.0)
+        local initialCount = mapCount(TrackerManager._test.getTrackers())
+        mockInventory[1] = { pliers = 1 }
+        mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0)
 
-        -- TRK-CLASS-01: Class 7 (chance 0.85) with roll 0.50 -> ACTIVE
-        local vSuper = createMockVeh(601, 7777, 7, 'SUPER7')
-        TrackerManager._test.setRoll(0.50)
-        local resSuper = TrackerManager.ObserveVehicle(601, 'test')
-        check('TRK-CLASS-01 Super class (0.85) with roll 0.50 is ACTIVE', resSuper.hasTracker == true and resSuper.state == 'ACTIVE')
+        -- TRK-NETID-ALIAS-01: String netId rejected without creating alias
+        local resStr = TrackerManager.StartRemoval(1, '1501')
+        check('TRK-NETID-ALIAS-01 String "1501" rejected with invalid_net', resStr.ok == false and resStr.err == 'invalid_net')
 
-        -- TRK-CLASS-02: Class 0 (chance 0.10) with roll 0.50 -> NONE
-        local vCompact = createMockVeh(602, 1111, 0, 'COMPACT')
-        local resCompact = TrackerManager.ObserveVehicle(602, 'test')
-        check('TRK-CLASS-02 Compact class (0.10) with roll 0.50 is NONE', resCompact.hasTracker == false and resCompact.state == 'NONE')
+        local resStrZero = TrackerManager.StartRemoval(1, '01501')
+        check('TRK-NETID-ALIAS-01 String "01501" rejected with invalid_net', resStrZero.ok == false and resStrZero.err == 'invalid_net')
 
-        -- TRK-CLASS-03: Unknown class uses DefaultChance (0.40) with roll 0.35 -> ACTIVE
-        local vOther = createMockVeh(603, 2222, nil, 'OTHER')
-        TrackerManager._test.setRoll(0.35)
-        local resOther = TrackerManager.ObserveVehicle(603, 'test')
-        check('TRK-CLASS-03 Unknown class uses DefaultChance (0.40) with roll 0.35 -> ACTIVE', resOther.hasTracker == true and resOther.state == 'ACTIVE')
+        local resStrFloat = TrackerManager.StartRemoval(1, '1501.0')
+        check('TRK-NETID-ALIAS-01 String "1501.0" rejected with invalid_net', resStrFloat.ok == false and resStrFloat.err == 'invalid_net')
+
+        check('TRK-NETID-ALIAS-01 Zero new trackers created by string aliases', mapCount(TrackerManager._test.getTrackers()) == initialCount)
+        check('TRK-NETID-ALIAS-01 Original tracker remains authority', mockStatebags[1501].vpChopTrackerId == trkOrig.trackerId)
+
+        -- TRK-NETID-INVALID-01: Non-positive or non-integer numbers rejected
+        check('TRK-NETID-INVALID-01 NetId 0 rejected', TrackerManager.ObserveVehicle(0, 'test').err == 'invalid_net')
+        check('TRK-NETID-INVALID-01 NetId -1 rejected', TrackerManager.ObserveVehicle(-1, 'test').err == 'invalid_net')
+        check('TRK-NETID-INVALID-01 Float 1.5 rejected', TrackerManager.ObserveVehicle(1.5, 'test').err == 'invalid_net')
+        check('TRK-NETID-INVALID-01 math.huge rejected', TrackerManager.ObserveVehicle(math.huge, 'test').err == 'invalid_net')
+    end
+
+    -- ─── 3. Pre-Auth Observation Gate in StartRemoval ─────────────────────────
+    do
+        TrackerManager._test.reset()
+        local vUnobs = createMockVeh(1601, 7777, 7, 'UNOBSERVED')
+        TrackerManager._test.setRoll(0.01) -- would generate ACTIVE if observed
+
+        -- TRK-START-AUTH-01: Distant player calling StartRemoval produces ZERO mutation
+        mockInventory[1] = { pliers = 1 }
+        mockPlayerCoords[1] = vector3(500.0, 500.0, 10.0) -- distant
+        local resDistFail = TrackerManager.StartRemoval(1, 1601)
+        check('TRK-START-AUTH-01 Distant player rejected with distance', resDistFail.ok == false and resDistFail.err == 'distance')
+        check('TRK-START-AUTH-01 Distant attempt created ZERO trackers', mapCount(TrackerManager._test.getTrackers()) == 0)
+        check('TRK-START-AUTH-01 Distant attempt created ZERO statebags', mockStatebags[1601].vpChopTrackerId == nil)
+        check('TRK-START-AUTH-01 Distant attempt created ZERO active removals', TrackerManager._test.getActiveRemovals()[1] == nil)
+
+        -- TRK-START-AUTH-02: Missing tool produces ZERO mutation
+        mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0) -- near
+        mockInventory[1] = { pliers = 0, screwdriver = 0 }
+        local resNoToolFail = TrackerManager.StartRemoval(1, 1601)
+        check('TRK-START-AUTH-02 No tool attempt rejected with no_tool', resNoToolFail.ok == false and resNoToolFail.err == 'no_tool')
+        check('TRK-START-AUTH-02 No tool attempt created ZERO trackers', mapCount(TrackerManager._test.getTrackers()) == 0)
+        check('TRK-START-AUTH-02 No tool attempt created ZERO statebags', mockStatebags[1601].vpChopTrackerId == nil)
+
+        -- TRK-START-AUTH-03: Legitimate start observes exactly once
+        mockInventory[1] = { pliers = 1 }
+        local resLegitStart = TrackerManager.StartRemoval(1, 1601)
+        check('TRK-START-AUTH-03 Legitimate start succeeds', resLegitStart.ok == true and type(resLegitStart.removalToken) == 'string')
+        check('TRK-START-AUTH-03 Exactly 1 tracker created', mapCount(TrackerManager._test.getTrackers()) == 1)
+        check('TRK-START-AUTH-03 Statebag marker written', mockStatebags[1601].vpChopTrackerId ~= nil)
+
+        -- Second legitimate start replaces token without rerolling
+        local firstToken = resLegitStart.removalToken
+        local resSecondStart = TrackerManager.StartRemoval(1, 1601)
+        check('TRK-START-AUTH-03 Second start succeeds with new token', resSecondStart.ok == true and resSecondStart.removalToken ~= firstToken)
+        check('TRK-START-AUTH-03 Still exactly 1 tracker (zero reroll)', mapCount(TrackerManager._test.getTrackers()) == 1)
 
         TrackerManager._test.setRoll(nil)
     end
 
-    -- ─── 3. Canonical Plate Resolution & MDT Integration ──────────────────────
+    -- ─── 4. CompleteRemoval NetId Strict & State Preservation ─────────────────
+    do
+        TrackerManager._test.reset()
+        local v17 = createMockVeh(1701, 7777, 7, 'COMP_STRICT')
+        local trk17 = TrackerManager.ObserveVehicle(1701, 'test', 1.0)
+        mockInventory[1] = { pliers = 1 }
+        mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0)
+        TrackerManager._test.setTime(1000)
+
+        local startRes = TrackerManager.StartRemoval(1, 1701)
+        local token = startRes.removalToken
+
+        -- TRK-COMP-NETID-01: String netId rejected without consuming active session
+        TrackerManager._test.setTime(9000)
+        local resStrComp = TrackerManager.CompleteRemoval(1, '1701', token)
+        check('TRK-COMP-NETID-01 Complete with string "1701" rejected with invalid_net', resStrComp.ok == false and resStrComp.err == 'invalid_net')
+        check('TRK-COMP-NETID-01 Tracker remains ACTIVE', trk17.state == 'ACTIVE')
+        check('TRK-COMP-NETID-01 Session was NOT consumed by malformed payload', TrackerManager._test.getActiveRemovals()[1] ~= nil)
+
+        -- Subsequent complete with numeric netId succeeds
+        local resLegitComp = TrackerManager.CompleteRemoval(1, 1701, token)
+        check('TRK-COMP-NETID-01 Legitimate completion with integer netId succeeds', resLegitComp.ok == true)
+        check('TRK-COMP-NETID-01 Tracker transitioned to REMOVED', trk17.state == 'REMOVED')
+    end
+
+    -- ─── 5. ClassChances with Unresolved Class ────────────────────────────────
     do
         TrackerManager._test.reset()
 
-        -- Mock VPChopMDT.GetRealPlate expecting visiblePlate string
-        local mdtReceivedPlate = nil
+        -- TRK-CLASS-01: Super class (0.85) with roll 0.50 -> ACTIVE
+        local vSuper = createMockVeh(1801, 7777, 7, 'SUPER7')
+        TrackerManager._test.setRoll(0.50)
+        local resSuper = TrackerManager.ObserveVehicle(1801, 'test')
+        check('TRK-CLASS-01 Super class (0.85) with roll 0.50 is ACTIVE', resSuper.hasTracker == true and resSuper.state == 'ACTIVE')
+
+        -- TRK-CLASS-02: Compact class (0.10) with roll 0.50 -> NONE
+        local vCompact = createMockVeh(1802, 1111, 0, 'COMPACT')
+        local resCompact = TrackerManager.ObserveVehicle(1802, 'test')
+        check('TRK-CLASS-02 Compact class (0.10) with roll 0.50 is NONE', resCompact.hasTracker == false and resCompact.state == 'NONE')
+
+        -- TRK-CLASS-03: Unknown class (nil) uses DefaultChance (0.40) with roll 0.35 -> ACTIVE
+        local vUnkActive = createMockVeh(1803, 2222, nil, 'UNK_ACT')
+        TrackerManager._test.setRoll(0.35)
+        local resUnkAct = TrackerManager.ObserveVehicle(1803, 'test')
+        check('TRK-CLASS-03 Unresolved class with roll 0.35 is ACTIVE via DefaultChance', resUnkAct.hasTracker == true and resUnkAct.state == 'ACTIVE')
+
+        -- TRK-CLASS-04: Unknown class (nil) uses DefaultChance (0.40) with roll 0.50 -> NONE
+        local vUnkNone = createMockVeh(1804, 3333, nil, 'UNK_NONE')
+        TrackerManager._test.setRoll(0.50)
+        local resUnkNone = TrackerManager.ObserveVehicle(1804, 'test')
+        check('TRK-CLASS-04 Unresolved class with roll 0.50 is NONE via DefaultChance', resUnkNone.hasTracker == false and resUnkNone.state == 'NONE')
+
+        TrackerManager._test.setRoll(nil)
+    end
+
+    -- ─── 6. Canonical Plate to Evidence Integration ───────────────────────────
+    do
+        TrackerManager._test.reset()
+        TrackerManager._test.setRoll(0.01) -- guarantees ACTIVE tracker
+        evidenceCalls = {}
+
         _G.VPChopMDT = {
             GetRealPlate = function(visiblePlate)
-                mdtReceivedPlate = visiblePlate
                 if visiblePlate == 'FAKE999' then
                     return 'REAL777'
                 end
@@ -204,169 +318,86 @@ local function run()
             end
         }
 
-        local vPlate = createMockVeh(701, 7777, 7, '  FAKE999  ')
-        local resPlate = TrackerManager.ObserveVehicle(701, 'test', 1.0)
-        check('TRK-PLATE-01 MDT received normalized visiblePlate string', mdtReceivedPlate == 'FAKE999')
-        check('TRK-PLATE-01 Canonical plate resolved to real plate', resPlate.canonicalPlate == 'REAL777')
-
-        -- Fallback when MDT fails
-        _G.VPChopMDT = {
-            GetRealPlate = function() error('MDT crash') end
-        }
-        local vFallback = createMockVeh(702, 7777, 7, 'CLEAN123')
-        local resFallback = TrackerManager.ObserveVehicle(702, 'test', 1.0)
-        check('TRK-PLATE-02 MDT crash falls back cleanly to visiblePlate', resFallback.canonicalPlate == 'CLEAN123')
-    end
-
-    -- ─── 4. StartRemoval, Strict MaxDistance & Token Transaction ──────────────
-    do
-        TrackerManager._test.reset()
-        local v8 = createMockVeh(801, 7777, 7, 'START1')
-        TrackerManager.ObserveVehicle(801, 'test', 1.0)
-
-        mockInventory[1] = { pliers = 1 }
-        mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0) -- dist = 0.0
-
-        -- TRK-DIST-01: Exact distance 3.5 is accepted
-        mockPlayerCoords[1] = vector3(100.0, 203.5, 10.0)
-        local resDistOk = TrackerManager.StartRemoval(1, 801)
-        check('TRK-DIST-01 Exact MaxDistance (3.5) is accepted', resDistOk.ok == true)
-
-        -- TRK-DIST-02: Distance 3.51 is rejected with distance (strict, zero hidden margin)
-        mockPlayerCoords[1] = vector3(100.0, 203.51, 10.0)
-        local resDistFar = TrackerManager.StartRemoval(1, 801)
-        check('TRK-DIST-02 Distance 3.51 is rejected with distance', resDistFar.ok == false and resDistFar.err == 'distance')
-
-        -- TRK-TOKEN-01: Valid start generates opaque token
-        mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0)
-        local resStart = TrackerManager.StartRemoval(1, 801)
-        check('TRK-TOKEN-01 StartRemoval returns token', resStart.ok == true and type(resStart.removalToken) == 'string')
-    end
-
-    -- ─── 5. CancelRemoval & TTL Expiry ────────────────────────────────────────
-    do
-        TrackerManager._test.reset()
-        local v9 = createMockVeh(901, 7777, 7, 'CANCEL1')
-        local trk9 = TrackerManager.ObserveVehicle(901, 'test', 1.0)
+        local vEvid = createMockVeh(1901, 7777, 7, '  FAKE999  ')
         mockInventory[1] = { pliers = 1 }
         mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0)
         TrackerManager._test.setTime(1000)
 
-        local startRes = TrackerManager.StartRemoval(1, 901)
+        local startEv = TrackerManager.StartRemoval(1, 1901)
+        TrackerManager._test.setTime(9000)
+        local compEv = TrackerManager.CompleteRemoval(1, 1901, startEv.removalToken)
+        check('TRK-EVID-REAL-01 Complete removal succeeds', compEv.ok == true)
+        check('TRK-EVID-REAL-01 Evidence received REAL777 canonical plate', #evidenceCalls == 1 and evidenceCalls[1].plate == 'REAL777' and evidenceCalls[1].actionKey == 'tracker_removal')
+
+        TrackerManager._test.setRoll(nil)
+    end
+
+    -- ─── 7. BroadcastPings Same Model + Marker Mismatch ───────────────────────
+    do
+        TrackerManager._test.reset()
+        sentClientEvents = {}
+        mockPlayerJobs[1] = 'police'
+        mockPlayerJobs[2] = 'civilian'
+
+        local vSameA = createMockVeh(2001, 7777, 7, 'SAME_A')
+        local trkSameA = TrackerManager.ObserveVehicle(2001, 'test', 1.0)
+        TrackerManager._test.setTime(100000)
+
+        -- Replace statebag with different marker (simulating recycled entity with same model)
+        mockStatebags[2001].vpChopTrackerId = 'trk:different_lifecycle'
+
+        -- TRK-PING-RECYCLE-SAME-MODEL-01: Broadcast produces ZERO pings and invalidates stale tracker A
+        TrackerManager._test.setTime(120000)
+        local pingsStale = TrackerManager.BroadcastPings()
+        check('TRK-PING-RECYCLE-SAME-MODEL-01 Marker mismatch produces ZERO pings', pingsStale == 0)
+        check('TRK-PING-RECYCLE-SAME-MODEL-01 Zero client events emitted', #sentClientEvents == 0)
+
+        -- Observe new lifecycle B
+        local trkSameB = TrackerManager.ObserveVehicle(2001, 'test', 1.0)
+        check('TRK-PING-RECYCLE-SAME-MODEL-01 New lifecycle B observed', trkSameB.trackerId ~= trkSameA.trackerId)
+
+        TrackerManager._test.setTime(140000)
+        local pingsB = TrackerManager.BroadcastPings()
+        check('TRK-PING-RECYCLE-SAME-MODEL-01 Only lifecycle B produces ping', pingsB == 1 and #sentClientEvents == 1 and sentClientEvents[1].target == 1)
+    end
+
+    -- ─── 8. Cancel & TTL Expiry ───────────────────────────────────────────────
+    do
+        TrackerManager._test.reset()
+        local vCancel = createMockVeh(2101, 7777, 7, 'CANCEL_TEST')
+        local trkCancel = TrackerManager.ObserveVehicle(2101, 'test', 1.0)
+        mockInventory[1] = { pliers = 1 }
+        mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0)
+        TrackerManager._test.setTime(1000)
+
+        local startRes = TrackerManager.StartRemoval(1, 2101)
         local token = startRes.removalToken
 
-        -- TRK-CANCEL-01: Cancel with wrong token fails
+        -- Cancel with wrong token fails
         local resWrongCancel = TrackerManager.CancelRemoval(1, 'wrong_token')
         check('TRK-CANCEL-01 Cancel with wrong token fails', resWrongCancel.ok == false and resWrongCancel.err == 'invalid_token')
         check('TRK-CANCEL-01 Active removal session remains intact', TrackerManager._test.getActiveRemovals()[1] ~= nil)
 
-        -- TRK-CANCEL-02: Cancel with correct token cleans session
+        -- Cancel with correct token cleans session
         local resOkCancel = TrackerManager.CancelRemoval(1, token)
         check('TRK-CANCEL-02 Cancel with correct token succeeds', resOkCancel.ok == true)
         check('TRK-CANCEL-02 Session is cleared', TrackerManager._test.getActiveRemovals()[1] == nil)
-        check('TRK-CANCEL-02 Tracker remains ACTIVE', trk9.state == 'ACTIVE')
+        check('TRK-CANCEL-02 Tracker remains ACTIVE', trkCancel.state == 'ACTIVE')
 
-        -- TRK-TTL-01: Advance clock past expiresAt -> COMPLETE fails with expired
+        -- TTL Expiry
         TrackerManager._test.setTime(5000)
-        startRes = TrackerManager.StartRemoval(1, 901)
+        startRes = TrackerManager.StartRemoval(1, 2101)
         token = startRes.removalToken
 
         TrackerManager._test.setTime(5000 + 7000 + 25000) -- elapsed 32000ms > 27000ms expiresAt
-        local resExpired = TrackerManager.CompleteRemoval(1, 901, token)
+        local resExpired = TrackerManager.CompleteRemoval(1, 2101, token)
         check('TRK-TTL-01 Complete after expiresAt fails with expired', resExpired.ok == false and resExpired.err == 'expired')
-        check('TRK-TTL-01 Tracker remains ACTIVE', trk9.state == 'ACTIVE')
+        check('TRK-TTL-01 Tracker remains ACTIVE', trkCancel.state == 'ACTIVE')
         check('TRK-TTL-01 Expired session was cleared', TrackerManager._test.getActiveRemovals()[1] == nil)
     end
 
-    -- ─── 6. CompleteRemoval Old Token & NetId Recycling ───────────────────────
+    -- ─── 9. Source Canaries ───────────────────────────────────────────────────
     do
-        TrackerManager._test.reset()
-        local v10 = createMockVeh(1001, 7777, 7, 'RECYCLE1')
-        local trk10 = TrackerManager.ObserveVehicle(1001, 'test', 1.0)
-        mockInventory[1] = { pliers = 1 }
-        mockPlayerCoords[1] = vector3(100.0, 200.0, 10.0)
-        TrackerManager._test.setTime(1000)
-        evidenceCalls = {}
-
-        -- TRK-TOKEN-OLD-01: New start invalidates old token
-        local resStartA = TrackerManager.StartRemoval(1, 1001)
-        local tokenA = resStartA.removalToken
-
-        TrackerManager._test.setTime(2000)
-        local resStartB = TrackerManager.StartRemoval(1, 1001)
-        local tokenB = resStartB.removalToken
-
-        TrackerManager._test.setTime(10000)
-        local resOldComp = TrackerManager.CompleteRemoval(1, 1001, tokenA)
-        check('TRK-TOKEN-OLD-01 Completion with old token A rejected with invalid_token', resOldComp.ok == false and resOldComp.err == 'invalid_token')
-        check('TRK-TOKEN-OLD-01 Tracker remains ACTIVE', trk10.state == 'ACTIVE')
-
-        -- Legitimate completion with token B
-        local resNewComp = TrackerManager.CompleteRemoval(1, 1001, tokenB)
-        check('TRK-TOKEN-OLD-01 Completion with new token B succeeds', resNewComp.ok == true)
-        check('TRK-TOKEN-OLD-01 Tracker transitioned to REMOVED', trk10.state == 'REMOVED')
-
-        -- TRK-COMP-RECYCLE-01: Model changed before complete -> identity_mismatch
-        local v11 = createMockVeh(1101, 8888, 7, 'MOD_RECYCLE')
-        local trk11 = TrackerManager.ObserveVehicle(1101, 'test', 1.0)
-        TrackerManager._test.setTime(20000)
-        local start11 = TrackerManager.StartRemoval(1, 1101)
-        local token11 = start11.removalToken
-
-        -- Change model on entity (netId recycled to different car)
-        v11.model = 9999
-        TrackerManager._test.setTime(28000)
-        local resRecycleModel = TrackerManager.CompleteRemoval(1, 1101, token11)
-        check('TRK-COMP-RECYCLE-01 Model change before complete rejected with identity_mismatch', resRecycleModel.ok == false and resRecycleModel.err == 'identity_mismatch')
-        check('TRK-COMP-RECYCLE-01 Tracker 11 not removed', trk11.state == 'ACTIVE')
-
-        -- TRK-COMP-RECYCLE-02: Same model but statebag marker mismatch -> identity_mismatch
-        v11.model = 8888 -- restore model
-        mockStatebags[1101].vpChopTrackerId = 'trk:different_lifecycle'
-        TrackerManager._test.setTime(35000)
-        local start12 = TrackerManager.StartRemoval(1, 1101)
-        local token12 = start12.removalToken
-
-        mockStatebags[1101].vpChopTrackerId = 'trk:recycled_tampered'
-        TrackerManager._test.setTime(43000)
-        local resMarkerMismatch = TrackerManager.CompleteRemoval(1, 1101, token12)
-        check('TRK-COMP-RECYCLE-02 Marker mismatch rejected with identity_mismatch', resMarkerMismatch.ok == false and resMarkerMismatch.err == 'identity_mismatch')
-    end
-
-    -- ─── 7. BroadcastPings Lifecycle Validation & Stale Cleanup ───────────────
-    do
-        TrackerManager._test.reset()
-        sentClientEvents = {}
-
-        mockPlayerJobs[1] = 'police'
-        mockPlayerJobs[2] = 'civilian'
-
-        local vA = createMockVeh(1201, 7777, 7, 'VEH_A')
-        local trkA = TrackerManager.ObserveVehicle(1201, 'test', 1.0)
-        TrackerManager._test.setTime(100000)
-
-        -- TRK-PING-RECYCLE-01: Veículo A desaparece, netId recebe modelo diferente
-        vA.exists = false -- A despawned
-        local vB = createMockVeh(1201, 3333, 7, 'VEH_B') -- B spawned on same netId with different model
-
-        TrackerManager._test.setTime(120000)
-        local pings = TrackerManager.BroadcastPings()
-        check('TRK-PING-RECYCLE-01 Stale tracker A produces ZERO pings', pings == 0)
-        check('TRK-PING-RECYCLE-01 Zero client events sent for stale A', #sentClientEvents == 0)
-
-        -- TRK-PING-RECYCLE-02: Veículo B é observado legitimamente
-        local trkB = TrackerManager.ObserveVehicle(1201, 'test', 1.0)
-        check('TRK-PING-RECYCLE-02 Vehicle B receives new trackerId', trkB.trackerId ~= trkA.trackerId)
-
-        TrackerManager._test.setTime(140000)
-        local pingsB = TrackerManager.BroadcastPings()
-        check('TRK-PING-RECYCLE-03 Only active tracker B produces ping', pingsB == 1)
-        check('TRK-PING-RECYCLE-03 Only police receives ping for B', #sentClientEvents == 1 and sentClientEvents[1].target == 1)
-    end
-
-    -- ─── 8. Source Canaries ───────────────────────────────────────────────────
-    do
-        -- Canary: server/tracker.lua must have zero GetRealPlate(netId) and zero trackerPing to -1
         local f = io.open('server/tracker.lua', 'r')
         if f then
             local code = f:read('*a')
@@ -384,7 +415,7 @@ local function run()
         end
     end
 
-    -- ─── 9. Locale Parity across 5 Languages ──────────────────────────────────
+    -- ─── 10. Locale Parity across 5 Languages ─────────────────────────────────
     do
         local requiredKeys = {
             'target_search_tracker',

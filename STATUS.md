@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-02
 **Branch de trabalho:** `feat/v1.18-p4.2-gps-lojack` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `423fbfe`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1688 PASS / 0 FAIL / 1688 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1705 PASS / 0 FAIL / 1705 asserts**
 
 ---
 
