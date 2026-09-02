@@ -1,14 +1,17 @@
 -- server/tracker.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.18 P4.2] GPS Tracker & LoJack Domain Authority
---  Server-authoritative state machine, vehicle resolution, anti-recycling
---  and periodic police beacon broadcast loop.
+--  [v1.18 P4.2.1] GPS Tracker & LoJack Domain Authority
+--  Server-authoritative vehicle state machine, netId recycling protection,
+--  removal token transaction, and server-filtered police beacon broadcast.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 TrackerManager = TrackerManager or {}
 
-local _trackers = {}          -- vsid -> { vsid, netId, plate, modelClass, state, lastPing, created }
-local _activeRemovals = {}    -- src  -> { vsid, netId, startTime }
+local _trackers = {}          -- trackerId -> { trackerId, netId, model, markerSet, canonicalPlate, state, lastPing, created }
+local _netToTracker = {}      -- netId -> trackerId
+local _activeRemovals = {}    -- src -> { token, trackerId, netId, model, markerSet, startedAt, expiresAt }
+local _bootNonce = tostring(os.time()) .. ':' .. tostring(math.random(1000, 9999))
+local _seq = 0
 local _mockNow = nil
 
 local function nowMs()
@@ -37,89 +40,140 @@ local function getTrackerConfig()
     }
 end
 
---- Resolve um identificador consistente para o veículo (VSID)
----@param netId number
----@param plate string|nil
----@return string vsid
-local function resolveVsid(netId, plate)
-    local p = (plate and plate ~= '' and plate) or 'UNKNOWN'
-    return ('trk:%d:%s'):format(netId or 0, p)
+--- Gera um identificador único e opaco para o rastreador
+---@return string
+local function mintTrackerId()
+    _seq = _seq + 1
+    return ('trk:%s:%d:%d'):format(_bootNonce, _seq, math.random(1000, 9999))
 end
 
---- Resolve o estado do rastreador GPS para um veículo no servidor
+--- Gera um token opaco para a sessão de remoção
+---@param src number
+---@return string
+local function mintRemovalToken(src)
+    return ('rem:%s:%d:%d:%d'):format(_bootNonce, src, _seq, math.random(10000, 99999))
+end
+
+--- Resolve e atribui o estado de rastreador para um veículo de forma server-authoritative
 ---@param netId number
----@param plate string|nil
----@param modelClass number|nil
----@param forcedChance number|nil
----@return table trackerData
-function TrackerManager.Resolve(netId, plate, modelClass, forcedChance)
+---@param reason string|nil
+---@param forcedChance number|nil (apenas para testes)
+---@return table trackerRecord
+function TrackerManager.ObserveVehicle(netId, reason, forcedChance)
     local cfg = getTrackerConfig()
     if not cfg.Enable then
-        return { hasTracker = false, state = 'NONE', vsid = 'none' }
+        return { trackerId = 'none', state = 'NONE', hasTracker = false }
     end
 
-    local vsid = resolveVsid(netId, plate)
-    if _trackers[vsid] then
-        return _trackers[vsid]
+    if not netId or netId <= 0 then
+        return { trackerId = 'none', state = 'NONE', hasTracker = false, err = 'invalid_net' }
+    end
+
+    local ent = nil
+    if NetworkGetEntityFromNetworkId then
+        ent = NetworkGetEntityFromNetworkId(netId)
+    end
+
+    -- Se já possui tracker associado a este netId, verifica integridade do modelo/statebag
+    local existingId = _netToTracker[netId]
+    if existingId and _trackers[existingId] then
+        local trk = _trackers[existingId]
+        if ent and DoesEntityExist and DoesEntityExist(ent) then
+            local curModel = (GetEntityModel and GetEntityModel(ent)) or trk.model
+            if curModel == trk.model then
+                if trk.markerSet and Entity then
+                    local s = Entity(ent).state
+                    if s and s.vpChopTrackerId == trk.trackerId then
+                        return trk
+                    end
+                else
+                    return trk
+                end
+            end
+        else
+            return trk
+        end
+    end
+
+    -- Novo lifecycle veicular: deriva dados server-side
+    local model = 0
+    if ent and DoesEntityExist and DoesEntityExist(ent) and GetEntityModel then
+        model = GetEntityModel(ent)
+    end
+
+    local trackerId = mintTrackerId()
+    local markerSet = false
+
+    -- Statebag write + readback confirmation
+    if ent and DoesEntityExist and DoesEntityExist(ent) and Entity then
+        pcall(function()
+            Entity(ent).state.vpChopTrackerId = trackerId
+            markerSet = (Entity(ent).state.vpChopTrackerId == trackerId)
+        end)
     end
 
     local chance = forcedChance
     if not chance then
-        local cTable = cfg.ClassChances or {}
-        chance = (modelClass and cTable[modelClass]) or cfg.DefaultChance or 0.40
+        chance = cfg.DefaultChance or 0.40
     end
 
     local roll = math.random()
     local hasTracker = (roll <= chance)
     local state = hasTracker and 'ACTIVE' or 'NONE'
 
-    local data = {
-        vsid = vsid,
+    local canonicalPlate = ''
+    if type(VPChopMDT) == 'table' and type(VPChopMDT.GetRealPlate) == 'function' then
+        pcall(function()
+            canonicalPlate = VPChopMDT.GetRealPlate(netId) or ''
+        end)
+    end
+
+    local record = {
+        trackerId = trackerId,
         netId = netId,
-        plate = plate or '',
-        modelClass = modelClass or 0,
+        model = model,
+        markerSet = markerSet,
+        canonicalPlate = canonicalPlate,
         state = state,
         hasTracker = hasTracker,
         lastPing = 0,
         created = os.time(),
+        reason = reason or 'observe',
     }
 
-    _trackers[vsid] = data
-    return data
+    _trackers[trackerId] = record
+    _netToTracker[netId] = trackerId
+    return record
 end
 
---- Retorna o registro de tracker por VSID
----@param vsid string
+--- Retorna registro por trackerId
+---@param trackerId string
 ---@return table|nil
-function TrackerManager.GetByVsid(vsid)
-    return _trackers[vsid]
+function TrackerManager.GetByTrackerId(trackerId)
+    return _trackers[trackerId]
 end
 
---- Retorna o registro de tracker por NetId
+--- Retorna registro pelo netId (se ainda ativo)
 ---@param netId number
----@param plate string|nil
 ---@return table|nil
-function TrackerManager.GetByNetId(netId, plate)
-    local vsid = resolveVsid(netId, plate)
-    return _trackers[vsid]
+function TrackerManager.GetByNetId(netId)
+    local tid = _netToTracker[netId]
+    return tid and _trackers[tid]
 end
 
 --- Verifica se o veículo possui um rastreador ativo no momento
 ---@param netId number
----@param plate string|nil
 ---@return boolean
-function TrackerManager.IsActive(netId, plate)
-    local trk = TrackerManager.GetByNetId(netId, plate)
+function TrackerManager.IsActive(netId)
+    local trk = TrackerManager.GetByNetId(netId)
     return trk ~= nil and trk.state == 'ACTIVE'
 end
 
---- Inicia o processo de remoção do rastreador com validações de segurança
+--- Inicia o processo de remoção do rastreador com validações estritas de segurança
 ---@param src number
 ---@param netId number
----@param plate string|nil
----@param modelClass number|nil
----@return table { ok: boolean, err?: string, minDurationMs?: number }
-function TrackerManager.StartRemoval(src, netId, plate, modelClass)
+---@return table { ok: boolean, err?: string, removalToken?: string, minDurationMs?: number }
+function TrackerManager.StartRemoval(src, netId)
     local cfg = getTrackerConfig()
     if not cfg.Enable then
         return { ok = false, err = 'disabled' }
@@ -133,7 +187,16 @@ function TrackerManager.StartRemoval(src, netId, plate, modelClass)
         return { ok = false, err = 'invalid_net' }
     end
 
-    local trk = TrackerManager.Resolve(netId, plate, modelClass)
+    local ent = nil
+    if NetworkGetEntityFromNetworkId then
+        ent = NetworkGetEntityFromNetworkId(netId)
+    end
+
+    if not ent or (DoesEntityExist and not DoesEntityExist(ent)) then
+        return { ok = false, err = 'invalid_entity' }
+    end
+
+    local trk = TrackerManager.ObserveVehicle(netId, 'removal_start')
     if trk.state == 'REMOVED' then
         return { ok = false, err = 'already_removed' }
     end
@@ -150,39 +213,55 @@ function TrackerManager.StartRemoval(src, netId, plate, modelClass)
         end
     end
 
-    -- Validação de distância física (se entidade existir no mundo)
-    if NetworkGetEntityFromNetworkId and DoesEntityExist and GetPlayerPed and GetEntityCoords then
-        local ent = NetworkGetEntityFromNetworkId(netId)
-        if ent and DoesEntityExist(ent) then
-            local ped = GetPlayerPed(src)
-            local pCoords = GetEntityCoords(ped)
-            local vCoords = GetEntityCoords(ent)
-            local maxDist = cfg.MaxDistance or 3.5
-            if #(pCoords - vCoords) > (maxDist + 1.0) then
-                return { ok = false, err = 'distance' }
-            end
+    -- Validação de distância física
+    if GetPlayerPed and GetEntityCoords then
+        local ped = GetPlayerPed(src)
+        local pCoords = GetEntityCoords(ped)
+        local vCoords = GetEntityCoords(ent)
+        local maxDist = cfg.MaxDistance or 3.5
+        if #(pCoords - vCoords) > (maxDist + 1.0) then
+            return { ok = false, err = 'distance' }
         end
     end
 
+    local token = mintRemovalToken(src)
+    local minDur = cfg.MinDurationMs or 7000
+
     _activeRemovals[src] = {
-        vsid = trk.vsid,
+        token = token,
+        trackerId = trk.trackerId,
         netId = netId,
-        plate = plate,
-        startTime = nowMs(),
+        model = trk.model,
+        markerSet = trk.markerSet,
+        startedAt = nowMs(),
+        expiresAt = nowMs() + minDur + 20000, -- TTL de 20s além da duração mínima
     }
 
     return {
         ok = true,
-        minDurationMs = cfg.MinDurationMs or 7000,
+        removalToken = token,
+        minDurationMs = minDur,
     }
 end
 
---- Finaliza a remoção do rastreador validando tempo e estado do servidor
+--- Cancela uma tentativa ativa de remoção sem alterar o estado do rastreador
+---@param src number
+---@param removalToken string
+---@return table { ok: boolean }
+function TrackerManager.CancelRemoval(src, removalToken)
+    local session = _activeRemovals[src]
+    if session and (not removalToken or session.token == removalToken) then
+        _activeRemovals[src] = nil
+    end
+    return { ok = true }
+end
+
+--- Finaliza a remoção do rastreador com revalidação integral de segurança
 ---@param src number
 ---@param netId number
----@param plate string|nil
+---@param removalToken string
 ---@return table { ok: boolean, err?: string }
-function TrackerManager.CompleteRemoval(src, netId, plate)
+function TrackerManager.CompleteRemoval(src, netId, removalToken)
     local cfg = getTrackerConfig()
     if not cfg.Enable then
         return { ok = false, err = 'disabled' }
@@ -196,21 +275,62 @@ function TrackerManager.CompleteRemoval(src, netId, plate)
     if not session then
         return { ok = false, err = 'no_session' }
     end
-    _activeRemovals[src] = nil
+
+    if session.token ~= removalToken then
+        return { ok = false, err = 'invalid_token' }
+    end
 
     if session.netId ~= netId then
         return { ok = false, err = 'vehicle_mismatch' }
     end
 
-    local elapsed = nowMs() - session.startTime
-    local minDur = (cfg.MinDurationMs or 7000) - 500 -- margem de latência de 500ms
+    local curTime = nowMs()
+    if curTime > session.expiresAt then
+        _activeRemovals[src] = nil
+        return { ok = false, err = 'expired' }
+    end
+
+    -- Revalidação estrita de tempo mínimo sem margem negativa de rede
+    local minDur = cfg.MinDurationMs or 7000
+    local elapsed = curTime - session.startedAt
     if elapsed < minDur then
         return { ok = false, err = 'too_fast' }
     end
 
-    local trk = _trackers[session.vsid]
-    if not trk or trk.state ~= 'ACTIVE' then
-        return { ok = false, err = 'not_active' }
+    local ent = nil
+    if NetworkGetEntityFromNetworkId then
+        ent = NetworkGetEntityFromNetworkId(netId)
+    end
+
+    if not ent or (DoesEntityExist and not DoesEntityExist(ent)) then
+        _activeRemovals[src] = nil
+        return { ok = false, err = 'vehicle_stale' }
+    end
+
+    -- Revalidação de modelo e statebag (anti-recycling)
+    if GetEntityModel and GetEntityModel(ent) ~= session.model then
+        _activeRemovals[src] = nil
+        return { ok = false, err = 'identity_mismatch' }
+    end
+
+    if session.markerSet and Entity then
+        local s = Entity(ent).state
+        if not s or s.vpChopTrackerId ~= session.trackerId then
+            _activeRemovals[src] = nil
+            return { ok = false, err = 'identity_mismatch' }
+        end
+    end
+
+    -- Revalidação de distância
+    if GetPlayerPed and GetEntityCoords then
+        local ped = GetPlayerPed(src)
+        local pCoords = GetEntityCoords(ped)
+        local vCoords = GetEntityCoords(ent)
+        local maxDist = cfg.MaxDistance or 3.5
+        if #(pCoords - vCoords) > (maxDist + 1.0) then
+            _activeRemovals[src] = nil
+            return { ok = false, err = 'distance' }
+        end
     end
 
     -- Revalidação de ferramenta
@@ -218,30 +338,37 @@ function TrackerManager.CompleteRemoval(src, netId, plate)
         local hasPrimary = InvCount(src, cfg.RequiredTool) > 0
         local hasFallback = cfg.ToolFallback and (InvCount(src, cfg.ToolFallback) > 0)
         if not hasPrimary and not hasFallback then
+            _activeRemovals[src] = nil
             return { ok = false, err = 'no_tool' }
         end
+    end
+
+    local trk = _trackers[session.trackerId]
+    if not trk or trk.state ~= 'ACTIVE' then
+        _activeRemovals[src] = nil
+        return { ok = false, err = 'not_active' }
     end
 
     -- Transição de estado autoritativa
     trk.state = 'REMOVED'
     trk.hasTracker = false
+    _activeRemovals[src] = nil
 
-    -- Plant defensivo de evidência forense (digital/DNA)
+    -- Plant defensivo de evidência forense usando actionKey dedicada 'tracker_removal'
     if cfg.RemovalEvidence and type(VPChopLeaveEvidence) == 'function' then
         local coords = vector3(0, 0, 0)
-        if NetworkGetEntityFromNetworkId and DoesEntityExist and GetEntityCoords then
-            local ent = NetworkGetEntityFromNetworkId(netId)
-            if ent and DoesEntityExist(ent) then
-                coords = GetEntityCoords(ent)
-            end
+        if GetEntityCoords then
+            coords = GetEntityCoords(ent)
         end
-        VPChopLeaveEvidence(src, coords, 'vin_scratch', trk.plate)
+        pcall(function()
+            VPChopLeaveEvidence(src, coords, 'tracker_removal', trk.canonicalPlate)
+        end)
     end
 
     return { ok = true }
 end
 
---- Executa uma rodada do broadcast policial de pings para veículos ativos
+--- Broadcast policial server-filtered: apenas policiais recebem as coordenadas do beacon
 ---@return number pingsSent
 function TrackerManager.BroadcastPings()
     local cfg = getTrackerConfig()
@@ -251,7 +378,9 @@ function TrackerManager.BroadcastPings()
     local intervalMs = (cfg.PingIntervalSeconds or 15) * 1000
     local pingsSent = 0
 
-    for vsid, trk in pairs(_trackers) do
+    local policeJobs = cfg.PoliceJobs or { 'police', 'sheriff', 'bcso', 'state' }
+
+    for trackerId, trk in pairs(_trackers) do
         if trk.state == 'ACTIVE' and (now - trk.lastPing >= intervalMs) then
             local ent = NetworkGetEntityFromNetworkId and NetworkGetEntityFromNetworkId(trk.netId)
             if ent and DoesEntityExist and DoesEntityExist(ent) and GetEntityCoords then
@@ -259,9 +388,20 @@ function TrackerManager.BroadcastPings()
                 local coords = GetEntityCoords(ent)
                 pingsSent = pingsSent + 1
 
-                -- Broadcast para jogadores policiais conectados
-                if TriggerClientEvent then
-                    TriggerClientEvent('vp_chopshop:client:trackerPing', -1, coords, trk.plate, trk.modelClass)
+                -- Filtra e despacha exclusivamente para policiais autorizados server-side
+                if GetPlayers and TriggerClientEvent then
+                    for _, pidStr in ipairs(GetPlayers()) do
+                        local recipient = tonumber(pidStr)
+                        if recipient and IsValidSource(recipient) then
+                            local isCop = false
+                            if type(BridgeIsPolice) == 'function' then
+                                isCop = BridgeIsPolice(recipient, policeJobs)
+                            end
+                            if isCop then
+                                TriggerClientEvent('vp_chopshop:client:trackerPing', recipient, coords, trk.canonicalPlate)
+                            end
+                        end
+                    end
                 end
             end
         end
@@ -270,22 +410,36 @@ function TrackerManager.BroadcastPings()
     return pingsSent
 end
 
+-- ─── Limpeza em desconexão ───────────────────────────────────────────────────
+if AddEventHandler then
+    AddEventHandler('playerDropped', function()
+        local src = source
+        if src then
+            _activeRemovals[src] = nil
+        end
+    end)
+end
+
 -- ─── Callbacks de Integração ──────────────────────────────────────────────────
 if lib and lib.callback and lib.callback.register then
-    lib.callback.register('vp_chopshop:tracker:check', function(src, netId, plate, modelClass)
-        local trk = TrackerManager.Resolve(netId, plate, modelClass)
+    lib.callback.register('vp_chopshop:tracker:check', function(src, netId)
+        local trk = TrackerManager.ObserveVehicle(netId, 'check')
         return {
             hasTracker = (trk.state == 'ACTIVE'),
             state = trk.state,
         }
     end)
 
-    lib.callback.register('vp_chopshop:tracker:startRemoval', function(src, netId, plate, modelClass)
-        return TrackerManager.StartRemoval(src, netId, plate, modelClass)
+    lib.callback.register('vp_chopshop:tracker:startRemoval', function(src, netId)
+        return TrackerManager.StartRemoval(src, netId)
     end)
 
-    lib.callback.register('vp_chopshop:tracker:completeRemoval', function(src, netId, plate)
-        return TrackerManager.CompleteRemoval(src, netId, plate)
+    lib.callback.register('vp_chopshop:tracker:cancelRemoval', function(src, removalToken)
+        return TrackerManager.CancelRemoval(src, removalToken)
+    end)
+
+    lib.callback.register('vp_chopshop:tracker:completeRemoval', function(src, netId, removalToken)
+        return TrackerManager.CompleteRemoval(src, netId, removalToken)
     end)
 end
 
@@ -306,7 +460,9 @@ TrackerManager._test = {
     getActiveRemovals = function() return _activeRemovals end,
     reset = function()
         _trackers = {}
+        _netToTracker = {}
         _activeRemovals = {}
         _mockNow = nil
+        _seq = 0
     end,
 }

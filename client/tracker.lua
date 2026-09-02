@@ -1,8 +1,8 @@
 -- client/tracker.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [v1.18 P4.2] GPS Tracker & LoJack Client Interaction & Police Beacon
---  Handles target options on vehicles, removal minigame/progress,
---  and receiving periodic police tracking beacons.
+--  [v1.18 P4.2.1] GPS Tracker & LoJack Client Interaction & Police Beacon
+--  Handles target options on vehicles, removal minigame/progress with tokens,
+--  cancel cleanup, and receiving periodic police tracking beacons.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
 local function isPlayerPolice()
@@ -33,9 +33,8 @@ local function doTrackerRemoval(vehicle)
     if not DoesEntityExist(vehicle) then return end
 
     local netId = NetworkGetNetworkIdFromEntity(vehicle)
-    local plate = GetVehicleNumberPlateText(vehicle)
-    local modelClass = GetVehicleClass(vehicle)
 
+    -- Client envia SOMENTE o netId para autorização server-side
     lib.callback('vp_chopshop:tracker:startRemoval', false, function(res)
         if not res or not res.ok then
             local err = (res and res.err) or 'unknown'
@@ -53,6 +52,7 @@ local function doTrackerRemoval(vehicle)
             return
         end
 
+        local removalToken = res.removalToken
         lib.notify({ type = 'inform', description = L('tracker_found') })
 
         local duration = res.minDurationMs or 7000
@@ -74,6 +74,8 @@ local function doTrackerRemoval(vehicle)
         })
 
         if not success then
+            -- Notifica o servidor para limpar a sessão ativa
+            lib.callback('vp_chopshop:tracker:cancelRemoval', false, function() end, removalToken)
             lib.notify({ type = 'error', description = L('tracker_removal_failed') })
             return
         end
@@ -81,10 +83,12 @@ local function doTrackerRemoval(vehicle)
         -- Minigame de precisão para desarmar o circuito
         local skillPassed = lib.skillCheck({ 'easy', 'medium', 'medium' }, { 'w', 'a', 's', 'd' })
         if not skillPassed then
+            lib.callback('vp_chopshop:tracker:cancelRemoval', false, function() end, removalToken)
             lib.notify({ type = 'error', description = L('tracker_removal_failed') })
             return
         end
 
+        -- Conclui enviando estritamente netId e o token de autorização
         lib.callback('vp_chopshop:tracker:completeRemoval', false, function(resComp)
             if resComp and resComp.ok then
                 lib.notify({ type = 'success', description = L('tracker_removed') })
@@ -92,8 +96,8 @@ local function doTrackerRemoval(vehicle)
                 local errComp = (resComp and resComp.err) or 'failed'
                 lib.notify({ type = 'error', description = VPChopLocaleErr(errComp) })
             end
-        end, netId, plate)
-    end, netId, plate, modelClass)
+        end, netId, removalToken)
+    end, netId)
 end
 
 -- ─── Registro ox_target ───────────────────────────────────────────────────────
@@ -121,17 +125,17 @@ CreateThread(function()
     end
 end)
 
--- ─── Recebimento de Beacon Policial ──────────────────────────────────────────
-RegisterNetEvent('vp_chopshop:client:trackerPing', function(coords, plate, modelClass)
+-- ─── Recebimento de Beacon Policial (Server-Filtered) ─────────────────────────
+RegisterNetEvent('vp_chopshop:client:trackerPing', function(coords, plate)
     if not isPlayerPolice() then return end
     if not coords or type(coords.x) ~= 'number' then return end
 
     local cfg = Config.Tracker or {}
     local blipTtl = cfg.BlipDurationSeconds or 10
 
-    -- Notificação policial
+    -- Notificação policial com título localizado
     lib.notify({
-        title = 'LoJack Alert',
+        title = L('tracker_police_title'),
         description = L('tracker_police_alert', plate or 'UNKNOWN'),
         type = 'error',
     })

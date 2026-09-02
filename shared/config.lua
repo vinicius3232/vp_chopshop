@@ -1137,6 +1137,7 @@ Config.Evidence = {
         plate_steal = { fingerprint = 0.60, dna = 0.10 },
         plate_forge = { fingerprint = 0.40, dna = 0.05 },
         plate_apply = { fingerprint = 0.50, dna = 0.08 },
+        tracker_removal = { fingerprint = 0.65, dna = 0.15 },
     },
 }
 
