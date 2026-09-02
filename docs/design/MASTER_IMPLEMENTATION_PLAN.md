@@ -1,6 +1,6 @@
 # MASTER_IMPLEMENTATION_PLAN — vp_chopshop
 
-**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 1545 PASS / 0 FAIL / 1545 asserts  
+**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness Baseline:** consultar [`STATUS.md`](../../STATUS.md)  
 **Progresso:** ver [`STATUS.md`](../../STATUS.md) na raiz. Este documento é o roadmap e plano mestre de implementação.
 
 ---
@@ -55,10 +55,11 @@
 ---
 
 ### 🎯 FASE 4 (v1.18) — Camada de Crime & Perícia Policial Profunda
-- **P4.1 — `EvidenceBridge` Unificado:** Bridge multi-framework com detecção dinâmica de `qbx_policejob`, `ox_evidence`, `evidences` (CFX) ou standalone inerte.
-- **P4.2 — Sistema de Rastreadores GPS / LoJack:** Veículos de alto valor com chance de rastreador ativo emitindo pings periódicos à polícia; minigame com ferramenta de corte para desativação física (`ActionSession(kind='tracker_removal')`).
-- **P4.3 — Scanner Policial & Séries Adulteradas:** Item policial `parts_scanner` para perícia forense de números de série gravados e forjados em inventários e veículos.
-- **P4.4 — Release Gate v1.18:** Specs de integração policial e checklist de Live QA forense.
+- **P4.1 / P4.1.1 — `EvidenceBridge` Multi-Provider & Hardening:** Bridge multi-framework (`evidences`, `vp_crimescene`, `custom`, `none`) com validação estrita de contexto, sanitização de coordenadas/placas e isolamento fail-soft que nunca quebra o core do desmanche.
+- **P4.2 — Sistema de Rastreadores GPS / LoJack & Furto de Catalisador:** Veículos com chance de rastreador server-authoritative (`TrackerManager`), pings policiais periciais, minigame de remoção de LoJack com ferramenta (`pliers`), e minigame de corte duplo de escapamento com faíscas VFX, alarme e alerta policial.
+- **P4.3 / P4.3.1 — `DispatchBridge` Multi-Provider & Alertas Policiais:** Conector unificado multi-framework para `ps-dispatch`, `cd_dispatch`, `qs-dispatch`, `op-dispatch`, `core_dispatch`, `custom` e `none`, com isolamento de contexto e coordenadas validadas.
+- **P4.4 / P4.4.1 — Scanner Forense, Domínios Canônicos & Inutilização Anti-Farm:** Perícia policial read-only (`inspectVehicle`), detecção tri-state de VIN raspado (`VPChopIsVinScratched`), resolução canônica de placa disfarçada (`VPChopMDT.GetRealPlate`), leitura sem geração de serial de motor (`peekVehicleSerial`), consulta pura de rastreador (`GetVehicleState`) e inutilização física de veículos desmanchados (`vpChopEngineMissing` / `catalyticStolen`).
+- **v1.18-RC — Forensics Release Gate, Invariantes Canônicos & Matriz Live QA:** Suite de integração e canários de release (`server/v118_release_gate_spec.lua`), 12 invariantes forenses congelados ([`docs/V118_RELEASE_INVARIANTS.md`](../V118_RELEASE_INVARIANTS.md)), matriz completa de Live QA ([`docs/V118_LIVE_QA.md`](../V118_LIVE_QA.md)) e reconciliação de roadmap.
 
 ---
 

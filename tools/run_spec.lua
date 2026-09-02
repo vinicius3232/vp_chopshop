@@ -731,6 +731,52 @@ _G.Config = {
             car_parts  = { amount = 1, chance = 1.0 },
         },
     },
+    Evidence = {
+        Enable = true,
+        Provider = 'auto',
+        AutoOrder = { 'evidences', 'vp_crimescene' },
+        GlovesItem = 'gloves',
+        GlovesBlocksDna = false,
+        DnaType = 'blood',
+        HeatScaling = true,
+        HeatFactor = 0.5,
+        Actions = {
+            chop_part   = { fingerprint = 0.50, dna = 0.12 },
+            vin_scratch = { fingerprint = 0.70, dna = 0.15 },
+            plate_steal = { fingerprint = 0.60, dna = 0.10 },
+            plate_forge = { fingerprint = 0.40, dna = 0.05 },
+            plate_apply = { fingerprint = 0.50, dna = 0.08 },
+            tracker_removal = { fingerprint = 0.65, dna = 0.15 },
+        },
+    },
+    Tracker = {
+        Enable = true,
+        DefaultChance = 0.40,
+        ClassChances = {
+            [0] = 0.15, [1] = 0.20, [2] = 0.30, [3] = 0.35, [4] = 0.40,
+            [5] = 0.45, [6] = 0.65, [7] = 0.85, [8] = 0.25, [9] = 0.30,
+            [10] = 0.20, [11] = 0.20, [12] = 0.20,
+        },
+        RequiredTool = 'pliers',
+        ToolFallback = 'screwdriver',
+        MinDurationMs = 7000,
+        MaxDistance = 3.5,
+        PingIntervalSeconds = 15,
+        BlipDurationSeconds = 10,
+        PoliceJobs = { 'police', 'bcso', 'sheriff' },
+        RemovalEvidence = true,
+    },
+    Dispatch = {
+        Enable = true,
+        Provider = 'auto',
+        CustomResource = nil,
+        DefaultJobs = { 'police', 'bcso', 'sheriff' },
+        Alerts = {
+            catalytic_cut = { title = '10-90: Furto de Catalisador em Andamento', code = '10-90', duration = 8000 },
+            chop_activity = { title = '10-99: Atividade Suspeita de Desmanche', code = '10-99', duration = 10000 },
+            lojack_ping   = { title = '10-33: Sinal de Rastreador Veicular (LoJack)', code = '10-33', duration = 12000 },
+        },
+    },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
 if not _G.vector3 then
@@ -857,6 +903,7 @@ dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS 
 dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]
 dofile(base .. '/server/dispatch_bridge_spec.lua')          -- [v1.18 P4.3 DispatchBridge]
 dofile(base .. '/server/forensic_scanner_spec.lua')          -- [v1.18 P4.4 Forensic Scanner]
+dofile(base .. '/server/v118_release_gate_spec.lua')         -- [v1.18 FORENSICS RC]
 
 local anyFail = false
 for i = specStart, #threads do

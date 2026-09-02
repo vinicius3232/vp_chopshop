@@ -39,7 +39,7 @@ mods por placa.
 ## 3. NUNCA faça / NUNCA delegue
 
 - **Não reescreva** `ChopSession` / `ActionSession` / `discard` / `deliverCar` /
-  `TyreEntitlement` / `carcass_ledger`. São a fundação provada por 632 asserts
+  `TyreEntitlement` / `carcass_ledger`. São a fundação provada pela suite de testes
   (concorrência, idempotência, transação de dinheiro, fail-closed). Estenda,
   não substitua.
 - **Não edite os arquivos do spike** `shared/registry/parts.lua` /
@@ -50,7 +50,7 @@ mods por placa.
   de teste que usa mock, nem nada onde "confiante e errado" é caro.
 - **Não faça `cat`/`type`/leitura integral** de `settings*.json`, `.env*`,
   `secrets`, ou qualquer arquivo no `.gitignore`. Já vazou chave de API 3×.
-- **Não toque em `main`** — está em `v1.14.3`. Todo o trabalho v1.16 vive em `pr-h`.
+- **Não toque em `main`** — está em `v1.14.3`. Todo o trabalho de integração vive em `pr-h`.
 - **Não copie código de terceiros** (ver `docs/research/EXTERNAL_RESEARCH_MATRIX.md`
   §13 — licenças). Reuso de **conceito**, reimplementação própria.
 
@@ -58,9 +58,9 @@ mods por placa.
 
 ```
 git checkout pr-h/... && git pull
-git checkout -b feat/v1.16-<id>
+git checkout -b feat/<id>
   implementar
-  lua tools/run_spec.lua .              → deve ficar VERDE (hoje: 632 PASS / 0 FAIL)
+  lua tools/run_spec.lua .              → deve ficar VERDE (baseline atual: consultar STATUS.md)
   luac -p <arquivos tocados>            → limpo (ignore "unexpected symbol near '`'"
                                           — é o hashkey literal do CFX, não é erro seu)
   OmniRoute -Kind challenge no diff     → CONFERIR cada achado você mesmo
@@ -89,6 +89,10 @@ sai `!= 0` se qualquer spec falha **ou** se 0 asserts forem contados.
 |---|---|
 | **O que fazer a seguir** | [`STATUS.md`](STATUS.md) |
 | **Roadmap completo** (Fases 0–5, `Pn.x`) | [`docs/design/MASTER_IMPLEMENTATION_PLAN.md`](docs/design/MASTER_IMPLEMENTATION_PLAN.md) |
+| Invariantes Canônicos Forenses v1.18 | [`docs/V118_RELEASE_INVARIANTS.md`](docs/V118_RELEASE_INVARIANTS.md) |
+| Matriz de Live QA Forense v1.18 | [`docs/V118_LIVE_QA.md`](docs/V118_LIVE_QA.md) |
+| Invariantes Canônicos Broker/Workshop v1.17 | [`docs/BROKER-6_RELEASE_INVARIANTS.md`](docs/BROKER-6_RELEASE_INVARIANTS.md) |
+| Matriz de Live QA Broker v1.17 | [`docs/BROKER-6_LIVE_QA.md`](docs/BROKER-6_LIVE_QA.md) |
 | Definição de peça (bones, tool, deps, gates, carry, reward, minigame) | `shared/registry/parts.lua` (**autoridade**, congelado) |
 | Classe GTA de peça (`'door'/'tyre'`) | `VPChopPartGtaClass(id)` em `shared/part_class.lua` |
 | Ferramentas | `Config.Tools` (saw_cheap/saw_pro/mechanic_drill) + `shared/registry/tools.lua` |
@@ -105,8 +109,7 @@ sai `!= 0` se qualquer spec falha **ou** se 0 asserts forem contados.
 
 ## 6. Build & teste
 
-- **Harness estático** (fora do FiveM): `lua tools/run_spec.lua .` — roda 10 suites,
-  hoje **632 PASS / 0 FAIL**. Stub completo dos globals CFX no topo de `run_spec.lua`.
+- **Harness estático** (fora do FiveM): `lua tools/run_spec.lua .` — roda todas as suites registradas (baseline atual: consultar [`STATUS.md`](STATUS.md)). Stub completo dos globals CFX no topo de `run_spec.lua`.
 - Specs são self-gated na convar `vp_chopshop_selftest 1` (no servidor real também).
 - `luac -p` para checar sintaxe. O erro `unexpected symbol near '` `'` é o literal
   hashkey do CFX (`` `prop_name` ``) — **não** é um erro seu; filtre com

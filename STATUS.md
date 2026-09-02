@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-02
-**Branch de trabalho:** `feat/v1.18-p4.4-forensic-scanner` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `3fd6f54`)
+**Branch de trabalho:** `feat/v1.18-rc-forensics-gate` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `7ba20804cfb4bdffeeadda9b569b610c6fe83586`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1983 PASS / 0 FAIL / 1983 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **2019 PASS / 0 FAIL / 2019 asserts**
 
 ---
 
@@ -33,7 +33,8 @@ v1.18 Camada de Crime & Perícia Policial Profunda:
 P4.1.1     — EvidenceBridge Provider Hardening      ✅ HOMOLOGADO & MERGED (PR #48, merge SHA 423fbfe)
 P4.2       — GPS Tracker / LoJack & Catalytic Theft ✅ HOMOLOGADO & MERGED (PR #49, merge SHA 9c52c52)
 P4.3       — DispatchBridge & Police Alert System   ✅ HOMOLOGADO & MERGED (PR #50, merge SHA 3fd6f54)
-P4.4.1     — Forensic Domain Integration & Read-Only Hardening 🚧 ABERTA PARA GATE (PR #51)
+P4.4/4.4.1 — Forensic Scanner & Anti-Farm Disable   ✅ HOMOLOGADO & MERGED (PR #51, merge SHA 7ba2080)
+v1.18-RC   — Forensics Release Gate & Roadmap Recon 🚧 EM GATE / PENDING LIVE QA
 ─────────────────────────────────────────────────────────────────────────
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)
