@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-02
 **Branch de trabalho:** `feat/v1.18-p4.3-dispatch-bridge` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `9c52c52`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1761 PASS / 0 FAIL / 1761 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1785 PASS / 0 FAIL / 1785 asserts**
 
 ---
 
