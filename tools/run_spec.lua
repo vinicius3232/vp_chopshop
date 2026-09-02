@@ -253,6 +253,14 @@ function GetEntityModel(h)
     local n = (h or 0) - 70000
     return FAKE_VEH[n] and FAKE_VEH[n].model or 0
 end
+function GetEntityType(h)
+    if not h or h == 0 then return 0 end
+    if _G._MOCK_ENTITY_TYPES and _G._MOCK_ENTITY_TYPES[h] then
+        return _G._MOCK_ENTITY_TYPES[h]
+    end
+    if type(h) == 'table' then return h.entityType or 2 end
+    return 2
+end
 function GetVehicleNumberPlateText(h)
     if type(h) == 'table' then return h.plate or 'PLATE' end
     local n = (h or 0) - 70000
@@ -312,6 +320,7 @@ _G.VPChopGetProgression = function(src) return { tier = 4, xp = 1000 } end
 _G.VPChopHeatGetLabel = function(plate) return 'frio' end
 _G.MySQL = _G.MySQL or {
     single = { await = function(q, p) return nil end },
+    scalar = { await = function(q, p) return nil end },
     query = { await = function(q, p) return { affectedRows = 1 } end },
     insert = { await = function(q, p) return 1 end },
     update = { await = function(q, p) return 1 end },
@@ -356,7 +365,13 @@ _G.FAKE_EXPORTS   = {
             if not src or src <= 0 then return nil end
             return { citizenid = 'player_' .. tostring(src) }
         end,
-    }
+    },
+    ox_inventory = {
+        AddItem = function(self, src, item, count, metadata)
+            _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1
+            return true
+        end,
+    },
 }
 function GetResourceState(r) return _G.FAKE_RESOURCES[r] or 'missing' end
 _G.exports = setmetatable({}, {
@@ -677,6 +692,45 @@ _G.Config = {
             Debug = false,
         },
     },
+    PartSerial = {
+        Enable = true,
+        PoliceJobs = { 'police', 'bcso', 'sheriff' },
+        ScannerItem = 'parts_scanner',
+        ForensicItem = 'forensic_kit',
+        InspectCooldownSeconds = 5,
+        VehicleInspection = {
+            Enable = true,
+            DurationMs = 5000,
+        },
+    },
+    CatalyticTheft = {
+        Enable = true,
+        Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+        Minigame = {
+            Enable = true,
+            Stages = 2,
+            Difficulty = { 'easy', 'medium' },
+            Inputs = { 'w', 'a', 's', 'd' },
+        },
+        SparksVfx = true,
+        PoliceAlertChance = 30,
+        PoliceAlertOnFail = 100,
+        ProgressMs = 7000,
+        Anim = {
+            dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+            clip = 'cutting_loop',
+            flag = 1,
+        },
+        Payout = { min = 1200, max = 2200 },
+        BlockOwnVehicle = true,
+        DisableVehicle = true,
+        BenchMaterials = {
+            copper     = { amount = 4, chance = 1.0 },
+            metalscrap = { amount = 6, chance = 1.0 },
+            steel      = { amount = 2, chance = 1.0 },
+            car_parts  = { amount = 1, chance = 1.0 },
+        },
+    },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
 if not _G.vector3 then
@@ -773,6 +827,7 @@ dofile(base .. '/server/broker/contracts.lua')           -- [v1.17 BROKER-3] pro
 dofile(base .. '/bridge/workshop.lua')                   -- [v1.17 BROKER-4] provê WorkshopBridge
 dofile(base .. '/server/tracker.lua')                  -- [v1.18 P4.2] provê TrackerManager
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
+dofile(base .. '/server/heat.lua')                    -- [v1.18 P4.4.1] provê VPChopIsVinScratched / HeatCheck
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
 -- no-op) — nunca rodar. Só os corpos dos specs, registrados a partir daqui.

@@ -5,7 +5,7 @@
 **Atualizado:** 2026-09-02
 **Branch de trabalho:** `feat/v1.18-p4.4-forensic-scanner` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `3fd6f54`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1879 PASS / 0 FAIL / 1879 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1983 PASS / 0 FAIL / 1983 asserts**
 
 ---
 
@@ -33,7 +33,7 @@ v1.18 Camada de Crime & Perícia Policial Profunda:
 P4.1.1     — EvidenceBridge Provider Hardening      ✅ HOMOLOGADO & MERGED (PR #48, merge SHA 423fbfe)
 P4.2       — GPS Tracker / LoJack & Catalytic Theft ✅ HOMOLOGADO & MERGED (PR #49, merge SHA 9c52c52)
 P4.3       — DispatchBridge & Police Alert System   ✅ HOMOLOGADO & MERGED (PR #50, merge SHA 3fd6f54)
-P4.4       — Forensic Scanner & Anti-Farm Disable   🚧 ABERTA PARA GATE (PR a ser aberta)
+P4.4.1     — Forensic Domain Integration & Read-Only Hardening 🚧 ABERTA PARA GATE (PR #51)
 ─────────────────────────────────────────────────────────────────────────
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)

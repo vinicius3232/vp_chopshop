@@ -496,6 +496,41 @@ function TrackerManager.CompleteRemoval(src, netId, removalToken)
     return { ok = true }
 end
 
+--- [v1.18 P4.4.1] Consulta somente-leitura do estado de rastreador de um veículo.
+--- NÃO chama ObserveVehicle, NÃO rola chances, NÃO cria trackerId, NÃO altera statebag.
+--- Retorna:
+---   'ACTIVE'  - Rastreador ativo autenticado
+---   'REMOVED' - Rastreador neutralizado / fiação rompida
+---   'NONE'    - Sem rastreador / veículo limpo não equipado
+---   nil, err  - netId ou entidade inválida / stale
+---@param netId any
+---@return string|nil state, string|nil err
+function TrackerManager.GetVehicleState(netId)
+    local ent, err, canonNetId = resolveTrackerVehicle(netId)
+    if not ent then
+        return nil, err or 'vehicle_not_found'
+    end
+
+    local trackerId = _netToTracker[canonNetId]
+    if not trackerId then
+        return 'NONE', nil
+    end
+
+    local trk = _trackers[trackerId]
+    if not trk then
+        _netToTracker[canonNetId] = nil
+        return 'NONE', nil
+    end
+
+    local valid, _, valErr = validateTrackerLifecycle(trk)
+    if not valid then
+        invalidateTracker(trackerId, valErr)
+        return nil, valErr
+    end
+
+    return trk.state or 'NONE', nil
+end
+
 --- Broadcast policial server-filtered: apenas policiais recebem as coordenadas do beacon
 ---@return number pingsSent
 function TrackerManager.BroadcastPings()

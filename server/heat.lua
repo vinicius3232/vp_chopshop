@@ -206,3 +206,27 @@ AddEventHandler('playerDropped', function()
     local src = source  -- [FIX L-1]
     VinScratchCooldown[src] = nil
 end)
+
+--- [v1.18 P4.4.1] Helper server-side canônico para checar se o VIN de uma placa está raspado.
+--- Contrato tri-state:
+---   true  = raspado (registro existente em vp_chop_vin_scratched)
+---   false = comprovadamente intacto (sem registro)
+---   nil   = DB error ou placa inválida (fail-closed / unknown)
+---@param canonicalPlate string
+---@return boolean|nil isScratched
+function VPChopIsVinScratched(canonicalPlate)
+    if not canonicalPlate or type(canonicalPlate) ~= 'string' then return nil end
+    local clean = canonicalPlate:gsub('%s+', ''):upper()
+    if clean == '' then return nil end
+
+    local ok, res = pcall(function()
+        if not MySQL or not MySQL.scalar or not MySQL.scalar.await then return nil end
+        return MySQL.scalar.await(
+            'SELECT 1 FROM vp_chop_vin_scratched WHERE UPPER(plate) = ? LIMIT 1',
+            { clean }
+        )
+    end)
+    if not ok then return nil end
+    return (res ~= nil and res ~= 0 and res ~= false)
+end
+
