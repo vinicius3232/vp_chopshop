@@ -25,6 +25,7 @@ shared_scripts {
     -- [P2.1] VPChopPartGtaClass — acessor legado sobre o registry. DEPOIS de registry/parts.lua.
     'shared/part_class.lua',
     'shared/action_gate.lua',   -- [v1.15 PR-G] predicate ActionSession vs legacy (client+server)
+    'bridge/dispatch.lua',      -- [v1.18 P4.3] DispatchBridge: alertas policiais multi-framework (client+server)
 }
 
 ui_page 'html/index.html'
@@ -73,6 +74,7 @@ server_scripts {
     'server/evidence_bridge_spec.lua', -- [v1.18 FORENSICS V2] self-gated (vp_chopshop_selftest 1)
     'server/tracker.lua',              -- [v1.18 P4.2] autoridade de rastreador GPS / LoJack
     'server/tracker_spec.lua',         -- [v1.18 P4.2] self-gated (vp_chopshop_selftest 1)
+    'server/dispatch_bridge_spec.lua', -- [v1.18 P4.3] self-gated (vp_chopshop_selftest 1)
     'server/db.lua',
     'server/validate.lua',
     -- [v1.15 arch] ChopSession — fonte server-authoritative do estado de desmanche.

@@ -54,6 +54,7 @@ local function run()
         return 0
     end
 
+    local origGetResourceState = _G.GetResourceState
     local mockResourceStates = {}
     _G.GetResourceState = function(resName)
         return mockResourceStates[resName] or 'missing'
@@ -305,6 +306,7 @@ local function run()
     EvidenceBridge._test.reset()
     Config.Evidence = origCfg
     _G.exports = origExports
+    _G.GetResourceState = origGetResourceState
 
     print(('[evidence/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
     if fail > 0 then

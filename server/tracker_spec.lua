@@ -65,26 +65,43 @@ local function run()
     local mockStatebags = {}
     local sentClientEvents = {}
 
+    local origNetworkGetEntityFromNetworkId = _G.NetworkGetEntityFromNetworkId
+    local origDoesEntityExist = _G.DoesEntityExist
+    local origGetEntityType = _G.GetEntityType
+    local origGetEntityModel = _G.GetEntityModel
+    local origGetVehicleClass = _G.GetVehicleClass
+    local origGetVehicleClassFromName = _G.GetVehicleClassFromName
+    local origGetVehicleNumberPlateText = _G.GetVehicleNumberPlateText
+    local origGetPlayerPed = _G.GetPlayerPed
+    local origGetEntityCoords = _G.GetEntityCoords
+    local origEntity = _G.Entity
+
     _G.NetworkGetEntityFromNetworkId = function(netId)
         return mockEntities[netId] or 0
     end
     _G.DoesEntityExist = function(ent)
-        return ent ~= nil and ent ~= 0 and ent.exists == true
+        if type(ent) == 'table' then return ent.exists == true end
+        if type(ent) == 'number' then return ent > 0 end
+        return ent ~= nil and ent ~= 0
     end
     _G.GetEntityType = function(ent)
-        return ent and ent.entityType or 0
+        if type(ent) == 'table' then return ent.entityType or 0 end
+        return (type(ent) == 'number' and ent > 0) and 2 or 0
     end
     _G.GetEntityModel = function(ent)
-        return ent and ent.model or 0
+        if type(ent) == 'table' then return ent.model or 0 end
+        return 0
     end
     _G.GetVehicleClass = function(ent)
-        return ent and ent.vehClass
+        if type(ent) == 'table' then return ent.vehClass end
+        return nil
     end
     _G.GetVehicleClassFromName = function(model)
         return nil
     end
     _G.GetVehicleNumberPlateText = function(ent)
-        return ent and ent.plate or ''
+        if type(ent) == 'table' then return ent.plate or '' end
+        return ''
     end
     _G.GetPlayerPed = function(src)
         return src
@@ -93,7 +110,7 @@ local function run()
         if type(ent) == 'number' and mockPlayerCoords[ent] then
             return mockPlayerCoords[ent]
         end
-        return (ent and ent.coords) or mockEntityCoords[ent] or vector3(0, 0, 0)
+        return (type(ent) == 'table' and ent.coords) or mockEntityCoords[ent] or vector3(0, 0, 0)
     end
     _G.Entity = function(ent)
         local id = (type(ent) == 'table' and ent.id) or ent
@@ -445,6 +462,16 @@ local function run()
     -- Teardown
     TrackerManager._test.reset()
     Config.Tracker = origCfg
+    _G.NetworkGetEntityFromNetworkId = origNetworkGetEntityFromNetworkId
+    _G.DoesEntityExist = origDoesEntityExist
+    _G.GetEntityType = origGetEntityType
+    _G.GetEntityModel = origGetEntityModel
+    _G.GetVehicleClass = origGetVehicleClass
+    _G.GetVehicleClassFromName = origGetVehicleClassFromName
+    _G.GetVehicleNumberPlateText = origGetVehicleNumberPlateText
+    _G.GetPlayerPed = origGetPlayerPed
+    _G.GetEntityCoords = origGetEntityCoords
+    _G.Entity = origEntity
 
     print(('[tracker/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
     if fail > 0 then

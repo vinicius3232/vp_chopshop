@@ -752,6 +752,7 @@ dofile(base .. '/server/action/base_tyre.lua')        -- [PR-F] registra kind/ex
 dofile(base .. '/server/action/advanced_chop.lua')    -- [PR-G] registra kinds/executores adv_*
 dofile(base .. '/bridge/vp_gangs.lua')                -- [INT-01A] provê VPChopGangs* (ponte vp_chopshop→vp_gangs)
 dofile(base .. '/bridge/evidence.lua')                -- [v1.18 FORENSICS V2] provê EvidenceBridge e VPChopLeaveEvidence
+dofile(base .. '/bridge/dispatch.lua')                -- [v1.18 P4.3] provê DispatchBridge
 dofile(base .. '/server/broker/market.lua')              -- [v1.17 BROKER-1] provê BrokerMarket
 dofile(base .. '/server/broker/contracts.lua')           -- [v1.17 BROKER-3] provê BrokerContracts
 dofile(base .. '/bridge/workshop.lua')                   -- [v1.17 BROKER-4] provê WorkshopBridge
@@ -784,6 +785,7 @@ dofile(base .. '/server/broker/workshop_spec.lua')          -- [v1.17 BROKER-4]
 dofile(base .. '/server/broker/npc_context_spec.lua')       -- [v1.17 BROKER-5]
 dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS V2]
 dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]
+dofile(base .. '/server/dispatch_bridge_spec.lua')          -- [v1.18 P4.3 DispatchBridge]
 
 local anyFail = false
 for i = specStart, #threads do
