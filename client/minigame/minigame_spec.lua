@@ -1064,6 +1064,12 @@ local function run()
         Config.CatalyticTheft and Config.CatalyticTheft.Payout and Config.CatalyticTheft.Payout.min > 0 and Config.CatalyticTheft.Payout.max >= Config.CatalyticTheft.Payout.min)
     check('CATALYTIC-1 BenchMaterials contains copper and scrap',
         Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials and Config.CatalyticTheft.BenchMaterials.copper ~= nil and Config.CatalyticTheft.BenchMaterials.metalscrap ~= nil)
+    check('CATALYTIC-MINIGAME-1 2-Stage Minigame is configured',
+        Config.CatalyticTheft and Config.CatalyticTheft.Minigame and Config.CatalyticTheft.Minigame.Stages == 2)
+    check('CATALYTIC-MINIGAME-1 Sparks VFX is enabled',
+        Config.CatalyticTheft and Config.CatalyticTheft.SparksVfx == true)
+    check('CATALYTIC-MINIGAME-1 Police Alert on Fail configured',
+        Config.CatalyticTheft and Config.CatalyticTheft.PoliceAlertOnFail == 100)
 
     -- Simulação de roubo de catalisador -> carregamento -> venda no Fence
     local catalyticCarry = {
@@ -1076,6 +1082,17 @@ local function run()
     -- Venda no Fence consome o carry e premia dinheiro
     catalyticCarry = nil
     check('CATALYTIC-2 fence sale consumes carried catalytic', catalyticCarry == nil)
+
+    -- Testes de paridade de idioma para o minigame de catalisador
+    local catKeys = { 'catalytic_cutting_stage_1', 'catalytic_cutting_stage_2', 'catalytic_cut_failed', 'catalytic_stolen_success' }
+    for _, lang in ipairs({ 'en', 'pt', 'es', 'fr', 'tr' }) do
+        Config.Locale = lang
+        for _, k in ipairs(catKeys) do
+            local val = L(k)
+            check(('CATALYTIC-LOCALE-1 %s present in %s'):format(k, lang), val ~= nil and val ~= k and val ~= '')
+        end
+    end
+    Config.Locale = 'en'
 
     -- 33: Testes de Roubo em Veículos de Outros Jogadores & Proteção Anti-Auto-Farm (BlockOwnVehicle)
     check('OWNERSHIP-1 Jackstand BlockOwnVehicle is configured', Config.Jackstand and Config.Jackstand.BlockOwnVehicle ~= nil)

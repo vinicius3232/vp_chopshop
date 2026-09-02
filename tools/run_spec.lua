@@ -429,7 +429,15 @@ _G.Config = {
         Enable = true,
         BlockOwnVehicle = false,
         Bones = { 'exhaust', 'exhaust_2', 'chassis' },
-        PoliceAlertChance = 40,
+        Minigame = {
+            Enable = true,
+            Stages = 2,
+            Difficulty = { 'easy', 'medium' },
+            Inputs = { 'w', 'a', 's', 'd' },
+        },
+        SparksVfx = true,
+        PoliceAlertChance = 30,
+        PoliceAlertOnFail = 100,
         ProgressMs = 7000,
         Payout = { min = 1200, max = 2200 },
         BenchMaterials = {

@@ -1925,29 +1925,120 @@ local function doStealCatalytic(veh)
 
     spawnToolProp(Config.AdvancedChop and Config.AdvancedChop.SawAnim and Config.AdvancedChop.SawAnim.prop)
 
-    -- Chance de disparar alarme da polícia pelo barulho da serra
-    if math.random(1, 100) <= ((Config.CatalyticTheft and Config.CatalyticTheft.PoliceAlertChance) or 40) then
-        VPChopCheckAlarmAndDispatch(veh, tCfg)
-    end
+    local catCfg = Config.CatalyticTheft or {}
+    local minigameCfg = catCfg.Minigame or {
+        Enable = true,
+        Stages = 2,
+        Difficulty = { 'easy', 'medium' },
+        Inputs = { 'w', 'a', 's', 'd' },
+    }
 
-    local animCfg = (Config.CatalyticTheft and Config.CatalyticTheft.Anim) or {
+    local animCfg = catCfg.Anim or {
         dict = 'anim@scripted@heist@ig16_glass_cut@male@',
         clip = 'cutting_loop',
         flag = 1,
     }
 
-    local ok = lib.progressBar({
-        duration = startRes.durationMs or 7000,
-        label = L('catalytic_progress'),
+    -- Helper local para tocar efeito de faíscas de corte
+    local sparksFx = nil
+    if catCfg.SparksVfx ~= false and RequestNamedPtfxAsset and HasNamedPtfxAssetLoaded then
+        pcall(function()
+            if not HasNamedPtfxAssetLoaded('core') then
+                RequestNamedPtfxAsset('core')
+                local timeout = GetGameTimer() + 1000
+                while not HasNamedPtfxAssetLoaded('core') and GetGameTimer() < timeout do
+                    Wait(10)
+                end
+            end
+            if HasNamedPtfxAssetLoaded('core') and UseParticleFxAssetNextCall and StartParticleFxLoopedOnEntityBone then
+                UseParticleFxAssetNextCall('core')
+                local boneIdx = GetEntityBoneIndexByName(veh, 'exhaust')
+                if boneIdx == -1 then boneIdx = GetEntityBoneIndexByName(veh, 'chassis') end
+                if boneIdx ~= -1 then
+                    sparksFx = StartParticleFxLoopedOnEntityBone('ent_dst_sparking_wires', veh, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, boneIdx, 1.0, false, false, false)
+                end
+            end
+        end)
+    end
+
+    local function cleanupTheft(failed)
+        if sparksFx and StopParticleFxLooped then
+            pcall(StopParticleFxLooped, sparksFx, false)
+            sparksFx = nil
+        end
+        destroyToolProp()
+        JackstandBusy = false
+        if failed then
+            pcall(lib.callback.await, 'vp_chopshop:catalytic:cancel', false, netId, startRes.token)
+        end
+    end
+
+    local totalMs = startRes.durationMs or 7000
+    local stage1Ms = math.floor(totalMs / 2)
+    local stage2Ms = totalMs - stage1Ms
+
+    -- ─── ETAPA 1: Corte do Tubo Dianteiro ────────────────────────────────────
+    local ok1 = lib.progressBar({
+        duration = stage1Ms,
+        label = L('catalytic_cutting_stage_1'),
         useWhileDead = false,
         canCancel = true,
         disable = { move = true, car = true, combat = true },
         anim = animCfg,
     })
-    destroyToolProp()
-    JackstandBusy = false
 
-    if not ok then return end
+    if not ok1 then
+        cleanupTheft(true)
+        return
+    end
+
+    if minigameCfg.Enable ~= false and lib.skillCheck then
+        local diff1 = (minigameCfg.Difficulty and minigameCfg.Difficulty[1]) or 'easy'
+        local pass1 = lib.skillCheck(diff1, minigameCfg.Inputs or { 'w', 'a', 's', 'd' })
+        if not pass1 then
+            cleanupTheft(true)
+            if math.random(1, 100) <= (catCfg.PoliceAlertOnFail or 100) then
+                VPChopCheckAlarmAndDispatch(veh, tCfg)
+            end
+            VPChopNotify(L('catalytic_cut_failed'), 'error')
+            return
+        end
+    end
+
+    -- ─── ETAPA 2: Corte do Tubo Traseiro ─────────────────────────────────────
+    local ok2 = lib.progressBar({
+        duration = stage2Ms,
+        label = L('catalytic_cutting_stage_2'),
+        useWhileDead = false,
+        canCancel = true,
+        disable = { move = true, car = true, combat = true },
+        anim = animCfg,
+    })
+
+    if not ok2 then
+        cleanupTheft(true)
+        return
+    end
+
+    if minigameCfg.Enable ~= false and lib.skillCheck then
+        local diff2 = (minigameCfg.Difficulty and minigameCfg.Difficulty[2]) or 'medium'
+        local pass2 = lib.skillCheck(diff2, minigameCfg.Inputs or { 'w', 'a', 's', 'd' })
+        if not pass2 then
+            cleanupTheft(true)
+            if math.random(1, 100) <= (catCfg.PoliceAlertOnFail or 100) then
+                VPChopCheckAlarmAndDispatch(veh, tCfg)
+            end
+            VPChopNotify(L('catalytic_cut_failed'), 'error')
+            return
+        end
+    end
+
+    cleanupTheft(false)
+
+    -- Chance normal de alerta policial por corte concluído
+    if math.random(1, 100) <= (catCfg.PoliceAlertChance or 30) then
+        VPChopCheckAlarmAndDispatch(veh, tCfg)
+    end
 
     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:catalytic:complete', false, netId, startRes.token)
     if not cbOk or not res or not res.ok then

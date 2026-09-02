@@ -881,10 +881,24 @@ Config.CatalyticTheft = {
     --- Bones no veículo onde a opção de cortar catalisador é exibida
     Bones = { 'exhaust', 'exhaust_2', 'chassis' },
 
-    --- Chance percentual (0 a 100) de disparar o alarme e chamar a polícia pelo ruído da serra
-    PoliceAlertChance = 40,
+    --- Minigame de corte duplo de escapamento (tubo dianteiro e tubo traseiro)
+    Minigame = {
+        Enable = true,
+        Stages = 2,
+        Difficulty = { 'easy', 'medium' },
+        Inputs = { 'w', 'a', 's', 'd' },
+    },
 
-    --- Tempo de corte do escapamento em milissegundos
+    --- Efeito visual de faíscas de serra durante o corte do escape
+    SparksVfx = true,
+
+    --- Chance percentual (0 a 100) de disparar o alarme e chamar a polícia em corte normal
+    PoliceAlertChance = 30,
+
+    --- Chance de alerta policial caso o jogador falhe no minigame (ruído súbito de metal/serra travando)
+    PoliceAlertOnFail = 100,
+
+    --- Tempo total de corte do escapamento em milissegundos (dividido entre as 2 etapas)
     ProgressMs = 7000,
 
     --- Animação de corte com serra
