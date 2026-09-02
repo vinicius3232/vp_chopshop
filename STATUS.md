@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-02
-**Branch de trabalho:** `feat/v1.18-p4.3-dispatch-bridge` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `9c52c52`)
+**Branch de trabalho:** `feat/v1.18-p4.4-forensic-scanner` (base: `pr-h/v1.15-delivercar-terminal-hardening`, SHA `3fd6f54`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **1785 PASS / 0 FAIL / 1785 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **1879 PASS / 0 FAIL / 1879 asserts**
 
 ---
 
@@ -32,7 +32,8 @@ BROKER-6.2 — Static Gate Approved & Live QA Matrix ✅ HOMOLOGADO & MERGED (PR
 v1.18 Camada de Crime & Perícia Policial Profunda:
 P4.1.1     — EvidenceBridge Provider Hardening      ✅ HOMOLOGADO & MERGED (PR #48, merge SHA 423fbfe)
 P4.2       — GPS Tracker / LoJack & Catalytic Theft ✅ HOMOLOGADO & MERGED (PR #49, merge SHA 9c52c52)
-P4.3       — DispatchBridge & Police Alert System   🚧 ABERTA PARA GATE (PR #50)
+P4.3       — DispatchBridge & Police Alert System   ✅ HOMOLOGADO & MERGED (PR #50, merge SHA 3fd6f54)
+P4.4       — Forensic Scanner & Anti-Farm Disable   🚧 ABERTA PARA GATE (PR a ser aberta)
 ─────────────────────────────────────────────────────────────────────────
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)
@@ -46,3 +47,5 @@ P4.3       — DispatchBridge & Police Alert System   🚧 ABERTA PARA GATE (PR 
 7. **Escala de Dano (EngineHealth):** Motor danificado tem recompensas reduzidas e convertidas em sucata de metal. Motor fundido ($<150$ HP) bloqueia reaproveitamento de peças.
 8. **Furto de Catalisador:** Corte de escapamento em veículos de rua, chance de disparar alarme/polícia, e opção de desmanchar na bancada ou vender direto no NPC Fence.
 9. **Roubo em Carros de Jogadores:** Permite furtar catalisadores e rodas de veículos pertencentes a outros jogadores, bloqueando o dono de roubar o próprio veículo (`BlockOwnVehicle` anti-auto-farm).
+10. **Inutilização Veicular Anti-Farm:** Remoção do bloco do motor (`vpChopEngineMissing`) ou furto de catalisador com `DisableVehicle = true` inutiliza o carro e bloqueia ignição/condução no client até reparo.
+11. **Perícia Policial Veicular:** Policiais com `parts_scanner` ou `forensic_kit` inspecionam o veículo revelando estado do motor, catalisador, VIN raspado, disfarce de placa e sinal de rastreador GPS.

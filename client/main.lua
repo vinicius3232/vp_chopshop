@@ -2615,3 +2615,47 @@ CreateThread(function()
         end
     end
 end)
+
+-- [v1.18 P4.4] Inutilização veicular anti-farm (motor ausente / catalisador furtado)
+CreateThread(function()
+    local lastWarnVeh = 0
+    local lastWarnTime = 0
+    while true do
+        local sleep = 1000
+        local ped = PlayerPedId()
+        if ped and ped ~= 0 and IsPedInAnyVehicle(ped, false) then
+            local veh = GetVehiclePedIsIn(ped, false)
+            if veh and veh ~= 0 and GetPedInVehicleSeat(veh, -1) == ped then
+                sleep = 250
+                local entState = Entity(veh).state
+                local engineMissing = (entState and (entState.vpChopEngineMissing or entState.engineRemoved))
+                local catalyticStolen = (entState and entState.catalyticStolen)
+                local catCfg = Config.CatalyticTheft or {}
+
+                if engineMissing then
+                    SetVehicleEngineOn(veh, false, true, true)
+                    SetVehicleUndriveable(veh, true)
+                    local now = GetGameTimer()
+                    if veh ~= lastWarnVeh or (now - lastWarnTime) > 8000 then
+                        lastWarnVeh = veh
+                        lastWarnTime = now
+                        VPChopNotify(L('err_engine_missing'), 'error')
+                    end
+                elseif catalyticStolen and catCfg.DisableVehicle then
+                    SetVehicleEngineOn(veh, false, true, true)
+                    SetVehicleUndriveable(veh, true)
+                    local now = GetGameTimer()
+                    if veh ~= lastWarnVeh or (now - lastWarnTime) > 8000 then
+                        lastWarnVeh = veh
+                        lastWarnTime = now
+                        VPChopNotify(L('err_catalytic_stolen_drive'), 'warning')
+                    end
+                end
+            end
+        else
+            lastWarnVeh = 0
+        end
+        Wait(sleep)
+    end
+end)
+

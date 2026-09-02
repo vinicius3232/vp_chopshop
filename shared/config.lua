@@ -642,6 +642,13 @@ Config.PartSerial = {
     --- Jobs policiais que podem inspecionar (reusa a lista das placas por padrão).
     PoliceJobs = Config.Plates and Config.Plates.PoliceJobs or { 'police', 'bcso', 'sheriff' },
 
+    --- [v1.18 P4.4] Perícia veicular avançada realizada pela polícia (chassi, VIN, catalisador, motor, rastreador)
+    VehicleInspection = {
+        Enable = true,
+        DurationMs = 5000,
+        Bones = { 'bonnet', 'engine', 'exhaust', 'chassis' },
+    },
+
     --- Vendedor LEGAL opcional (NPC fixo): vende car_parts 'legal' (série registrada no DB)
     --- por dinheiro. Cobra via BridgeRemoveCash e chama o export IssueLegalParts.
     LegalVendor = {
@@ -928,6 +935,9 @@ Config.CatalyticTheft = {
 
     --- Bloqueia o jogador de roubar o catalisador do seu próprio carro pessoal (true = anti-auto-farm em produção; false = desativa para QA local)
     BlockOwnVehicle = true,
+
+    --- [v1.18 P4.4] Inutilização veicular: corte do catalisador impede o motor de ligar até reparo mecânico
+    DisableVehicle = true,
 
     --- Materiais recebidos caso o jogador decida desmanchar o catalisador na bancada
     BenchMaterials = {

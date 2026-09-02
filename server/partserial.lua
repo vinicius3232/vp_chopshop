@@ -541,3 +541,90 @@ lib.callback.register('vp_chopshop:inspectParts', function(src, targetServerId)
 
     return { ok = true, empty = false, forensic = hasForensic, lines = lines }
 end)
+
+--- [v1.18 P4.4] Callback de Perícia Veicular Policial (Chassi, Motor, Catalisador, VIN, Rastreador)
+lib.callback.register('vp_chopshop:inspectVehicle', function(src, netId)
+    if not (Config.PartSerial and Config.PartSerial.Enable) then return { ok = false, err = 'disabled' } end
+    if not IsValidSource(src) then return { ok = false, err = 'invalid' } end
+    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+
+    -- Gate de JOB policial
+    local policeJobs = Config.PartSerial.PoliceJobs or { 'police', 'bcso', 'sheriff' }
+    if not BridgeIsPolice(src, policeJobs) then return { ok = false, err = 'not_police' } end
+
+    -- Scanner ou Forensic Kit obrigatório
+    local scannerItem = Config.PartSerial.ScannerItem or 'parts_scanner'
+    local forensicItem = Config.PartSerial.ForensicItem or 'forensic_kit'
+    local hasScanner = InvCount(src, scannerItem) >= 1
+    local hasForensic = InvCount(src, forensicItem) >= 1
+    if not hasScanner and not hasForensic then return { ok = false, err = 'no_tool' } end
+
+    -- Rate limit
+    local now = GetGameTimer()
+    if InspectCooldown[src] and now < InspectCooldown[src] then return { ok = false, err = 'cooldown' } end
+
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return { ok = false, err = 'invalid_net' } end
+
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
+
+    -- Proximidade policial ↔ veículo (max 5.0m)
+    if not ValidatePlayerNearVehicle(src, veh, 5.0) then return { ok = false, err = 'range' } end
+
+    InspectCooldown[src] = now + inspectCdMs()
+
+    local entState = Entity(veh).state
+    local engineMissing = (entState and (entState.vpChopEngineMissing == true or entState.engineRemoved == true)) or false
+    local catalyticStolen = (entState and entState.catalyticStolen == true) or false
+
+    local plate = ''
+    if GetVehicleNumberPlateText then
+        plate = GetVehicleNumberPlateText(veh) or ''
+    end
+
+    local vinScratched = false
+    if VPChopIsVinScratched then
+        vinScratched = VPChopIsVinScratched(plate) == true
+    end
+
+    local plateOriginal = entState and entState.vpChopPlateOriginal or nil
+    local plateDisguised = (plateOriginal ~= nil and plateOriginal ~= '')
+
+    -- Tracker status
+    local trackerStatus = 'none'
+    if entState and entState.vpChopTrackerId then
+        trackerStatus = 'active'
+    elseif TrackerManager and TrackerManager.GetVehicleState then
+        local st = TrackerManager.GetVehicleState(netId)
+        if st == 'ACTIVE' then trackerStatus = 'active'
+        elseif st == 'REMOVED' then trackerStatus = 'cut'
+        else trackerStatus = 'none'
+        end
+    end
+
+    local serialData = getVehicleSerial(netId)
+
+    pcall(function()
+        if VPChopMDT and VPChopMDT.ReportActivity then
+            VPChopMDT.ReportActivity(plate, src, 'vehicle_inspected')
+        end
+    end)
+
+    return {
+        ok = true,
+        forensic = hasForensic,
+        data = {
+            engineMissing = engineMissing,
+            catalyticStolen = catalyticStolen,
+            vinScratched = vinScratched,
+            trackerStatus = trackerStatus,
+            plateDisguised = plateDisguised,
+            plateOriginal = plateOriginal,
+            plate = plate,
+            sourceModel = serialData.sourceModel,
+            serial = serialData.serial,
+        }
+    }
+end)
+

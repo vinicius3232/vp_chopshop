@@ -231,7 +231,8 @@ function NetworkGetNetworkIdFromEntity(h)
     return h - 70000
 end
 function DoesEntityExist(h)
-    if h == nil or h == 0 then return false end
+    if not h or h == 0 then return false end
+    if type(h) == 'table' then return h.exists ~= false end
     if h >= 90000 then
         local n = h - 90000
         return _G.FAKE_TRUCK and _G.FAKE_TRUCK[n] ~= nil
@@ -244,6 +245,7 @@ function DoesEntityExist(h)
 end
 function GetEntityModel(h)
     if not h or h == 0 then return 0 end
+    if type(h) == 'table' then return h.model or 0 end
     if h >= 90000 then
         local n = h - 90000
         return _G.FAKE_TRUCK and _G.FAKE_TRUCK[n] and _G.FAKE_TRUCK[n].model or 0
@@ -251,9 +253,15 @@ function GetEntityModel(h)
     local n = (h or 0) - 70000
     return FAKE_VEH[n] and FAKE_VEH[n].model or 0
 end
-function GetVehicleNumberPlateText(_) return 'PLATE' end
+function GetVehicleNumberPlateText(h)
+    if type(h) == 'table' then return h.plate or 'PLATE' end
+    local n = (h or 0) - 70000
+    if FAKE_VEH[n] and FAKE_VEH[n].plate then return FAKE_VEH[n].plate end
+    return 'PLATE'
+end
 function GetVehicleClass(h)
     if h == nil or h == 0 then return 0 end
+    if type(h) == 'table' then return h.vehicleClass or h.vehClass or 0 end
     local n = (h or 0) - 70000
     if FAKE_VEH[n] and FAKE_VEH[n].vehicleClass ~= nil then
         return FAKE_VEH[n].vehicleClass
@@ -264,11 +272,18 @@ function GetVehicleClassFromName(model)
     return 0
 end
 function Entity(h)
-    local n = (h or 0) - 70000
-    local v = FAKE_VEH[n] or {}
+    local n = (type(h) == 'number' and (h >= 70000 and (h - 70000) or h)) or (type(h) == 'table' and (h.netId or 0)) or 0
+    local v = (type(h) == 'table' and h) or FAKE_VEH[n]
+    if not v then
+        v = {}
+        if type(n) == 'number' and n > 0 then FAKE_VEH[n] = v end
+    end
     return { state = setmetatable(
         { set = function(_, k, val) v[k] = val end },
-        { __index = function(_, k) return v[k] end }) }
+        {
+            __index = function(_, k) return v[k] end,
+            __newindex = function(_, k, val) v[k] = val end,
+        }) }
 end
 _G.NEAR = true                                                -- specs alternam p/ testar 'distance'
 function ValidatePlayerNearVehicle(_, _, _) return _G.NEAR ~= false end
@@ -786,6 +801,7 @@ dofile(base .. '/server/broker/npc_context_spec.lua')       -- [v1.17 BROKER-5]
 dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS V2]
 dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]
 dofile(base .. '/server/dispatch_bridge_spec.lua')          -- [v1.18 P4.3 DispatchBridge]
+dofile(base .. '/server/forensic_scanner_spec.lua')          -- [v1.18 P4.4 Forensic Scanner]
 
 local anyFail = false
 for i = specStart, #threads do

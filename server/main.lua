@@ -784,6 +784,12 @@ lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, 
     end
 
     Entity(veh).state:set('catalyticStolen', true, true)
+    if SetVehicleEngineHealth then
+        SetVehicleEngineHealth(veh, 200.0)
+    end
+    if Config.CatalyticTheft and Config.CatalyticTheft.DisableVehicle and SetVehicleUndriveable then
+        SetVehicleUndriveable(veh, true)
+    end
     VPChopConsumeTool(source, false)
 
     -- [v1.16 SEC-1.2] Emissão autoritativa baseada no theft token (imune a reciclagem de netId)
