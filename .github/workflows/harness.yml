@@ -1,8 +1,8 @@
 name: harness
 
 # Transforma o self-test estático (tools/run_spec.lua) em check de CI.
-# Critério de sucesso = EXIT CODE do harness. O número de asserts (hoje 632)
-# NÃO é hardcoded — novas suites aumentam esse número naturalmente.
+# Critério de sucesso = EXIT CODE do harness. O número de asserts não é hardcoded.
+# Baseline atual: consultar STATUS.md. Novas suites aumentam esse número naturalmente.
 # Nenhuma parte deste workflow toca runtime/gameplay FiveM.
 
 on:

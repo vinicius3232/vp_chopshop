@@ -109,7 +109,7 @@ local function run()
 
     -- ─── 1. FORENSIC-AUTH & TOOL: Gate Policial e Ferramenta ─────────────────
     do
-        _G._CUSTOM_TIMER = 1000
+        _G._CUSTOM_TIMER = (_G._CUSTOM_TIMER or 100000) + 10000
         mockPolice = { [1] = false, [2] = true }
         mockInventory = { [1] = { parts_scanner = 1 }, [2] = { parts_scanner = 1 } }
         _G.FAKE_VEH[101] = { model = 970598228, plate = 'POLTEST1', exists = true }

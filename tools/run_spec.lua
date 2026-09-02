@@ -325,11 +325,35 @@ _G.MySQL = _G.MySQL or {
     insert = { await = function(q, p) return 1 end },
     update = { await = function(q, p) return 1 end },
 }
+-- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
+if not _G.vector3 then
+    local v3meta = {
+        __add = function(a, b) return vector3(a.x + b.x, a.y + b.y, a.z + b.z) end,
+        __sub = function(a, b) return vector3(a.x - b.x, a.y - b.y, a.z - b.z) end,
+        __mul = function(a, b)
+            if type(a) == 'number' then return vector3(a * b.x, a * b.y, a * b.z)
+            elseif type(b) == 'number' then return vector3(a.x * b, a.y * b, a.z * b)
+            else return vector3(a.x * b.x, a.y * b.y, a.z * b.z) end
+        end,
+        __div = function(a, b) return vector3(a.x / b, a.y / b, a.z / b) end,
+        __unm = function(a) return vector3(-a.x, -a.y, -a.z) end,
+        __len = function(a) return math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) end,
+        __tostring = function(a) return ('vector3(%s, %s, %s)'):format(a.x, a.y, a.z) end,
+    }
+    function vector3(x, y, z)
+        return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, v3meta)
+    end
+end
+if not _G.vector4 then
+    function vector4(x, y, z, w)
+        return { x = x or 0, y = y or 0, z = z or 0, w = w or 0 }
+    end
+end
 -- [PR-G] stubs p/ server/advanced_chop.lua (commit helpers + kind specs advanced)
 _G.ServerWelders = {}
 function GetPlayers() return {} end
 function GetPlayerPed(_) return 0 end
-function GetEntityCoords(_) return { x = 0, y = 0, z = 0 } end
+function GetEntityCoords(_) return vector3(0.0, 0.0, 0.0) end
 function TriggerClientEvent(_, _, ...) end
 function VPChopAddStolenCarParts(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
 function InvAdd(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
@@ -731,77 +755,7 @@ _G.Config = {
             car_parts  = { amount = 1, chance = 1.0 },
         },
     },
-    Evidence = {
-        Enable = true,
-        Provider = 'auto',
-        AutoOrder = { 'evidences', 'vp_crimescene' },
-        GlovesItem = 'gloves',
-        GlovesBlocksDna = false,
-        DnaType = 'blood',
-        HeatScaling = true,
-        HeatFactor = 0.5,
-        Actions = {
-            chop_part   = { fingerprint = 0.50, dna = 0.12 },
-            vin_scratch = { fingerprint = 0.70, dna = 0.15 },
-            plate_steal = { fingerprint = 0.60, dna = 0.10 },
-            plate_forge = { fingerprint = 0.40, dna = 0.05 },
-            plate_apply = { fingerprint = 0.50, dna = 0.08 },
-            tracker_removal = { fingerprint = 0.65, dna = 0.15 },
-        },
-    },
-    Tracker = {
-        Enable = true,
-        DefaultChance = 0.40,
-        ClassChances = {
-            [0] = 0.15, [1] = 0.20, [2] = 0.30, [3] = 0.35, [4] = 0.40,
-            [5] = 0.45, [6] = 0.65, [7] = 0.85, [8] = 0.25, [9] = 0.30,
-            [10] = 0.20, [11] = 0.20, [12] = 0.20,
-        },
-        RequiredTool = 'pliers',
-        ToolFallback = 'screwdriver',
-        MinDurationMs = 7000,
-        MaxDistance = 3.5,
-        PingIntervalSeconds = 15,
-        BlipDurationSeconds = 10,
-        PoliceJobs = { 'police', 'bcso', 'sheriff' },
-        RemovalEvidence = true,
-    },
-    Dispatch = {
-        Enable = true,
-        Provider = 'auto',
-        CustomResource = nil,
-        DefaultJobs = { 'police', 'bcso', 'sheriff' },
-        Alerts = {
-            catalytic_cut = { title = '10-90: Furto de Catalisador em Andamento', code = '10-90', duration = 8000 },
-            chop_activity = { title = '10-99: Atividade Suspeita de Desmanche', code = '10-99', duration = 10000 },
-            lojack_ping   = { title = '10-33: Sinal de Rastreador Veicular (LoJack)', code = '10-33', duration = 12000 },
-        },
-    },
 }
--- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
-if not _G.vector3 then
-    local v3meta = {
-        __add = function(a, b) return vector3(a.x + b.x, a.y + b.y, a.z + b.z) end,
-        __sub = function(a, b) return vector3(a.x - b.x, a.y - b.y, a.z - b.z) end,
-        __mul = function(a, b)
-            if type(a) == 'number' then return vector3(a * b.x, a * b.y, a * b.z)
-            elseif type(b) == 'number' then return vector3(a.x * b, a.y * b, a.z * b)
-            else return vector3(a.x * b.x, a.y * b.y, a.z * b.z) end
-        end,
-        __div = function(a, b) return vector3(a.x / b, a.y / b, a.z / b) end,
-        __unm = function(a) return vector3(-a.x, -a.y, -a.z) end,
-        __len = function(a) return math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) end,
-        __tostring = function(a) return ('vector3(%s, %s, %s)'):format(a.x, a.y, a.z) end,
-    }
-    function vector3(x, y, z)
-        return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, v3meta)
-    end
-end
-if not _G.vector4 then
-    function vector4(x, y, z, w)
-        return { x = x or 0, y = y or 0, z = z or 0, w = w or 0 }
-    end
-end
 function RegisterNUICallback(_, _) end
 function SendNUIMessage(_) end
 function SetNuiFocus(_, _) end

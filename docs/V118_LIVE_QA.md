@@ -95,31 +95,31 @@
 ## QA-B — EVIDENCEBRIDGE
 
 - [ ] **QA-B01:** Crime elegível de desmanche gera evidência de vestígio.
-  - **Preconditions:** Jogador sem luvas desmancha porta de veículo.
+  - **Preconditions:** Jogador sem luvas desmancha porta de veículo; para verificação determinística, `Config.Evidence.Actions.chop_part.fingerprint = 1.0`.
   - **Steps:** Completar desmanche avançado da porta.
-  - **Expected:** Evidência deixada no local com tipo e placa canônica associada.
+  - **Expected:** Evidência de impressão digital deixada no local com tipo e placa canônica associada.
   - **Observed:**
   - **Evidence:**
   - **Result:** PENDING
 
 - [ ] **QA-B02:** Uso de luvas bloqueia impressão digital (*fingerprint*).
-  - **Preconditions:** Jogador equipado com item de luva configurado.
-  - **Steps:** Realizar corte de peça ou remoção de catalisador.
-  - **Expected:** Zero evidência de impressão digital gerada; apenas vestígios materiais se aplicável.
+  - **Preconditions:** Jogador equipado com item de luva configurado; `Config.Evidence.Actions.chop_part.fingerprint = 1.0`.
+  - **Steps:** Realizar corte de peça ou remoção de catalisador com luvas no inventário.
+  - **Expected:** Zero evidência de impressão digital gerada; luva bloqueia com sucesso.
   - **Observed:**
   - **Evidence:**
   - **Result:** PENDING
 
-- [ ] **QA-B03:** Evidência de DNA em caso de dano ou corte sangrento.
-  - **Preconditions:** Jogador com saúde baixa ou sofrendo falha física.
-  - **Steps:** Executar corte perigoso gerando vestígio biológico.
-  - **Expected:** Evidência de sangue/DNA gerada no ponto exato.
+- [ ] **QA-B03:** Evidência de DNA em ação criminosa.
+  - **Preconditions:** `Config.Evidence.Actions.chop_part.dna = 1.0`.
+  - **Steps:** Executar desmanche de peça.
+  - **Expected:** Evidência de sangue/DNA gerada no ponto exato da ação.
   - **Observed:**
   - **Evidence:**
   - **Result:** PENDING
 
 - [ ] **QA-B04:** Integração com provider `evidences`.
-  - **Preconditions:** Resource `evidences` iniciado e configurado.
+  - **Preconditions:** Resource `evidences` iniciado e configurado (`Config.Evidence.Provider = 'evidences'`).
   - **Steps:** Realizar ação de desmanche.
   - **Expected:** Evidência registrada no sistema `evidences`.
   - **Observed:**
@@ -127,7 +127,7 @@
   - **Result:** PENDING
 
 - [ ] **QA-B05:** Integração com provider `vp_crimescene`.
-  - **Preconditions:** Resource `vp_crimescene` iniciado e configurado.
+  - **Preconditions:** Resource `vp_crimescene` iniciado e configurado (`Config.Evidence.Provider = 'vp_crimescene'`).
   - **Steps:** Realizar ação de desmanche.
   - **Expected:** Marcador de cena de crime registrado no formato canônico.
   - **Observed:**
@@ -135,15 +135,15 @@
   - **Result:** PENDING
 
 - [ ] **QA-B06:** Integração com custom provider via `RegisterEvidenceProvider`.
-  - **Preconditions:** Script de teste registra handler customizado no client.
+  - **Preconditions:** Script de teste registra handler customizado no SERVER via export `RegisterEvidenceProvider`.
   - **Steps:** Acionar desmanche de peça.
-  - **Expected:** Handler customizado recebe evento formatado.
+  - **Expected:** Handler customizado server-side recebe payload formatado.
   - **Observed:**
   - **Evidence:**
   - **Result:** PENDING
 
 - [ ] **QA-B07:** Tentativa de hijacking de provider customizado.
-  - **Preconditions:** Resource B tenta registrar provider já registrado pelo Resource A.
+  - **Preconditions:** Resource B tenta registrar provider já registrado pelo Resource A no servidor.
   - **Steps:** Executar `RegisterEvidenceProvider` a partir de outro recurso.
   - **Expected:** Rejeição segura com `already_registered`; provider original inalterado.
   - **Observed:**
@@ -179,15 +179,15 @@
 ## QA-C — GPS / LOJACK
 
 - [ ] **QA-C01:** Veículo comum sem rastreador GPS.
-  - **Preconditions:** Veículo de classe baixa (ex.: compacto/sedan comum).
+  - **Preconditions:** Veículo de classe com chance 0.0 configurada (`Config.Tracker.ClassChances[0] = 0.0`, classe Compacto).
   - **Steps:** Inspecionar e interagir com o veículo.
   - **Expected:** `TrackerManager.GetVehicleState` retorna `'NONE'`, nenhum ping emitido.
   - **Observed:**
   - **Evidence:**
   - **Result:** PENDING
 
-- [ ] **QA-C02:** Veículo de alto valor com rastreador GPS ativo.
-  - **Preconditions:** Veículo de classe esportiva/super (`ClassChances` configurado).
+- [ ] **QA-C02:** Veículo com rastreador GPS ativo determinístico.
+  - **Preconditions:** Veículo de classe com chance 1.0 configurada (`Config.Tracker.ClassChances[6] = 1.0`, classe Esportivo).
   - **Steps:** Observar veículo e entrar como motorista.
   - **Expected:** Rastreador `ACTIVE` registrado no servidor, início da emissão periódica de pings.
   - **Observed:**
@@ -195,7 +195,7 @@
   - **Result:** PENDING
 
 - [ ] **QA-C03:** Recepção de sinal e blip policial de LoJack.
-  - **Preconditions:** Policial em serviço (`BridgeIsPolice == true`).
+  - **Preconditions:** Policial em serviço (`BridgeIsPolice == true`), veículo com LoJack `ACTIVE`.
   - **Steps:** Veículo com LoJack ativo em movimento.
   - **Expected:** Policial recebe coordenadas aproximadas / blip com raio estático; civis NÃO recebem o alerta.
   - **Observed:**
