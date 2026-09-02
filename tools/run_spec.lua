@@ -314,6 +314,24 @@ function InvCount(_, _) return 1 end
 function VPChopLeaveEvidence(_, _, _, _) end
 function VPChopArmTyreWindow(_, _) end
 function VPChopChopPartCommit(_, _, _) return { ok = true } end  -- overridden pelo spec de tyre
+function VPChopCatalyticShouldDispatch(chancePercent, rollPercent)
+    local chance = tonumber(chancePercent)
+    if not chance or chance ~= chance or chance == math.huge or chance == -math.huge then
+        chance = 30
+    end
+    chance = math.max(0, math.min(100, math.floor(chance)))
+    if chance <= 0 then return false end
+    if chance >= 100 then return true end
+
+    local roll = rollPercent
+    if roll == nil then
+        roll = math.random(1, 100)
+    else
+        roll = tonumber(roll) or 1
+        roll = math.max(1, math.min(100, math.floor(roll)))
+    end
+    return roll <= chance
+end
 
 -- [PR-D] Stubs de resource/export p/ bridge/server_vehicle.lua (discard ownership).
 _G.FAKE_RESOURCES = { qbx_core = 'started', qbx_vehicles = 'started' }

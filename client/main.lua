@@ -229,6 +229,29 @@ function VPChopTriggerDispatch(veh)
     end
 end
 
+--- [v1.18 P4.2.4] Resolve de forma pura a decisão de alerta policial para furto de catalisador (sem dupla probabilidade)
+---@param chancePercent any Percentual configurado (0 a 100)
+---@param rollPercent number|nil Valor forçado de roll (1 a 100) para testes determinísticos
+---@return boolean
+function VPChopCatalyticShouldDispatch(chancePercent, rollPercent)
+    local chance = tonumber(chancePercent)
+    if not chance or chance ~= chance or chance == math.huge or chance == -math.huge then
+        chance = 30
+    end
+    chance = math.max(0, math.min(100, math.floor(chance)))
+    if chance <= 0 then return false end
+    if chance >= 100 then return true end
+
+    local roll = rollPercent
+    if roll == nil then
+        roll = math.random(1, 100)
+    else
+        roll = tonumber(roll) or 1
+        roll = math.max(1, math.min(100, math.floor(roll)))
+    end
+    return roll <= chance
+end
+
 function VPChopCheckAlarmAndDispatch(veh, toolCfg)
     -- Alarme agora gerenciado pelo servidor via Config.Alarm (probabilidade por classe).
     -- client/alarm.lua escuta vp_chopshop:client:alarmTriggered.
@@ -1997,8 +2020,8 @@ local function doStealCatalytic(veh)
         local pass1 = lib.skillCheck(diff1, minigameCfg.Inputs or { 'w', 'a', 's', 'd' })
         if not pass1 then
             cleanupTheft(true)
-            if math.random(1, 100) <= (catCfg.PoliceAlertOnFail or 100) then
-                VPChopCheckAlarmAndDispatch(veh, tCfg)
+            if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertOnFail or 100) then
+                VPChopTriggerDispatch(veh)
             end
             VPChopNotify(L('catalytic_cut_failed'), 'error')
             return
@@ -2025,8 +2048,8 @@ local function doStealCatalytic(veh)
         local pass2 = lib.skillCheck(diff2, minigameCfg.Inputs or { 'w', 'a', 's', 'd' })
         if not pass2 then
             cleanupTheft(true)
-            if math.random(1, 100) <= (catCfg.PoliceAlertOnFail or 100) then
-                VPChopCheckAlarmAndDispatch(veh, tCfg)
+            if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertOnFail or 100) then
+                VPChopTriggerDispatch(veh)
             end
             VPChopNotify(L('catalytic_cut_failed'), 'error')
             return
@@ -2035,9 +2058,9 @@ local function doStealCatalytic(veh)
 
     cleanupTheft(false)
 
-    -- Chance normal de alerta policial por corte concluído
-    if math.random(1, 100) <= (catCfg.PoliceAlertChance or 30) then
-        VPChopCheckAlarmAndDispatch(veh, tCfg)
+    -- Chance normal de alerta policial por corte concluído (sem dupla probabilidade)
+    if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertChance or 30) then
+        VPChopTriggerDispatch(veh)
     end
 
     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:catalytic:complete', false, netId, startRes.token)

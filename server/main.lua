@@ -724,11 +724,13 @@ end)
 
 --- Cancelamento defensivo de sessão de furto de catalisador
 lib.callback.register('vp_chopshop:catalytic:cancel', function(source, netId, token)
-    if not ServerPlayerIsReady(source) then return { ok = false } end
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    if type(token) ~= 'string' or token == '' then return { ok = false, err = 'invalid_token' } end
     local theft = _catalyticThefts[source]
-    if theft and theft.token == token then
-        _catalyticThefts[source] = nil
+    if not theft or theft.token ~= token then
+        return { ok = false, err = 'no_session' }
     end
+    _catalyticThefts[source] = nil
     return { ok = true }
 end)
 

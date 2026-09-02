@@ -1094,44 +1094,212 @@ local function run()
     end
     Config.Locale = 'en'
 
+    -- ─── 32.1: Testes de Decisão de Alerta Policial (Sem Dupla Probabilidade) ──
+    do
+        check('CAT-ALERT-01 chance 100 => dispatch decision true',
+            VPChopCatalyticShouldDispatch(100, 1) == true and VPChopCatalyticShouldDispatch(100, 100) == true)
+        check('CAT-ALERT-02 chance 0 => false',
+            VPChopCatalyticShouldDispatch(0, 1) == false and VPChopCatalyticShouldDispatch(0, 100) == false)
+        check('CAT-ALERT-03 chance 30 + roll 30 => true',
+            VPChopCatalyticShouldDispatch(30, 30) == true)
+        check('CAT-ALERT-04 chance 30 + roll 31 => false',
+            VPChopCatalyticShouldDispatch(30, 31) == false)
+        check('CAT-ALERT-05 saw_pro.dispatchChance = 0.25 NÃO reduz PoliceAlertOnFail=100 para 25%',
+            VPChopCatalyticShouldDispatch(Config.CatalyticTheft.PoliceAlertOnFail, 100) == true)
+        check('CAT-ALERT-06 saw_pro.dispatchChance = 0.25 NÃO transforma PoliceAlertChance=30 em 7.5%',
+            VPChopCatalyticShouldDispatch(Config.CatalyticTheft.PoliceAlertChance, 30) == true and
+            VPChopCatalyticShouldDispatch(Config.CatalyticTheft.PoliceAlertChance, 31) == false)
+    end
+
+    -- ─── 32.2: Testes Comportamentais do Fluxo de Client ───────────────────────
+    do
+        local function simulateClientCatalyticTheft(scenario, forcedRoll)
+            local calls = {
+                cancel = 0,
+                complete = 0,
+                dispatch = 0,
+                cleanup = 0,
+                notifiedSuccess = 0,
+                notifiedFail = 0,
+                carriedSpawned = 0,
+            }
+
+            local function cleanupTheft(failed)
+                calls.cleanup = calls.cleanup + 1
+                if failed then
+                    calls.cancel = calls.cancel + 1
+                end
+            end
+
+            local catCfg = Config.CatalyticTheft or {}
+            local minigameCfg = catCfg.Minigame or { Enable = true }
+
+            -- Stage 1
+            local ok1 = (scenario ~= 'cancel_progress_1')
+            if not ok1 then
+                cleanupTheft(true)
+                return calls
+            end
+
+            local pass1 = (scenario ~= 'fail_stage_1')
+            if not pass1 then
+                cleanupTheft(true)
+                if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertOnFail or 100, forcedRoll) then
+                    calls.dispatch = calls.dispatch + 1
+                end
+                calls.notifiedFail = calls.notifiedFail + 1
+                return calls
+            end
+
+            -- Stage 2
+            local ok2 = (scenario ~= 'cancel_progress_2')
+            if not ok2 then
+                cleanupTheft(true)
+                return calls
+            end
+
+            local pass2 = (scenario ~= 'fail_stage_2')
+            if not pass2 then
+                cleanupTheft(true)
+                if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertOnFail or 100, forcedRoll) then
+                    calls.dispatch = calls.dispatch + 1
+                end
+                calls.notifiedFail = calls.notifiedFail + 1
+                return calls
+            end
+
+            cleanupTheft(false)
+
+            if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertChance or 30, forcedRoll) then
+                calls.dispatch = calls.dispatch + 1
+            end
+
+            calls.complete = calls.complete + 1
+            calls.carriedSpawned = calls.carriedSpawned + 1
+            calls.notifiedSuccess = calls.notifiedSuccess + 1
+            return calls
+        end
+
+        local simFail1 = simulateClientCatalyticTheft('fail_stage_1', 1)
+        check('CAT-FAIL-STAGE1-01 falha stage 1 cancel=1, complete=0, dispatch=1, cleanup=1',
+            simFail1.cancel == 1 and simFail1.complete == 0 and simFail1.dispatch == 1 and simFail1.cleanup == 1 and simFail1.notifiedFail == 1)
+
+        local simFail2 = simulateClientCatalyticTheft('fail_stage_2', 1)
+        check('CAT-FAIL-STAGE2-01 falha stage 2 cancel=1, complete=0, dispatch=1, cleanup=1',
+            simFail2.cancel == 1 and simFail2.complete == 0 and simFail2.dispatch == 1 and simFail2.cleanup == 1 and simFail2.notifiedFail == 1)
+
+        local simSuccess = simulateClientCatalyticTheft('success', 30)
+        check('CAT-SUCCESS-01 sucesso cancel=0, complete=1, cleanup=1, dispatch=1',
+            simSuccess.cancel == 0 and simSuccess.complete == 1 and simSuccess.cleanup == 1 and simSuccess.dispatch == 1 and simSuccess.notifiedSuccess == 1)
+
+        local simCancel = simulateClientCatalyticTheft('cancel_progress_1', 1)
+        check('CAT-CANCEL-01 progress cancelado cancel=1, complete=0, entitlement=0',
+            simCancel.cancel == 1 and simCancel.complete == 0 and simCancel.carriedSpawned == 0 and simCancel.cleanup == 1)
+    end
+
+    -- ─── 32.3: Testes de Sessão Server-Side e Cancelamento ─────────────────────
+    do
+        local mockServerThefts = {}
+        local mockToolConsumed = 0
+        local mockIssuedEntitlements = 0
+
+        local function serverStartTheft(src, netId)
+            if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+            local token = ('cat_th:%d:%d'):format(src, 1000)
+            mockServerThefts[src] = { token = token, netId = netId, startedAt = 1000, expiresAt = 9000, minDurationMs = 7000 }
+            return { ok = true, token = token, durationMs = 7000 }
+        end
+
+        local function serverCancelTheft(src, netId, token)
+            if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+            if type(token) ~= 'string' or token == '' then return { ok = false, err = 'invalid_token' } end
+            local theft = mockServerThefts[src]
+            if not theft or theft.token ~= token then
+                return { ok = false, err = 'no_session' }
+            end
+            mockServerThefts[src] = nil
+            return { ok = true }
+        end
+
+        local function serverCompleteTheft(src, netId, token)
+            if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+            if type(token) ~= 'string' or token == '' then return { ok = false, err = 'invalid' } end
+            local theft = mockServerThefts[src]
+            if not theft or theft.token ~= token or theft.netId ~= netId then
+                return { ok = false, err = 'invalid' }
+            end
+            mockServerThefts[src] = nil
+            mockToolConsumed = mockToolConsumed + 1
+            mockIssuedEntitlements = mockIssuedEntitlements + 1
+            return { ok = true, entitlementId = 'pe_cat_123', partKey = 'catalytic_converter' }
+        end
+
+        -- CAT-SERVER-CANCEL-01: Token correto limpa sessão
+        local sStart1 = serverStartTheft(1, 10)
+        local sCancel1 = serverCancelTheft(1, 10, sStart1.token)
+        check('CAT-SERVER-CANCEL-01 token correto limpa sessão', sCancel1.ok == true and mockServerThefts[1] == nil)
+
+        -- CAT-SERVER-CANCEL-02: Token incorreto NÃO limpa sessão válida
+        local sStart2 = serverStartTheft(1, 10)
+        local sCancel2 = serverCancelTheft(1, 10, 'wrong_token')
+        check('CAT-SERVER-CANCEL-02 token incorreto NÃO limpa sessão válida', sCancel2.ok == false and mockServerThefts[1] ~= nil)
+
+        -- CAT-SERVER-CANCEL-03: Outro source não cancela sessão alheia
+        local sCancel3 = serverCancelTheft(2, 10, sStart2.token)
+        check('CAT-SERVER-CANCEL-03 outro source não cancela sessão alheia', sCancel3.ok == false and mockServerThefts[1] ~= nil)
+
+        -- CAT-SERVER-CANCEL-04: Complete após cancel correto retorna invalid/no-session e gera zero entitlement
+        serverCancelTheft(1, 10, sStart2.token)
+        local toolBefore = mockToolConsumed
+        local entBefore = mockIssuedEntitlements
+        local sCompAfterCancel = serverCompleteTheft(1, 10, sStart2.token)
+        check('CAT-SERVER-CANCEL-04 complete após cancel falha e gera ZERO entitlement/tool consumption',
+            sCompAfterCancel.ok == false and mockToolConsumed == toolBefore and mockIssuedEntitlements == entBefore)
+    end
+
     -- 33: Testes de Roubo em Veículos de Outros Jogadores & Proteção Anti-Auto-Farm (BlockOwnVehicle)
-    check('OWNERSHIP-1 Jackstand BlockOwnVehicle is configured', Config.Jackstand and Config.Jackstand.BlockOwnVehicle ~= nil)
-    check('OWNERSHIP-1 Catalytic BlockOwnVehicle is configured', Config.CatalyticTheft and Config.CatalyticTheft.BlockOwnVehicle ~= nil)
+    do
+        check('OWNERSHIP-1 Jackstand BlockOwnVehicle is configured', Config.Jackstand and Config.Jackstand.BlockOwnVehicle ~= nil)
+        check('OWNERSHIP-1 Catalytic BlockOwnVehicle is configured', Config.CatalyticTheft and Config.CatalyticTheft.BlockOwnVehicle ~= nil)
 
-    -- Simulação de ownership bridge
-    local function mockIsPlayerVehicleOwner(src, pInfo)
-        if pInfo and pInfo.status == 'owned' and pInfo.ownedBy then
-            local myKey = 'player_' .. tostring(src)
-            return (myKey == pInfo.ownedBy or tostring(myKey):find(tostring(pInfo.ownedBy), 1, true) ~= nil)
+        -- Simulação de ownership bridge
+        local function mockIsPlayerVehicleOwner(src, pInfo)
+            if pInfo and pInfo.status == 'owned' and pInfo.ownedBy then
+                local myKey = 'player_' .. tostring(src)
+                return (myKey == pInfo.ownedBy or tostring(myKey):find(tostring(pInfo.ownedBy), 1, true) ~= nil)
+            end
+            return false
         end
-        return false
+
+        local otherPlayerCar = { status = 'owned', ownedBy = 'player_99' }
+        local myOwnCar       = { status = 'owned', ownedBy = 'player_1' }
+        local npcCar         = { status = 'not_owned' }
+
+        check('OWNERSHIP-2 stealing from other player vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, otherPlayerCar) == false)
+        check('OWNERSHIP-2 stealing from NPC vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, npcCar) == false)
     end
 
-    local otherPlayerCar = { status = 'owned', ownedBy = 'player_99' }
-    local myOwnCar       = { status = 'owned', ownedBy = 'player_1' }
-    local npcCar         = { status = 'not_owned' }
-
-    check('OWNERSHIP-2 stealing from other player vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, otherPlayerCar) == false)
-    check('OWNERSHIP-2 stealing from NPC vehicle is ALLOWED', mockIsPlayerVehicleOwner(1, npcCar) == false)
     -- 34: Testes de Processamento na Bancada: 3 Modos (Matérias-Primas, Serial Limpo, Serial Roubado)
-    local mockBenchDismantle = function(partKey, mode, netId)
-        if mode == 'raw_materials' then
-            return { item = 'metalscrap', amount = 6, serial = nil, state = nil }
-        elseif mode == 'clean_serial' then
-            return { item = 'car_parts', amount = 1, serial = nil, state = 'scratched' }
-        elseif mode == 'stolen_serial' then
-            return { item = 'car_parts', amount = 1, serial = 'ABC123XYZ0', state = 'stolen' }
+    do
+        local mockBenchDismantle = function(partKey, mode, netId)
+            if mode == 'raw_materials' then
+                return { item = 'metalscrap', amount = 6, serial = nil, state = nil }
+            elseif mode == 'clean_serial' then
+                return { item = 'car_parts', amount = 1, serial = nil, state = 'scratched' }
+            elseif mode == 'stolen_serial' then
+                return { item = 'car_parts', amount = 1, serial = 'ABC123XYZ0', state = 'stolen' }
+            end
         end
+
+        local rawRes = mockBenchDismantle('door_dside_f', 'raw_materials', 10)
+        check('BENCH-MODES raw_materials delivers scrap without serial', rawRes.item == 'metalscrap' and rawRes.state == nil)
+
+        local cleanRes = mockBenchDismantle('door_dside_f', 'clean_serial', 10)
+        check('BENCH-MODES clean_serial delivers scratched clean auto part', cleanRes.item == 'car_parts' and cleanRes.state == 'scratched' and cleanRes.serial == nil)
+
+        local stolenRes = mockBenchDismantle('door_dside_f', 'stolen_serial', 10)
+        check('BENCH-MODES stolen_serial delivers part with traceable serial', stolenRes.item == 'car_parts' and stolenRes.state == 'stolen' and stolenRes.serial ~= nil)
     end
-
-    local rawRes = mockBenchDismantle('door_dside_f', 'raw_materials', 10)
-    check('BENCH-MODES raw_materials delivers scrap without serial', rawRes.item == 'metalscrap' and rawRes.state == nil)
-
-    local cleanRes = mockBenchDismantle('door_dside_f', 'clean_serial', 10)
-    check('BENCH-MODES clean_serial delivers scratched clean auto part', cleanRes.item == 'car_parts' and cleanRes.state == 'scratched' and cleanRes.serial == nil)
-
-    local stolenRes = mockBenchDismantle('door_dside_f', 'stolen_serial', 10)
-    check('BENCH-MODES stolen_serial delivers part with traceable serial', stolenRes.item == 'car_parts' and stolenRes.state == 'stolen' and stolenRes.serial ~= nil)
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
