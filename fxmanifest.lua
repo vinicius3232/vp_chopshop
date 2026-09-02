@@ -155,6 +155,7 @@ server_scripts {
     -- ANTES de advanced_chop.lua (que usa VPChopAddStolenCarParts) e main.lua.
     'server/partserial.lua',
     'server/partserial_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
+    'server/forensic_scanner_spec.lua', -- [v1.18 P4.4] self-gated (vp_chopshop_selftest 1)
     -- [FASE1 placas] depois de heat.lua e progression.lua (usa VPChopMDT, Validate*, Inv*,
     -- VPChopEvt e o listener de PART_CHOPPED da progressão), antes de main.lua.
     'server/plates.lua',

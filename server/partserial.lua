@@ -92,6 +92,27 @@ local function getVehicleSerial(netId)
     return data
 end
 
+--- [v1.18 P4.4.1] Leitura estritamente read-only do serial de um veículo.
+--- Se não existir no cache VehSerial, retorna serial = nil e resolve o sourceModel do veículo existente.
+--- NUNCA chama VPChopSerialGen e NUNCA grava em VehSerial.
+---@param netId number
+---@return { serial: string|nil, sourceModel: string|nil }
+local function peekVehicleSerial(netId)
+    local cached = VehSerial[netId]
+    if cached then return cached end
+
+    local sourceModel = nil
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if veh and veh ~= 0 and DoesEntityExist(veh) then
+        local modelHash = GetEntityModel(veh)
+        if modelHash and modelHash ~= 0 then
+            sourceModel = resolveServerModelIdentifier(modelHash)
+        end
+    end
+
+    return { serial = nil, sourceModel = sourceModel }
+end
+
 -- ─── Entrega de car_parts ROUBADA (com metadata) ──────────────────────────────
 --- [SERIAL] Adiciona `count` car_parts ao inventário do jogador com metadata de peça
 --- ROUBADA: { serial, state='stolen', sourceModel }. Usada pelas recompensas do desmanche.
@@ -541,3 +562,119 @@ lib.callback.register('vp_chopshop:inspectParts', function(src, targetServerId)
 
     return { ok = true, empty = false, forensic = hasForensic, lines = lines }
 end)
+
+--- [v1.18 P4.4.1] Callback de Perícia Veicular Policial (Chassi, Motor, Catalisador, VIN, Rastreador)
+lib.callback.register('vp_chopshop:inspectVehicle', function(src, netId)
+    if not (Config.PartSerial and Config.PartSerial.Enable) then return { ok = false, err = 'disabled' } end
+    if not (Config.PartSerial.VehicleInspection and Config.PartSerial.VehicleInspection.Enable) then return { ok = false, err = 'disabled' } end
+    if not IsValidSource(src) then return { ok = false, err = 'invalid' } end
+    if not ServerPlayerIsReady(src) then return { ok = false, err = 'player' } end
+
+    -- Gate de JOB policial
+    local policeJobs = Config.PartSerial.PoliceJobs or { 'police', 'bcso', 'sheriff' }
+    if not BridgeIsPolice(src, policeJobs) then return { ok = false, err = 'not_police' } end
+
+    -- Scanner ou Forensic Kit obrigatório
+    local scannerItem = Config.PartSerial.ScannerItem or 'parts_scanner'
+    local forensicItem = Config.PartSerial.ForensicItem or 'forensic_kit'
+    local hasScanner = InvCount(src, scannerItem) >= 1
+    local hasForensic = InvCount(src, forensicItem) >= 1
+    if not hasScanner and not hasForensic then return { ok = false, err = 'no_tool' } end
+
+    -- Rate limit
+    local now = GetGameTimer()
+    if InspectCooldown[src] and now < InspectCooldown[src] then return { ok = false, err = 'cooldown' } end
+
+    -- Trust boundary do netId: número inteiro positivo finito
+    if type(netId) ~= 'number' or netId ~= math.floor(netId) or netId <= 0 or netId ~= netId or netId == math.huge or netId == -math.huge then
+        return { ok = false, err = 'invalid_net' }
+    end
+
+    local veh = NetworkGetEntityFromNetworkId(netId)
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
+    if GetEntityType and GetEntityType(veh) ~= 2 then return { ok = false, err = 'not_a_vehicle' } end
+
+    -- Proximidade policial ↔ veículo (max 5.0m)
+    if not ValidatePlayerNearVehicle(src, veh, 5.0) then return { ok = false, err = 'range' } end
+
+    InspectCooldown[src] = now + inspectCdMs()
+
+    local entState = Entity(veh).state
+    local engineMissing = (entState and (entState.vpChopEngineMissing == true or entState.engineRemoved == true)) or false
+    local catalyticStolen = (entState and entState.catalyticStolen == true) or false
+
+    -- Resolução de Placas (Domínio real: Plates / MDT)
+    local visiblePlate = ''
+    if GetVehicleNumberPlateText then
+        visiblePlate = (GetVehicleNumberPlateText(veh) or ''):gsub('^%s*(.-)%s*$', '%1'):upper()
+    end
+
+    local canonicalRealPlate = visiblePlate
+    if visiblePlate ~= '' then
+        if VPChopMDT and VPChopMDT.GetRealPlate then
+            local okMdt, real = pcall(VPChopMDT.GetRealPlate, visiblePlate)
+            if okMdt and type(real) == 'string' and real ~= '' then
+                canonicalRealPlate = real:gsub('^%s*(.-)%s*$', '%1'):upper()
+            end
+        elseif entState and entState.vpFakeRealPlate then
+            canonicalRealPlate = tostring(entState.vpFakeRealPlate):gsub('^%s*(.-)%s*$', '%1'):upper()
+        end
+    end
+
+    local plateDisguised = (canonicalRealPlate ~= '' and visiblePlate ~= '' and canonicalRealPlate ~= visiblePlate)
+    local plateOriginal = plateDisguised and canonicalRealPlate or nil
+    local plate = visiblePlate
+
+    -- Resolução de VIN (Domínio real: Heat / Scratch)
+    local vinRes = nil
+    if VPChopIsVinScratched and canonicalRealPlate ~= '' then
+        vinRes = VPChopIsVinScratched(canonicalRealPlate)
+    end
+
+    local vinStatus = 'unknown'
+    if vinRes == true then
+        vinStatus = 'scratched'
+    elseif vinRes == false then
+        vinStatus = 'intact'
+    else
+        vinStatus = 'unknown'
+    end
+    local vinScratched = (vinStatus == 'scratched')
+
+    -- Resolução de Rastreador GPS (Domínio real: TrackerManager somente-leitura)
+    local trackerStatus = 'none'
+    if TrackerManager and TrackerManager.GetVehicleState then
+        local st = TrackerManager.GetVehicleState(netId)
+        if st == 'ACTIVE' then trackerStatus = 'active'
+        elseif st == 'REMOVED' then trackerStatus = 'cut'
+        else trackerStatus = 'none'
+        end
+    end
+
+    -- Leitura somente-leitura do serial (sem fabricar serial novo)
+    local serialData = peekVehicleSerial(netId)
+
+    pcall(function()
+        if VPChopMDT and VPChopMDT.ReportActivity then
+            VPChopMDT.ReportActivity(plate, src, 'vehicle_inspected')
+        end
+    end)
+
+    return {
+        ok = true,
+        forensic = hasForensic,
+        data = {
+            engineMissing = engineMissing,
+            catalyticStolen = catalyticStolen,
+            vinStatus = vinStatus,
+            vinScratched = vinScratched,
+            trackerStatus = trackerStatus,
+            plateDisguised = plateDisguised,
+            plateOriginal = plateOriginal,
+            plate = plate,
+            sourceModel = serialData.sourceModel,
+            serial = serialData.serial,
+        }
+    }
+end)
+

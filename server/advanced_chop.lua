@@ -230,6 +230,23 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
 
     local vehCoords = getVehCoords(netId)
     if vehCoords then leaveAdvancedTrace(src, netId, vehCoords) end
+
+    -- [v1.18 P4.4] Inutilização física do veículo pós-remoção do motor (anti-farm & realismo)
+    if netId and netId > 0 then
+        local vehEnt = NetworkGetEntityFromNetworkId(netId)
+        if vehEnt and vehEnt ~= 0 and DoesEntityExist(vehEnt) then
+            if Entity then
+                Entity(vehEnt).state:set('vpChopEngineMissing', true, true)
+            end
+            if SetVehicleEngineHealth then
+                SetVehicleEngineHealth(vehEnt, -4000.0)
+            end
+            if SetVehicleUndriveable then
+                SetVehicleUndriveable(vehEnt, true)
+            end
+        end
+    end
+
     TriggerEvent(VPChopEvt.PART_CHOPPED, src, netId, 'adv_engine', 3)
     return { ok = true, partEntitlementId = peId }
 end

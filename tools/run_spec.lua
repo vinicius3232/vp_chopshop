@@ -231,7 +231,8 @@ function NetworkGetNetworkIdFromEntity(h)
     return h - 70000
 end
 function DoesEntityExist(h)
-    if h == nil or h == 0 then return false end
+    if not h or h == 0 then return false end
+    if type(h) == 'table' then return h.exists ~= false end
     if h >= 90000 then
         local n = h - 90000
         return _G.FAKE_TRUCK and _G.FAKE_TRUCK[n] ~= nil
@@ -244,6 +245,7 @@ function DoesEntityExist(h)
 end
 function GetEntityModel(h)
     if not h or h == 0 then return 0 end
+    if type(h) == 'table' then return h.model or 0 end
     if h >= 90000 then
         local n = h - 90000
         return _G.FAKE_TRUCK and _G.FAKE_TRUCK[n] and _G.FAKE_TRUCK[n].model or 0
@@ -251,9 +253,23 @@ function GetEntityModel(h)
     local n = (h or 0) - 70000
     return FAKE_VEH[n] and FAKE_VEH[n].model or 0
 end
-function GetVehicleNumberPlateText(_) return 'PLATE' end
+function GetEntityType(h)
+    if not h or h == 0 then return 0 end
+    if _G._MOCK_ENTITY_TYPES and _G._MOCK_ENTITY_TYPES[h] then
+        return _G._MOCK_ENTITY_TYPES[h]
+    end
+    if type(h) == 'table' then return h.entityType or 2 end
+    return 2
+end
+function GetVehicleNumberPlateText(h)
+    if type(h) == 'table' then return h.plate or 'PLATE' end
+    local n = (h or 0) - 70000
+    if FAKE_VEH[n] and FAKE_VEH[n].plate then return FAKE_VEH[n].plate end
+    return 'PLATE'
+end
 function GetVehicleClass(h)
     if h == nil or h == 0 then return 0 end
+    if type(h) == 'table' then return h.vehicleClass or h.vehClass or 0 end
     local n = (h or 0) - 70000
     if FAKE_VEH[n] and FAKE_VEH[n].vehicleClass ~= nil then
         return FAKE_VEH[n].vehicleClass
@@ -264,11 +280,18 @@ function GetVehicleClassFromName(model)
     return 0
 end
 function Entity(h)
-    local n = (h or 0) - 70000
-    local v = FAKE_VEH[n] or {}
+    local n = (type(h) == 'number' and (h >= 70000 and (h - 70000) or h)) or (type(h) == 'table' and (h.netId or 0)) or 0
+    local v = (type(h) == 'table' and h) or FAKE_VEH[n]
+    if not v then
+        v = {}
+        if type(n) == 'number' and n > 0 then FAKE_VEH[n] = v end
+    end
     return { state = setmetatable(
         { set = function(_, k, val) v[k] = val end },
-        { __index = function(_, k) return v[k] end }) }
+        {
+            __index = function(_, k) return v[k] end,
+            __newindex = function(_, k, val) v[k] = val end,
+        }) }
 end
 _G.NEAR = true                                                -- specs alternam p/ testar 'distance'
 function ValidatePlayerNearVehicle(_, _, _) return _G.NEAR ~= false end
@@ -297,6 +320,7 @@ _G.VPChopGetProgression = function(src) return { tier = 4, xp = 1000 } end
 _G.VPChopHeatGetLabel = function(plate) return 'frio' end
 _G.MySQL = _G.MySQL or {
     single = { await = function(q, p) return nil end },
+    scalar = { await = function(q, p) return nil end },
     query = { await = function(q, p) return { affectedRows = 1 } end },
     insert = { await = function(q, p) return 1 end },
     update = { await = function(q, p) return 1 end },
@@ -341,7 +365,13 @@ _G.FAKE_EXPORTS   = {
             if not src or src <= 0 then return nil end
             return { citizenid = 'player_' .. tostring(src) }
         end,
-    }
+    },
+    ox_inventory = {
+        AddItem = function(self, src, item, count, metadata)
+            _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1
+            return true
+        end,
+    },
 }
 function GetResourceState(r) return _G.FAKE_RESOURCES[r] or 'missing' end
 _G.exports = setmetatable({}, {
@@ -662,6 +692,45 @@ _G.Config = {
             Debug = false,
         },
     },
+    PartSerial = {
+        Enable = true,
+        PoliceJobs = { 'police', 'bcso', 'sheriff' },
+        ScannerItem = 'parts_scanner',
+        ForensicItem = 'forensic_kit',
+        InspectCooldownSeconds = 5,
+        VehicleInspection = {
+            Enable = true,
+            DurationMs = 5000,
+        },
+    },
+    CatalyticTheft = {
+        Enable = true,
+        Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+        Minigame = {
+            Enable = true,
+            Stages = 2,
+            Difficulty = { 'easy', 'medium' },
+            Inputs = { 'w', 'a', 's', 'd' },
+        },
+        SparksVfx = true,
+        PoliceAlertChance = 30,
+        PoliceAlertOnFail = 100,
+        ProgressMs = 7000,
+        Anim = {
+            dict = 'anim@scripted@heist@ig16_glass_cut@male@',
+            clip = 'cutting_loop',
+            flag = 1,
+        },
+        Payout = { min = 1200, max = 2200 },
+        BlockOwnVehicle = true,
+        DisableVehicle = true,
+        BenchMaterials = {
+            copper     = { amount = 4, chance = 1.0 },
+            metalscrap = { amount = 6, chance = 1.0 },
+            steel      = { amount = 2, chance = 1.0 },
+            car_parts  = { amount = 1, chance = 1.0 },
+        },
+    },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
 if not _G.vector3 then
@@ -758,6 +827,7 @@ dofile(base .. '/server/broker/contracts.lua')           -- [v1.17 BROKER-3] pro
 dofile(base .. '/bridge/workshop.lua')                   -- [v1.17 BROKER-4] provê WorkshopBridge
 dofile(base .. '/server/tracker.lua')                  -- [v1.18 P4.2] provê TrackerManager
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
+dofile(base .. '/server/heat.lua')                    -- [v1.18 P4.4.1] provê VPChopIsVinScratched / HeatCheck
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
 -- no-op) — nunca rodar. Só os corpos dos specs, registrados a partir daqui.
@@ -786,6 +856,7 @@ dofile(base .. '/server/broker/npc_context_spec.lua')       -- [v1.17 BROKER-5]
 dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS V2]
 dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]
 dofile(base .. '/server/dispatch_bridge_spec.lua')          -- [v1.18 P4.3 DispatchBridge]
+dofile(base .. '/server/forensic_scanner_spec.lua')          -- [v1.18 P4.4 Forensic Scanner]
 
 local anyFail = false
 for i = specStart, #threads do

@@ -35,14 +35,23 @@ local function run()
 
     -- 2) Mock de veículo e ox_inventory AddItem
     local addedItems = {}
+    local origAddItem = _G.FAKE_EXPORTS.ox_inventory and _G.FAKE_EXPORTS.ox_inventory.AddItem
     _G.FAKE_EXPORTS.ox_inventory = _G.FAKE_EXPORTS.ox_inventory or {}
     _G.FAKE_EXPORTS.ox_inventory.AddItem = function(_, src, item, count, metadata)
         addedItems[#addedItems + 1] = { src = src, item = item, count = count, metadata = metadata }
+        _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1
         return true
     end
 
+    local origPartSerial = _G.Config and _G.Config.PartSerial
     _G.Config = _G.Config or {}
-    _G.Config.PartSerial = { Enable = true }
+    _G.Config.PartSerial = {
+        Enable = true,
+        PoliceJobs = { 'police', 'bcso', 'sheriff' },
+        ScannerItem = 'parts_scanner',
+        ForensicItem = 'forensic_kit',
+        VehicleInspection = { Enable = true, DurationMs = 5000 },
+    }
 
     local netId = 501
     _G.FAKE_VEH[netId] = { model = 970598228 } -- joaat("sultan")
@@ -102,6 +111,8 @@ local function run()
         end
     end
 
+    _G.Config.PartSerial = origPartSerial
+    if origAddItem then _G.FAKE_EXPORTS.ox_inventory.AddItem = origAddItem end
     print(('[partserial/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 
