@@ -79,6 +79,22 @@
     stopCuttingLoop();
     updateOverallProgress();
 
+    // [FIX-1.3] Se completar este ponto acabou de destravar um 'strike' (ex.: golpes
+    // de marreta liberados após tirar as porcas), leva a câmera até ele — senão o
+    // ponto fica fora de quadro e o jogador não consegue clicar.
+    if (pt.primitive !== 'trace') {
+      for (const k in pointsMap) {
+        const nx = pointsMap[k];
+        if (nx && nx.primitive === 'strike' && !nx.completed && !nx._focused && isPointUnlocked(nx)) {
+          nx._focused = true;
+          setTimeout(() => {
+            if (activeMinigame && !nx.completed) postNui('minigamePointStart', { id: nx.id });
+          }, 350);
+          break;
+        }
+      }
+    }
+
     // [UX-E Auto-Advance] Segue automaticamente para o próximo corte na carcaça
     if (pt.primitive === 'trace') {
       const allKeys = Object.keys(pointsMap);

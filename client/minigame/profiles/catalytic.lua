@@ -79,7 +79,8 @@ local function pointOffset(id, fwd, rightV, up)
     end
     local knockN = id:match('^cat_knock_(%d)$')
     if knockN then
-        return -(fwd * 0.20) + (up * ((tonumber(knockN) == 1) and 0.03 or -0.03))
+        -- junta traseira do corpo do catalisador, logo atrás da flange (fica no quadro).
+        return -(fwd * 0.10) + (up * ((tonumber(knockN) == 1) and 0.04 or -0.04))
     end
     return vector3(0, 0, 0)
 end
@@ -121,8 +122,13 @@ end
 local function focusCatalyticPoint(vehicle, pointId)
     local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
     local target = exPos + pointOffset(pointId, fwd, rightV, up)
-    local camPos = target - (fwd * 0.42) - (up * 0.04) + (rightV * 0.08)
-    return camPos, target, 26.0
+    if pointId:find('^cat_knock_') then
+        -- enquadra a junta inteira (os 2 golpes de uma vez), câmera mais afastada.
+        local mid = exPos + pointOffset('cat_knock_1', fwd, rightV, up) * 0.5
+        return mid - (fwd * 0.60) - (up * 0.05) + (rightV * 0.10), mid, 34.0
+    end
+    local camPos = target - (fwd * 0.44) - (up * 0.04) + (rightV * 0.08)
+    return camPos, target, 27.0
 end
 
 Profiles.list.catalytic = {
