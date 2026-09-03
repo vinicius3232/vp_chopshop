@@ -811,6 +811,7 @@ dofile(base .. '/bridge/server_vehicle.lua')          -- [PR-D] provê BridgeRes
 dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreEntitlement
 dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
 dofile(base .. '/server/logistics/part_entitlement.lua')  -- [v1.16 SEC-1] provê PartEntitlement
+dofile(base .. '/server/logistics/bench_txn.lua')        -- [FIX-1.1] provê VPChopBenchTxn (transação real da bancada)
 dofile(base .. '/server/session/action_session.lua')     -- [PR-F] provê ActionSession
 dofile(base .. '/server/session/deliver_car_util.lua')   -- [PR-H] provê VPChopDeliverCar (marker + retry)
 dofile(base .. '/server/session/carcass_ledger.lua')     -- [P0.4] provê VPChopCarcassLedger (DB seam nil no harness)

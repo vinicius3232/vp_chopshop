@@ -263,13 +263,34 @@ PR de correção sobre `71d56e2` (merge da leva). **Não mexe em economia.**
    não perde o hammer.
 2. **Catalytic locator:** `ox_target` só com bones `exhaust*` (sem `chassis`). O
    fallback de câmera do profile (que pode usar `chassis`/offset) é separado.
-3. **`Config.TargetDistances`:** distâncias RC centralizadas (catalytic 2.0 /
-   advDoor 2.5 / engine 3.0 / carcass 3.5 / jackLower 3.5 / baseDismantle 3.0 /
-   discard 3.5 / wheel 3.0). Zero mudança de valor — só não-regressão.
+3. **`Config.TargetDistances`:** distâncias de interação centralizadas.
 4. **i18n:** os 3 profiles novos resolvem `title`/`helpText`/labels via `L(...)`;
    15 keys `mg_*` × 5 idiomas.
 5. **Docs do token** reescritos (contexto + duração mínima, não "prova de execução").
 6. **Specs:** `MG-LOCALE-1/2`, `FIX1-TXN-01..08`.
+
+### FIX-1.1 — RC parity + real txn seam (branch `fix/minigame-expansion-hardening-rc11`, PR contra `docs/post-v118-future-roadmap-prep`)
+
+PR sobre `633ff97`. **Não mexe em economia. Não toca PR #52. PR #54 permanece a base.**
+
+1. **`Config.TargetDistances` = RC real (HEAD `03838d63` da PR #52):** catalytic **1.4**,
+   advDoor **1.5**, engine **1.6**, carcass **2.0**, jackLower **2.2**, baseDismantle **2.0**,
+   discard **2.2**, wheel **1.5**. Os 2.0/2.5/3.0/3.5 do FIX-1 eram default pré-RC — corrigidos.
+2. **Engine locator (porte da PR #52):** `engineBones` montado por `GetEntityBoneIndexByName`
+   (`engine` → `bonnet`); sem nenhum dos dois → target sem bone (comportamento antigo).
+3. **Transação real (`server/logistics/bench_txn.lua`):** a ordem inviolável saiu de
+   `server/main.lua` para um módulo `VPChopBenchTxn.run(params, deps)` — **o MESMO código
+   roda no callback `benchProcessPart` e nos specs**. `FIX1-TXN-*` deixou de ser espelho:
+   exercem o helper real contra o `PartEntitlement` real (ISSUED→CONSUMED observável).
+4. **Camera bone parity (catalytic):** fallback de câmera `exhaust → _2 → _3 → _4 → chassis
+   → offset`. Locator de `ox_target` continua sem `chassis`. Specs `MG-CAT-BONE-1..4`.
+5. **Sandpaper robustness (`server/partserial.lua`):** `pcall` no `SetMetadata` +
+   releitura via `GetSlot` confirmando `state == 'scratched'`; falha verificável →
+   refund de 1 lixa, fail-closed, sem double-refund. Releitura inconclusiva → segue +
+   loga (limitação documentada da API de metadata).
+6. **Refund do hammer:** `InvAdd` do refund tem retorno checado; falha → `err='refund_failed'`
+   + `print CRITICAL` + `LogSuspicious('hammer_refund_failed')`. Nunca mascara como sucesso.
+7. **Specs:** `FIX1-TXN-00..10` (real), `MG-CAT-BONE-0..4`. Harness **2102 PASS / 0 FAIL**.
 
 ### Entrega final
 

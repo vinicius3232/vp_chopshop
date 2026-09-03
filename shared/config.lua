@@ -63,19 +63,20 @@ Config.VehicleNearLiftRadius = 4.2  -- raio de proximidade jogador↔veículo/ma
 --- Distância mínima entre bancadas (0 = desligado)
 Config.MinBenchSpacing = 4.0
 
---- [FIX-1 / RC parity] Distância de interação (`ox_target.distance`, metros) de cada
---- target do desmanche. Valores refinados na RC v1.15 — a fonte da verdade fica aqui,
---- para não regredir a UX espacial ao editar os call sites em client/main.lua.
---- `catalytic` é um bone target no escapamento → distância curta.
+--- [FIX-1.1 / RC parity] Distância de interação (`ox_target.distance`, metros) de cada
+--- target do desmanche. Valores CONGELADOS do HEAD 03838d63 da PR #52 (RC forensics gate) —
+--- a fonte da verdade fica aqui para não regredir a UX espacial ao editar os call sites
+--- em client/main.lua. NÃO relaxar para 2.0/2.5/3.0/3.5 (aqueles eram os defaults soltos
+--- pré-RC, não são RC parity).
 Config.TargetDistances = {
-    catalytic     = 2.0,   -- furto de catalisador na rua (bones exhaust*)
-    advDoor       = 2.5,   -- Fase 2: portas / capô / porta-malas (bone)
-    engine        = 3.0,   -- Fase 3: motor
-    carcass       = 3.5,   -- Fase 4: carcaça
-    jackLower     = 3.5,   -- baixar o macaco
-    baseDismantle = 3.0,   -- Fase 1: menu de desmanche básico
-    discard       = 3.5,   -- descartar veículo
-    wheel         = 3.0,   -- roubo de roda individual (bone)
+    catalytic     = 1.4,   -- furto de catalisador na rua (bones exhaust*)
+    advDoor       = 1.5,   -- Fase 2: portas / capô / porta-malas (bone)
+    engine        = 1.6,   -- Fase 3: motor (bones engine/bonnet)
+    carcass       = 2.0,   -- Fase 4: carcaça
+    jackLower     = 2.2,   -- baixar o macaco
+    baseDismantle = 2.0,   -- Fase 1: menu de desmanche básico
+    discard       = 2.2,   -- descartar veículo
+    wheel         = 1.5,   -- roubo de roda individual (bone)
 }
 
 --- Modelos de objetos colocáveis

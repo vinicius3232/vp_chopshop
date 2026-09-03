@@ -1,8 +1,10 @@
-# Minigame Expansion — LIVE QA (v1.18.2 + FIX-1)
+# Minigame Expansion — LIVE QA (v1.18.2 + FIX-1 + FIX-1.1)
 
 **Data:** 2026-09-03
-**Branches:** `feat/minigame-expansion` (leva PR-2→4, merge `71d56e2`) + `fix/minigame-expansion-hardening` (FIX-1)
-**Harness estático:** `lua tools/run_spec.lua .` → **0 FAIL**
+**Branches:** `feat/minigame-expansion` (PR-2→4) → `fix/minigame-expansion-hardening` (FIX-1, PR #54)
+→ `fix/minigame-expansion-hardening-rc11` (FIX-1.1: RC parity + txn real)
+**Harness estático:** `lua tools/run_spec.lua .` → **2102 PASS / 0 FAIL**
+(FIX1-TXN-* agora exercem `server/logistics/bench_txn.lua` real, não mock)
 **Referência de fluxo geral:** `docs/audit/RC_QA_TASKLIST.md` · `docs/audit/V116_INTEGRATION_QA.md`
 
 Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a expansão de minigames.
@@ -41,8 +43,10 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
 | B4 | Perícia da polícia na peça resultante | "série riscada / adulterada" |
 | B5 | Cancelar no meio | nada consumido, peça intacta |
 | B6 | `Config.PartSerial.ScratchMinigame.Enable = false`, restart | cai na `lib.progressBar` de 5 s (sem stack de minigame) |
+| B7 | (FIX-1.1) Forçar falha do `SetMetadata` (ex.: dropar a peça no exato instante) | callback retorna `scratch_failed`; **1× `sandpaper` devolvido** (log `Rollback da lixa`); sem double-refund |
+| B8 | (FIX-1.1) Completar normal e reperícia | releitura server-side confirma `state == 'scratched'`; peça riscada de verdade |
 
-## MG-C — Bench teardown / marreta (PR-4 + FIX-1)
+## MG-C — Bench teardown / marreta (PR-4 + FIX-1 + FIX-1.1)
 
 | # | Passo | Esperado |
 |---|---|---|
@@ -58,6 +62,8 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
 | C10 | Deixar o token **expirar** (>`MinDurationMs`+20 s parado) e completar | `expired`, fail-closed; `hammer` intacto |
 | C11 | **Motor** (`adv_engine`) e **catalisador** carregados | motor: exige marreta; **catalisador: NÃO exige** (isento — já foi cortado no furto) |
 | C12 | Peça `legal` (via `IssueLegalParts` / vendedor legal) na bancada | processa **sem** minigame (peça legal nunca entra no fluxo de carga física) |
+| C13 | (FIX-1.1) Modo inválido p/ peça (catalisador + `clean_serial` forjado no client) | `invalid_mode_for_part` **antes** do consumo do hammer — `hammer` intacto |
+| C14 | (FIX-1.1) Simular `PartEntitlement.Consume` falhar após o golpe + `InvAdd` do refund falhar | retorno `refund_failed` (não `ok`); log `CRITICAL: hammer refund FAILED` + `LogSuspicious hammer_refund_failed`; **sem 2ª peça / sem payout** |
 
 ## MG-D — Regressão dos minigames antigos (mudança no `app.js`)
 
@@ -70,18 +76,38 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
 | D5 | Roubo de **placa** (frente e trás) | `lib.skillCheck` (desde a RC-FIX-2) — inalterado |
 | D6 | Rodar tudo isso com resmon aberto | sem regressão de performance na NUI (a `strikeLoop` só roda quando há ponto `strike`) |
 
-## MG-E — Validação espacial dos targets (FIX-1)
+## MG-E — Validação espacial dos targets (FIX-1.1 / RC parity)
 
-Para cada target, aproximar/afastar e confirmar que a distância "sente" igual à v1.16
-(valores em `Config.TargetDistances`): `catalytic` 2.0 · `advDoor` 2.5 · `engine` 3.0 ·
-`carcass` 3.5 · `jackLower` 3.5 · `baseDismantle` 3.0 · `discard` 3.5 · `wheel` 3.0.
+Valores CONGELADOS do HEAD `03838d63` da PR #52 (`Config.TargetDistances`):
+`catalytic` **1.4** · `advDoor` **1.5** · `engine` **1.6** · `carcass` **2.0** ·
+`jackLower` **2.2** · `baseDismantle` **2.0** · `discard` **2.2** · `wheel` **1.5**.
+Para cada target, aproximar/afastar e confirmar que o alcance "sente" igual à RC v1.15.
 
 | # | Target | Esperado |
 |---|---|---|
-| E1 | catalytic (escapamento) | pega perto do escapamento; **não** pega mirando o teto/porta |
-| E2 | adv doors / engine / carcass | mesmo alcance de antes |
-| E3 | jack lower / base dismantle / discard | mesmo alcance de antes |
+| E1 | catalytic (escapamento) | pega colado no escapamento (~1.4 m); **não** pega mirando o teto/porta |
+| E2 | adv doors (1.5) / engine (1.6) / carcass (2.0) | alcance curto de RC; nada de 2.5/3.0/3.5 |
+| E3 | jack lower (2.2) / base dismantle (2.0) / discard (2.2) / wheel (1.5) | idem RC |
 | E4 | Editar `Config.TargetDistances.catalytic = 1.2`, restart | alcance encurta (config funciona) |
+
+### MG-E engine bone locator (FIX-1.1 — porte da PR #52)
+
+| # | Cenário | Esperado |
+|---|---|---|
+| E5 | Veículo com bone `engine` | target do motor ancora no `engine` (opção aparece sobre o motor) |
+| E6 | Veículo sem `engine` mas com `bonnet` | target ancora no `bonnet` (fallback) |
+| E7 | Veículo sem `engine` e sem `bonnet` | target do motor SEM bone (aparece pela proximidade, comportamento antigo) — nunca some nem crasha |
+
+### MG-E catalytic exhaust bone parity (FIX-1.1)
+
+Locator de `ox_target` continua **só** `exhaust`/`exhaust_2`/`exhaust_3`/`exhaust_4`
+(sem `chassis`). A câmera do minigame tem o fallback extra `chassis` → offset.
+
+| # | Cenário | Esperado |
+|---|---|---|
+| E8 | Veículo só com `exhaust_3` (sem `exhaust`/`_2`) | opção aparece no `exhaust_3`; câmera do minigame enquadra o escapamento |
+| E9 | Veículo só com `exhaust_4` | idem no `exhaust_4` |
+| E10 | Veículo sem nenhum bone de escapamento | opção de `ox_target` **não** aparece; (se forçado) a câmera cai no chassis/offset sem crash |
 
 ## MG-F — Comportamento de fallback
 

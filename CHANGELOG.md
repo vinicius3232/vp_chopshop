@@ -5,8 +5,8 @@
 ## [1.18.2] — 2026-09-03 — Expansão de minigames físicos: catalisador, série e desmonte na marreta
 
 Leva de 3 PRs sobre o stack `client/minigame/` (`docs/design/MINIGAME_EXPANSION.md`,
-PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1. Nenhuma
-mudança de balanceamento. Harness: **0 fail**.
+PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.1
+(RC parity + seam de teste real). Nenhuma mudança de balanceamento. Harness: **0 fail**.
 
 > **Versão:** `v1.19` está reservada no roadmap para _Workshop Live_ — esta leva é
 > `1.18.2` (linha v1.18.x). Versão definitiva a decidir na integração.
@@ -69,8 +69,8 @@ mudança de balanceamento. Harness: **0 fail**.
   inteiro). O fallback de **câmera** do profile (`exhaust → exhaust_2 → chassis →
   offset geométrico`) é coisa separada e continua. Distância curta preservada.
 - **Distâncias de target centralizadas (`Config.TargetDistances`):** catalytic,
-  advDoor, engine, carcass, jackLower, baseDismantle, discard, wheel — valores
-  refinados da RC v1.15, agora numa fonte única, para não regredir a UX espacial.
+  advDoor, engine, carcass, jackLower, baseDismantle, discard, wheel — numa fonte
+  única, para não regredir a UX espacial. _(Valores ajustados na FIX-1.1 abaixo.)_
 - **i18n dos profiles novos:** `catalytic.lua`, `serial_scratch.lua`,
   `bench_teardown.lua` deixam de ter strings hardcoded — `title` / `helpText` /
   labels dos pontos resolvem via `L(...)`. 15 keys `mg_*` novas em `pt`/`en`/`es`/`fr`/`tr`.
@@ -82,6 +82,34 @@ mudança de balanceamento. Harness: **0 fail**.
   consumido 1× no commit; replay de token não gera 2º processamento; token
   expirado fail-closed; refund em falha de `Consume`; peça isenta não toca hammer).
 
+### Hardening (FIX-1.1) — RC parity + seam de teste real
+
+- **`Config.TargetDistances` = valores RC reais** do HEAD `03838d63` da PR #52:
+  catalytic **1.4**, advDoor **1.5**, engine **1.6**, carcass **2.0**, jackLower **2.2**,
+  baseDismantle **2.0**, discard **2.2**, wheel **1.5**. Os `2.0/2.5/3.0/3.5` do FIX-1
+  eram default pré-RC — não eram "RC parity". Live QA (MG-E) atualizado.
+- **Engine locator (porte da PR #52):** target do motor monta `engineBones` por
+  `GetEntityBoneIndexByName` (`engine` → `bonnet`); sem os dois → target sem bone.
+- **Transação da bancada extraída para `server/logistics/bench_txn.lua`
+  (`VPChopBenchTxn.run`):** a ordem inviolável (validate → mode/policy →
+  token/tempo → outputs → capacidade → consumo do hammer → `Consume` → refund)
+  agora é **um módulo único chamado pelo callback real E pelos testes**. Os
+  `FIX1-TXN-*` deixaram de ser espelho de `server/main.lua`: exercem o helper real
+  contra o `PartEntitlement` real (transição `ISSUED → CONSUMED` observável).
+- **Refund do hammer com retorno checado:** se o `InvAdd` do refund falhar →
+  `err = 'refund_failed'` + `print CRITICAL` + `LogSuspicious('hammer_refund_failed')`.
+  Nunca mascara como refund bem-sucedido. Sem 2ª peça / sem payout.
+- **`serial:scratch` robustez (`server/partserial.lua`):** `pcall` no `SetMetadata`
+  + releitura via `GetSlot` confirmando `state == 'scratched'`. Falha verificável →
+  devolve 1 `sandpaper` (fail-closed, sem double-refund). Releitura inconclusiva →
+  segue + loga (limitação conhecida da API de metadata, sem promessa de atomicidade
+  absoluta).
+- **Camera bone parity (catalytic):** fallback de câmera
+  `exhaust → _2 → _3 → _4 → chassis → offset`. Locator de `ox_target` segue sem
+  `chassis`. Specs `MG-CAT-BONE-1..4` + `MG-E` (E8/E9/E10).
+- **Specs:** `FIX1-TXN-00..10` (real, +`refund_failed`), `MG-CAT-BONE-0..4`.
+  Harness **2102 PASS / 0 FAIL**.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi
@@ -89,6 +117,8 @@ mudança de balanceamento. Harness: **0 fail**.
 - Locale órfão da v1.16 deixado: `catalytic_cutting_stage_1/2` (não referenciado).
 - Prop `prop_tool_hammer` a confirmar in-game (há fallback `IsModelInCdimage`).
 - QA in-game: `docs/audit/MINIGAME_EXPANSION_LIVE_QA.md`.
+- **Versão não congelada:** `1.18.2` provisório; `v1.19` continua reservada para
+  _Workshop Live_ no roadmap. Definitiva a decidir na integração.
 
 ---
 

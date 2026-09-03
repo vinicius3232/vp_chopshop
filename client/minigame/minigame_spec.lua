@@ -1332,72 +1332,163 @@ local function run()
         end
     end
 
-    -- ─── [FIX-1] Ordem da transação do desmonte na marreta (benchProcessPart) ──
-    -- Espelha server/main.lua: validate ent → mode/policy → token/time (VALIDAÇÃO) →
-    -- outputs → capacidade → REVALIDA+REMOVE hammer → consume entitlement → grant.
+    -- ─── [FIX-1.1] Catalytic — paridade de bone da CÂMERA (exhaust_3/_4-only) ──────
+    -- O locator de interação (ox_target) segue SEM chassis; aqui é só o fallback de
+    -- câmera do profile: exhaust → _2 → _3 → _4 → chassis → offset geométrico.
     do
-        local function mockTeardownTxn(o)
-            local h = { count = o.hammer or 1, removed = 0, added = 0 }
-            local entConsumed = 0
-            local now = o.now or 6000
-            -- validate entitlement
-            if not o.entValid then return { ok = false, err = 'invalid' }, h, entConsumed end
-            -- mode/policy
-            if o.badMode then return { ok = false, err = 'invalid_mode' }, h, entConsumed end
-            -- token/time — VALIDAÇÃO apenas, SEM consumo
-            if o.needTeardown then
-                local td = o.td
-                if not td or td.token ~= o.token or td.entId ~= o.entId then
-                    return { ok = false, err = 'teardown_required' }, h, entConsumed
+        local CP = _G.VPChopCatalyticProfile
+        check('MG-CAT-BONE-0 profile catalytic expõe resolveExhaustData',
+            type(CP) == 'table' and type(CP.resolveExhaustData) == 'function')
+
+        if CP and CP.resolveExhaustData then
+            local origIdx = _G.GetEntityBoneIndexByName
+            local function onlyBone(target)
+                _G.GetEntityBoneIndexByName = function(_, boneName)
+                    return boneName == target and 11 or -1
                 end
-                if now < (td.startedAt + td.minMs - 250) then return { ok = false, err = 'too_fast' }, h, entConsumed end
-                if now > td.expiresAt then return { ok = false, err = 'expired' }, h, entConsumed end
             end
-            -- build outputs + capacidade
-            if o.invFull then return { ok = false, err = 'inventory_full' }, h, entConsumed end
-            -- CONSUMO TERMINAL do hammer (revalida + remove)
-            if o.needTeardown then
-                if h.count < 1 then return { ok = false, err = 'no_hammer' }, h, entConsumed end
-                h.count = h.count - 1; h.removed = h.removed + 1
+
+            onlyBone('exhaust')
+            local id = CP.resolveExhaustData(1)
+            check('MG-CAT-BONE-1 exhaust-only → ancora no bone (id ~= -1/0)', id ~= -1 and id ~= 0)
+
+            onlyBone('exhaust_3')
+            id = CP.resolveExhaustData(1)
+            check('MG-CAT-BONE-2 exhaust_3-only → ancora no bone real, sem cair no chassis',
+                id ~= -1 and id ~= 0)
+
+            onlyBone('exhaust_4')
+            id = CP.resolveExhaustData(1)
+            check('MG-CAT-BONE-3 exhaust_4-only → ancora no bone real, sem cair no chassis',
+                id ~= -1 and id ~= 0)
+
+            -- nenhum bone de escapamento → cai no fallback chassis/offset (boneId = 0)
+            _G.GetEntityBoneIndexByName = function(_, boneName)
+                return boneName == 'chassis' and 1 or -1
             end
-            -- consume entitlement (commit terminal)
-            if o.consumeFails then
-                if o.needTeardown then h.count = h.count + 1; h.added = h.added + 1 end  -- refund
-                return { ok = false, err = 'consume_fail' }, h, entConsumed
+            id = CP.resolveExhaustData(1)
+            check('MG-CAT-BONE-4 sem escapamento → fallback de camera (chassis/offset), boneId 0', id == 0)
+
+            _G.GetEntityBoneIndexByName = origIdx
+        end
+    end
+
+    -- ─── [FIX-1.1] Transação REAL do desmonte na marreta (VPChopBenchTxn.run) ──────
+    -- Sem espelho. Estes casos exercem o MESMO server/logistics/bench_txn.lua que o
+    -- callback vp_chopshop:benchProcessPart chama em runtime, contra o PartEntitlement
+    -- REAL (Issue/Validate/Consume de verdade — estado ISSUED→CONSUMED observável).
+    -- Os únicos seams injetados são as fns de inventário e o relógio.
+    do
+        local haveTxn = type(_G.VPChopBenchTxn) == 'table' and type(VPChopBenchTxn.run) == 'function'
+        check('FIX1-TXN-00 VPChopBenchTxn.run carregado (authority real, nao mock)', haveTxn)
+        local havePE = type(_G.PartEntitlement) == 'table' and type(PartEntitlement.Issue) == 'function'
+
+        local txnSeq = 0
+        --- Executa a transação real contra um entitlement real recém-emitido.
+        ---@return table res, table hstate, string eid
+        local function runTxn(o)
+            o = o or {}
+            txnSeq = txnSeq + 1
+            local src = 1
+            local partKey = o.partKey or 'door_dside_f'
+            local eid = PartEntitlement.Issue('fix11_txn_' .. txnSeq, src, partKey, 10)
+            if o.preConsume then PartEntitlement.Consume(eid, src, 'pretest') end
+
+            local hstate = { count = o.hammer or 1, removed = 0, added = 0, refundFailMarker = false }
+            local td
+            if not o.noTd then
+                td = {
+                    token = o.tdToken or 'T', entId = o.wrongEntId and 'OTHER' or eid,
+                    startedAt = o.startedAt or 0, minMs = o.minMs or 5000,
+                    expiresAt = o.expiresAt or 99999,
+                }
             end
-            entConsumed = entConsumed + 1
-            return { ok = true }, h, entConsumed
+            local cleared = false
+
+            local fakePE = o.consumeFails and setmetatable({
+                Consume = function() return { ok = false, err = 'consume_fail' } end,
+            }, { __index = PartEntitlement }) or nil
+
+            local res = VPChopBenchTxn.run({
+                source = src,
+                entitlementId = eid,
+                mode = o.mode or 'raw_materials',
+                teardownToken = o.token or 'T',
+                buildOutputs = function()
+                    return o.outputs or { { item = 'metalscrap', amount = 2 } }
+                end,
+            }, {
+                now = function() return o.now or 6000 end,
+                PartEntitlement = fakePE or PartEntitlement,
+                teardownRequired = function() return o.exempt ~= true end,
+                teardownState = function() return cleared and nil or td end,
+                clearTeardown = function() cleared = true end,
+                InvCount = function() return hstate.count end,
+                InvRemove = function(_, _, n)
+                    if hstate.count < n then return false end
+                    hstate.count = hstate.count - n; hstate.removed = hstate.removed + n; return true
+                end,
+                InvAdd = function(_, _, n)
+                    if o.refundFails then return false end
+                    hstate.count = hstate.count + n; hstate.added = hstate.added + n; return true
+                end,
+                InvCanCarry = function() return not o.invFull end,
+                hammerItem = 'hammer',
+                onRefundFail = function() hstate.refundFailMarker = true end,
+            })
+            return res, hstate, eid
         end
 
-        local goodTd = function() return { token = 'T', entId = 'E', startedAt = 0, minMs = 5000, expiresAt = 99999 } end
-        local r, h, ec
+        if haveTxn and havePE then
+            local r, h, eid
 
-        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, invFull = true, token = 'T', entId = 'E', td = goodTd() })
-        check('FIX1-TXN-01 hammer NAO consumido em inventory_full', r.err == 'inventory_full' and h.removed == 0)
+            r, h = runTxn({ invFull = true })
+            check('FIX1-TXN-01 hammer NAO consumido em inventory_full', r.err == 'inventory_full' and h.removed == 0)
 
-        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, badMode = true, token = 'T', entId = 'E', td = goodTd() })
-        check('FIX1-TXN-02 hammer NAO consumido em invalid_mode', r.err == 'invalid_mode' and h.removed == 0)
+            r, h = runTxn({ partKey = 'catalytic_converter', mode = 'clean_serial' })
+            check('FIX1-TXN-02 hammer NAO consumido em modo invalido p/ peca (catalytic)',
+                r.err == 'invalid_mode_for_part' and h.removed == 0)
 
-        r, h = mockTeardownTxn({ entValid = false, needTeardown = true })
-        check('FIX1-TXN-03 hammer NAO consumido em entitlement invalido', r.err == 'invalid' and h.removed == 0)
+            r, h = runTxn({ preConsume = true })
+            check('FIX1-TXN-03 hammer NAO consumido: entitlement ja consumido',
+                r.err == 'already_consumed' and h.removed == 0)
 
-        r, h, ec = mockTeardownTxn({ entValid = true, needTeardown = true, token = 'T', entId = 'E', td = goodTd() })
-        check('FIX1-TXN-04 commit valido: hammer 1x + entitlement 1x', r.ok == true and h.removed == 1 and ec == 1)
+            r, h, eid = runTxn({})
+            check('FIX1-TXN-04 commit valido: hammer 1x + entitlement CONSUMED (estado real)',
+                r.ok == true and h.removed == 1
+                and select(2, PartEntitlement.Validate(eid, 1)) == 'already_consumed')
 
-        -- replay: token já consumido no server → _benchTeardowns limpo → td = nil na 2a chamada
-        r, h, ec = mockTeardownTxn({ entValid = true, needTeardown = true, token = 'T', entId = 'E', td = nil })
-        check('FIX1-TXN-05 replay do token: sem 2o processamento', r.err == 'teardown_required' and h.removed == 0 and ec == 0)
+            -- replay real: 2a chamada com o MESMO entitlement (agora CONSUMED)
+            r, h = runTxn({ preConsume = true, noTd = true })
+            check('FIX1-TXN-05 replay: 2o benchProcess sem 2o consumo nem hammer',
+                r.err == 'already_consumed' and h.removed == 0)
 
-        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, token = 'T', entId = 'E',
-            td = { token = 'T', entId = 'E', startedAt = 0, minMs = 5000, expiresAt = 5000 }, now = 20000 })
-        check('FIX1-TXN-06 token expirado: fail-closed, hammer intacto', r.err == 'expired' and h.removed == 0)
+            -- replay do token puro: entitlement fresco mas sem sessão de desmonte
+            r, h = runTxn({ noTd = true })
+            check('FIX1-TXN-05b token de desmonte ausente: teardown_required, hammer intacto',
+                r.err == 'teardown_required' and h.removed == 0)
 
-        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, consumeFails = true, token = 'T', entId = 'E', td = goodTd() })
-        check('FIX1-TXN-07 falha no consume terminal: hammer devolvido', r.err == 'consume_fail' and h.removed == 1 and h.added == 1)
+            r, h = runTxn({ minMs = 5000, now = 1000 })
+            check('FIX1-TXN-06 minigame rapido demais: too_fast, hammer intacto',
+                r.err == 'too_fast' and h.removed == 0)
 
-        -- peça isenta (catalytic): needTeardown=false → nunca toca hammer
-        r, h = mockTeardownTxn({ entValid = true, needTeardown = false })
-        check('FIX1-TXN-08 peca isenta: hammer nao envolvido', r.ok == true and h.removed == 0)
+            r, h = runTxn({ expiresAt = 5000, now = 20000 })
+            check('FIX1-TXN-07 token expirado: fail-closed, hammer intacto',
+                r.err == 'expired' and h.removed == 0)
+
+            r, h = runTxn({ consumeFails = true })
+            check('FIX1-TXN-08 falha no consume terminal: hammer devolvido (refund ok)',
+                r.err == 'consume_fail' and h.removed == 1 and h.added == 1 and r.refundFailed == false)
+
+            r, h = runTxn({ consumeFails = true, refundFails = true })
+            check('FIX1-TXN-09 consume-fail + refund-fail: NAO mascara, marca suporte',
+                r.err == 'refund_failed' and r.refundFailed == true
+                and h.removed == 1 and h.added == 0 and h.refundFailMarker == true)
+
+            r, h = runTxn({ exempt = true, partKey = 'catalytic_converter', mode = 'raw_materials' })
+            check('FIX1-TXN-10 peca isenta (catalytic): commit sem tocar no hammer',
+                r.ok == true and h.removed == 0)
+        end
     end
 
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))

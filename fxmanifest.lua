@@ -122,6 +122,9 @@ server_scripts {
     -- [v1.16 SEC-1] logística física de peças de carro e catalisador: entitlement autoritativo
     'server/logistics/part_entitlement.lua',
     'server/logistics/part_entitlement_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
+    -- [FIX-1.1] transação da bancada (ordem inviolável hammer/entitlement). Antes de
+    -- server/main.lua; usa PartEntitlement carregado acima.
+    'server/logistics/bench_txn.lua',
     -- [v1.15 PR-F] ActionSession core (autorização temporal + commit). Depois da
     -- ChopSession; usa VPChopHasTool/VPChopChopPartCommit em runtime (main.lua carrega
     -- depois). O executor de domínio (base_tyre) carrega DEPOIS de main.lua.

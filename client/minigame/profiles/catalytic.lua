@@ -5,7 +5,8 @@
 --  + corte" de scripts do gênero — implementação autoral):
 --    2 pontos 'drill' — braçadeiras de fixação do catalisador
 --    2 pontos 'cut'   — seccionamento dos tubos dianteiro e traseiro
---  Câmera por baixo/atrás no bone `exhaust` (fallback exhaust_2 → chassis → offset).
+--  Câmera por baixo/atrás no escapamento (fallback exhaust → _2 → _3 → _4 →
+--  chassis → offset; só a câmera usa chassis, o locator de ox_target não).
 --  Usado por doStealCatalytic (client/main.lua). O gate de tempo mínimo continua
 --  sendo o token temporal de `vp_chopshop:catalytic:start` (server).
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -18,16 +19,23 @@ local Proj = _G.VPChopProjection
 local CatalyticProfile = {}
 
 --- Resolve o centro do escapamento + vetores locais do veículo.
---- Ordem de fallback do bone: exhaust → exhaust_2 → chassis → offset geométrico traseiro.
+--- [FIX-1.1] Fallback de CÂMERA (só do profile — NÃO é o locator de interação, que
+--- continua sem `chassis`): exhaust → exhaust_2 → exhaust_3 → exhaust_4 → chassis →
+--- offset geométrico traseiro. O `chassis` aqui é aceitável porque só posiciona a
+--- câmera; a opção de ox_target nunca ancora nele.
+local EXHAUST_BONES = { 'exhaust', 'exhaust_2', 'exhaust_3', 'exhaust_4' }
+
 local function resolveExhaustData(vehicle)
     if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
         return -1, vector3(0, 0, 0), 1.0, vector3(0, 1, 0), vector3(1, 0, 0), vector3(0, 0, 1)
     end
 
-    local boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, 'exhaust')
-    if boneId == -1 then
-        boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, 'exhaust_2')
+    local boneId, bonePos, sideSign, fwd, rightV, up = -1, nil, nil, nil, nil, nil
+    for _, boneName in ipairs(EXHAUST_BONES) do
+        boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, boneName)
+        if boneId ~= -1 then break end
     end
+
     if boneId == -1 then
         -- 'chassis' existe em praticamente todo veículo, mas fica no centro — puxa
         -- para a traseira-baixa onde o escapamento realmente está.
@@ -102,4 +110,6 @@ Profiles.list.catalytic = {
 }
 
 CatalyticProfile.resolveExhaustData = resolveExhaustData
+CatalyticProfile.EXHAUST_BONES = EXHAUST_BONES
+_G.VPChopCatalyticProfile = CatalyticProfile  -- [FIX-1.1] acesso p/ specs de bone parity
 return CatalyticProfile
