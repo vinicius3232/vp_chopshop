@@ -263,6 +263,12 @@ function Core.Start(vehicle, profileName, opts)
     SetNuiFocus(false, false)
     SendNUIMessage({ action = 'minigame:stop' })
     ClearPedTasks(ped)
+    -- [FIX-1.3] Contraparte do setupPed: o profile pode restaurar a pose/posição do
+    -- ped (ex.: catalytic tira o jogador do cenário de mecânico deitado e o devolve
+    -- de pé onde começou, antes do carry do catalisador).
+    if profile and profile.teardownPed then
+        pcall(profile.teardownPed, ped, vehicle)
+    end
     CamCtrl.Destroy(400)
 
     isRunning = false

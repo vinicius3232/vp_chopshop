@@ -769,7 +769,12 @@ lib.callback.register('vp_chopshop:catalytic:start', function(source, netId)
         netId         = netId,
         startedAt     = now,
         minDurationMs = minDurationMs,
-        expiresAt     = now + minDurationMs + 8000,
+        -- [FIX-1.3] Janela de replay generosa: o minigame do catalisador é
+        -- player-paced e pode passar de 20 s (4 porcas + golpes + câmera). O
+        -- anti-abuso real é `too_fast` (minDurationMs) + at-most-once do
+        -- PartEntitlement, não esta expiração — ela só coleta sessão abandonada.
+        -- Cobre o timeout client do minigame (minMs + 20000) + folga de rede.
+        expiresAt     = now + minDurationMs + 30000,
     }
 
     return { ok = true, token = token, durationMs = minDurationMs }

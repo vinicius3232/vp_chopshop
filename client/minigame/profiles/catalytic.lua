@@ -60,11 +60,18 @@ local KNOCK_HITS     = 4        -- golpes de marreta por ponto (subiu de 3)
 
 --- [FIX-1.3] Jogador DEITADO de costas trabalhando embaixo do carro (creeper de
 --- mecânico) em vez do ajoelhado genérico. Devolve `true` → o core não toca o
---- TaskPlayAnim padrão.
+--- TaskPlayAnim padrão. A pose/posição original é guardada e restaurada no
+--- `teardownPed` (senão o jogador levanta no lugar errado / dentro do carro).
+local _savedPed = nil
+
 local function setupCatalyticPed(ped, vehicle)
     if type(TaskStartScenarioInPlace) ~= 'function' then
         return false  -- sem o native → deixa o core tocar o anim de fallback
     end
+    _savedPed = {
+        coords  = GetEntityCoords(ped),
+        heading = GetEntityHeading(ped),
+    }
     if ClearPedTasksImmediately then ClearPedTasksImmediately(ped) end
     -- posiciona os pés do jogador para o carro, na traseira, e desliza pra baixo
     if vehicle and vehicle ~= 0 and DoesEntityExist(vehicle) and GetOffsetFromEntityInWorldCoords then
@@ -78,6 +85,22 @@ local function setupCatalyticPed(ped, vehicle)
     end
     TaskStartScenarioInPlace(ped, 'WORLD_HUMAN_VEHICLE_MECHANIC', 0, true)
     return true
+end
+
+--- Sai do cenário e devolve o jogador de pé, onde começou o furto.
+local function teardownCatalyticPed(ped)
+    if ClearPedTasksImmediately then ClearPedTasksImmediately(ped) end
+    if _savedPed then
+        local s = _savedPed
+        _savedPed = nil
+        if SetEntityCoordsNoOffset then
+            SetEntityCoordsNoOffset(ped, s.coords.x, s.coords.y, s.coords.z, false, false, false)
+        elseif SetEntityCoords then
+            SetEntityCoords(ped, s.coords.x, s.coords.y, s.coords.z, false, false, false, false)
+        end
+        if SetEntityHeading then SetEntityHeading(ped, s.heading) end
+    end
+    if ClearPedSecondaryTask then ClearPedSecondaryTask(ped) end
 end
 
 local function calculateCatalyticCamera(vehicle, boneKey)
@@ -164,6 +187,7 @@ Profiles.list.catalytic = {
     focusPoint      = focusCatalyticPoint,
     generatePoints  = generateCatalyticPoints,
     setupPed        = setupCatalyticPed,
+    teardownPed     = teardownCatalyticPed,
 }
 
 CatalyticProfile.resolveExhaustData = resolveExhaustData

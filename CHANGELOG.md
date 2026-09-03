@@ -161,6 +161,13 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
   pra junta traseira (os 2 pontos de marreta ficavam fora de quadro e o minigame
   travava em 4/6). `app.js:completePoint` dispara `minigamePointStart` do primeiro
   `strike` recém-destravado; golpes reposicionados perto da flange.
+- **Ao terminar:** o jogador levantava no lugar errado (às vezes dentro do carro) e
+  o catalisador não vinha na mão. Corrigido: `catalytic.lua:setupPed` guarda coords
+  + heading originais e o novo `teardownPed` (chamado por `core.lua` depois do
+  `ClearPedTasks`) tira o jogador do cenário e o devolve de pé onde começou. E a
+  janela de replay de `catalytic:start` subiu de `+8000` para `+30000` ms — com o
+  minigame mais longo o `catalytic:complete` chegava depois de `expiresAt` e voltava
+  `expired` (o anti-abuso real continua sendo `too_fast` + at-most-once).
 
 ### Notes
 
