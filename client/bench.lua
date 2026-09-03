@@ -190,13 +190,93 @@ end
 -- 4. PROCESSAMENTO DE PEÇA FÍSICA CARREGADA
 -- ─────────────────────────────────────────────────────────────────────────────
 
+--- [PR-4] Prop de marreta na mão durante o desmonte. Retorna o handle (ou nil).
+local function spawnHammerProp()
+    local cfg = ((Config.PhysicalCarry or {}).Teardown or {}).HammerProp
+    if type(cfg) ~= 'table' or not cfg.model then return nil end
+    local model = cfg.model
+    if type(IsModelInCdimage) == 'function' and not IsModelInCdimage(model) then return nil end
+    local hash = type(model) == 'number' and model or GetHashKey(model)
+    RequestModel(hash)
+    local t0 = GetGameTimer()
+    while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 1500) do Wait(20) end
+    if not HasModelLoaded(hash) then return nil end
+    local ped  = PlayerPedId()
+    local pos  = GetEntityCoords(ped)
+    local prop = CreateObject(hash, pos.x, pos.y, pos.z, true, true, false)
+    SetModelAsNoLongerNeeded(hash)
+    if not prop or prop == 0 then return nil end
+    SetEntityAsMissionEntity(prop, true, true)
+    local off = cfg.offset   or { 0.10, 0.02, 0.0 }
+    local rot = cfg.rotation or { 0, 0, 0 }
+    AttachEntityToEntity(prop, ped, GetPedBoneIndex(ped, 28422),
+        off[1], off[2], off[3], rot[1], rot[2], rot[3], true, true, false, true, 1, true)
+    return prop
+end
+
+--- [PR-4] Desmonte na marreta antes de processar a peça roubada (profile
+--- bench_teardown, primitive 'strike'). Retorna true se pode seguir para o
+--- benchProcessPart, + o token server-side (nil no fluxo legacy/isento).
+---@return boolean ok, string|nil token
+local function runTeardownGate(benchId, partKey, entId)
+    local td = (Config.PhysicalCarry or {}).Teardown
+    if not td or td.Enable == false then return true, nil end
+    if td.ExemptParts and td.ExemptParts[partKey] then return true, nil end
+
+    local hammerItem = td.HammerItem or 'hammer'
+    if (exports.ox_inventory:Search('count', hammerItem) or 0) < 1 then
+        VPChopNotify(L('bench_teardown_no_hammer'), 'error')
+        return false, nil
+    end
+
+    local sOk, st = pcall(lib.callback.await, 'vp_chopshop:bench:teardownStart', false, benchId, entId)
+    if not sOk or not st or not st.ok then
+        VPChopNotify(VPChopLocaleErr(st and st.err) or L('notify_generic_error'), 'error')
+        return false, nil
+    end
+
+    local minMs = tonumber(st.minDurationMs) or 5000
+    local startMs = GetGameTimer()
+    local prop = spawnHammerProp()
+
+    local done
+    if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        done = VPChopDismantleMinigame.Start(cache.ped, td.Profile or 'bench_teardown', {
+            timeout = minMs + 20000,
+            anim    = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+        })
+    else
+        done = lib.progressBar({
+            duration = minMs, label = L('bench_processing_part'), useWhileDead = false,
+            canCancel = true, disable = { move = true, car = true, combat = true },
+            anim = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+        })
+    end
+
+    if prop and DoesEntityExist(prop) then DetachEntity(prop, true, true); DeleteEntity(prop) end
+
+    if not done then
+        pcall(lib.callback.await, 'vp_chopshop:bench:teardownCancel', false, st.token)
+        return false, nil
+    end
+
+    -- [SEC] o server rejeita 'too_fast' abaixo de minDurationMs — espera o restante.
+    local elapsed = GetGameTimer() - startMs
+    if elapsed < minMs then Wait(minMs - elapsed + 150) end
+    return true, st.token
+end
+
 local function executeBenchPartMode(benchId, mode)
     if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
-    local entId = VPChopCarryingPart.entitlementId
+    local entId   = VPChopCarryingPart.entitlementId
+    local partKey = VPChopCarryingPart.partKey
     if not entId then
         VPChopNotify(L('notify_generic_error'), 'error')
         return
     end
+
+    local gateOk, teardownToken = runTeardownGate(benchId, partKey, entId)
+    if not gateOk then return end
 
     local labels = {
         raw_materials = L('bench_progress_raw') or 'Desmanchando peça em matérias-primas...',
@@ -213,7 +293,7 @@ local function executeBenchPartMode(benchId, mode)
     })
     if not ok then return end
 
-    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchProcessPart', false, benchId, entId, mode)
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:benchProcessPart', false, benchId, entId, mode, teardownToken)
     if not cbOk or not res or not res.ok then
         VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error')
         return

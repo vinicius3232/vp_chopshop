@@ -5,7 +5,7 @@ game 'gta5'
 name 'vp_chopshop'
 author 'HAZE STUDIOS - LORD 32 DEV'
 description 'Chop shop with lift and bench — ox_lib, ox_target, ox_inventory, oxmysql. Locales: en, pt, es, fr, tr.'
-version '1.15.0-rc1'
+version '1.19.0'
 
 dependencies {
     'ox_lib',
@@ -50,6 +50,9 @@ client_scripts {
     'client/minigame/profiles/panels.lua',
     'client/minigame/profiles/engine.lua',
     'client/minigame/profiles/carcass.lua',
+    'client/minigame/profiles/catalytic.lua',       -- [PR-2] furto de catalisador
+    'client/minigame/profiles/serial_scratch.lua',  -- [PR-3] lixar série na bancada
+    'client/minigame/profiles/bench_teardown.lua',  -- [PR-4] desmonte na marreta
     'client/minigame/profiles.lua',
     'client/minigame/fallback.lua',
     'client/minigame/core.lua',
@@ -173,8 +176,9 @@ server_scripts {
 }
 
 -- [P0.2b] stream/ removido por completo. Continha só:
---   · bolt.ydr + wheel_spacer.ytyp — parafuso 3D do minigame, do pacote PAGO
---     `ls_bolt_minigame` (o minigame roda em modo marcador, DrawMarker, sem asset);
+--   · bolt.ydr + wheel_spacer.ytyp — parafuso 3D do minigame legado (pacote PAGO
+--     `ls_bolt_minigame`). O minigame legado (runBoltSurface) foi removido pós-v1.18;
+--     roubo de pneu/placa usa o stack client/minigame/ e lib.skillCheck.
 --   · nacelle.* + lr_supermod_* — props do ELEVADOR, removido do sistema há tempo
 --     (só o macaco `imp_prop_axel_stand_01a`, base game, é usado — Config.Jackstand).
 -- Nenhum é referenciado no código. Repo vai a público → sem IP de terceiros.

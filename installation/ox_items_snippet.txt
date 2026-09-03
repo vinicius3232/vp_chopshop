@@ -67,6 +67,22 @@
     description = 'Chave de fenda para remoção de placas de veículos e desarme de alarmes.',
 },
 
+['sandpaper'] = {
+    label = 'Lixa de metal',
+    weight = 120,
+    stack = true,
+    close = true,
+    description = 'Lixa abrasiva para apagar o número de série gravado em peças de carro.',
+},
+
+['hammer'] = {
+    label = 'Marreta',
+    weight = 1800,
+    stack = true,
+    close = true,
+    description = 'Marreta para desmontar peças roubadas na bancada antes de processá-las.',
+},
+
 -- ─── Peças e Commodities Automotivas ──────────────────────────────────────────
 
 ['chopshop_tyre'] = {

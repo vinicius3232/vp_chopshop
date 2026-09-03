@@ -479,9 +479,7 @@ _G.Config = {
         Bones = { 'exhaust', 'exhaust_2', 'chassis' },
         Minigame = {
             Enable = true,
-            Stages = 2,
-            Difficulty = { 'easy', 'medium' },
-            Inputs = { 'w', 'a', 's', 'd' },
+            Profile = 'catalytic',
         },
         SparksVfx = true,
         PoliceAlertChance = 30,
@@ -708,9 +706,7 @@ _G.Config = {
         Bones = { 'exhaust', 'exhaust_2', 'chassis' },
         Minigame = {
             Enable = true,
-            Stages = 2,
-            Difficulty = { 'easy', 'medium' },
-            Inputs = { 'w', 'a', 's', 'd' },
+            Profile = 'catalytic',
         },
         SparksVfx = true,
         PoliceAlertChance = 30,
@@ -799,6 +795,9 @@ dofile(base .. '/client/minigame/projection.lua')    -- [UX-A] ProjectionHelper
 dofile(base .. '/client/minigame/profiles/panels.lua')-- [UX-C] Panel Profiles
 dofile(base .. '/client/minigame/profiles/engine.lua')-- [UX-D] Engine Profile
 dofile(base .. '/client/minigame/profiles/carcass.lua')-- [UX-E] Carcass Profile
+dofile(base .. '/client/minigame/profiles/catalytic.lua')-- [PR-2] Catalytic Profile
+dofile(base .. '/client/minigame/profiles/serial_scratch.lua')-- [PR-3] Serial Scratch Profile
+dofile(base .. '/client/minigame/profiles/bench_teardown.lua')-- [PR-4] Bench Teardown Profile
 dofile(base .. '/client/minigame/profiles.lua')      -- [UX-A] Profiles Registry
 dofile(base .. '/client/minigame/fallback.lua')      -- [UX-A] Minigame Fallback
 dofile(base .. '/client/minigame/core.lua')          -- [UX-A] VPChopDismantleMinigame Core

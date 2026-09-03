@@ -907,321 +907,6 @@ local function hasNearbyWelder(pos, radius)
     return false
 end
 
--- ─── Bolt minigame (inline — evita problema de carregamento cross-file lua54) ──
--- Spawna parafusos 3D (bolt.ydr) na face da roda; jogador segura [E] para girar.
--- Fallback: lib.skillCheck se o modelo não carregar.
-do
-    local BOLT_MODEL = 'bolt'
-
-    local function boltCfg()
-        local m = Config.Jackstand and Config.Jackstand.Minigame
-        return (m and m.Bolt3D) or {}
-    end
-
-    -- Converte coords do mundo para coords de tela (0..1). Usa a native do CFX;
-    -- se indisponível, o pcall em volta do loop cai no fallback skillCheck.
-    local function world2screen(x, y, z)
-        local ok, on, sx, sy = pcall(GetScreenCoordFromWorldCoord, x, y, z)
-        if not ok then return false, 0.0, 0.0 end
-        return on, sx or 0.0, sy or 0.0
-    end
-
-    function VPChopBoltMinigameFallback()
-        local jmg   = Config.Jackstand and Config.Jackstand.Minigame
-        local diffs = (jmg and jmg.SkillCheckDifficulties) or { 'easy', 'medium', 'medium' }
-        local keys  = (jmg and jmg.SkillCheckKeys)         or { 'e', 'e', 'e' }
-        local passed = lib.skillCheck(diffs, keys)
-        if not passed then VPChopNotify(L('tyremission_minigame_fail'), 'error') end
-        return passed
-    end
-
-    -- ─── Núcleo genérico do minigame de parafusos ────────────────────────────
-    -- Recebe os pontos (world) onde spawnar cada parafuso + parâmetros de câmera e
-    -- giro. Serve tanto para a RODA (parafusos em círculo) quanto para a PLACA
-    -- (parafusos nos cantos). Retorna: true = concluído · false = cancelar/timeout
-    -- · 'fallback' = não conseguiu spawnar (modelo/pontos) → caller usa skillCheck.
-    -- o = { points={vec3...}, outward=vec3, camPos=vec3, lookAt=vec3,
-    --       baseRot={x,y,z}, needed, sens, hoverR, timeout, fov }
-    local function runBoltSurface(o)
-        if not o.points or #o.points == 0 then return 'fallback' end
-
-        -- O modelo do parafuso (bolt.ydr) é OPCIONAL: só carrega se houver um archetype .ytyp
-        -- válido — sem isso, RequestModel nunca completa. Então tentamos por pouco tempo e, se
-        -- não der, rodamos em MODO MARCADOR (parafuso desenhado via DrawMarker, sem entidade).
-        -- O minigame SEMPRE roda — nunca cai silenciosamente no skillCheck por falta de modelo.
-        local boltHash = GetHashKey(BOLT_MODEL)
-        local hasModel = false
-        if IsModelValid(boltHash) then
-            RequestModel(boltHash)
-            local t0 = GetGameTimer()
-            while not HasModelLoaded(boltHash) do
-                if GetGameTimer() - t0 > 1500 then break end
-                Wait(50)
-            end
-            hasModel = HasModelLoaded(boltHash)
-        end
-
-        local cam = CreateCamWithParams('DEFAULT_SCRIPTED_CAMERA',
-            o.camPos.x, o.camPos.y, o.camPos.z, 0.0, 0.0, 0.0, o.fov or 45.0, false, 0)
-        PointCamAtCoord(cam, o.lookAt.x, o.lookAt.y, o.lookAt.z)
-        SetCamActive(cam, true)
-        RenderScriptCams(true, true, 600, true, true)
-
-        local br    = o.baseRot or { x = 0.0, y = 0.0, z = 0.0 }
-        local bolts = {}
-        for i = 1, #o.points do
-            local p   = o.points[i]
-            local obj = nil
-            if hasModel then
-                obj = CreateObject(boltHash, p.x, p.y, p.z, true, true, false)
-                if obj and obj ~= 0 then
-                    SetEntityCollision(obj, false, false)
-                    SetEntityRotation(obj, br.x, br.y, br.z, 5, true)
-                    FreezeEntityPosition(obj, true)
-                else
-                    obj = nil
-                end
-            end
-            bolts[#bolts + 1] = { ent = obj, pos = p, deg = 0.0, done = false }
-        end
-        if hasModel then SetModelAsNoLongerNeeded(boltHash) end
-
-        local needed  = o.needed  or 720.0
-        local sens    = o.sens    or 900.0
-        local hoverR  = o.hoverR  or 0.06
-        local timeout = o.timeout or 30000
-        local outward = o.outward or vector3(0.0, 0.0, 1.0)
-
-        local ped = PlayerPedId()
-        RequestAnimDict('mini@repair')
-        t0 = GetGameTimer()
-        while not HasAnimDictLoaded('mini@repair') do
-            if GetGameTimer() - t0 > 2000 then break end
-            Wait(10)
-        end
-        if HasAnimDictLoaded('mini@repair') then
-            TaskPlayAnim(ped, 'mini@repair', 'fixing_a_player', 8.0, -1.0, -1, 49, 0.0, false, false, false)
-        end
-
-        lib.showTextUI(L('bolt_minigame_help'), { position = 'top-center', icon = 'wrench' })
-
-        local remaining      = #bolts
-        local startMs        = GetGameTimer()
-        local prevCx, prevCy = GetControlNormal(0, 239), GetControlNormal(0, 240)
-        local result         = nil  -- nil = a correr; true = concluído; false = cancelar/timeout; 'fallback' = geometria/câmera quebrada
-        local unprojSince    = nil  -- ms desde que NENHUM parafuso projeta na tela (câmera/geometria off)
-
-        local function cleanup()
-            lib.hideTextUI()
-            for _, b in ipairs(bolts) do
-                if b.ent and DoesEntityExist(b.ent) then DeleteEntity(b.ent) end
-            end
-            ClearPedTasks(ped)
-            RenderScriptCams(false, true, 400, true, true)
-            DestroyCam(cam, false)
-        end
-
-        local ok = pcall(function()
-            while result == nil do
-                Wait(0)
-
-                if GetGameTimer() - startMs > timeout then result = false; break end
-                -- Cancelar: ESC (322) ou BACKSPACE (177)
-                if IsControlJustReleased(0, 322) or IsControlJustReleased(0, 177) then
-                    result = false; break
-                end
-
-                -- Cursor do mouse ativo; bloquear tiro/mira/câmera/movimento
-                SetMouseCursorActiveThisFrame()
-                DisableControlAction(0, 24, true)   -- attack (clique esquerdo)
-                DisableControlAction(0, 25, true)   -- aim
-                DisableControlAction(0, 1,  true)   -- look LR
-                DisableControlAction(0, 2,  true)   -- look UD
-                DisableControlAction(0, 30, true)   -- move LR
-                DisableControlAction(0, 31, true)   -- move UD
-                DisableControlAction(0, 22, true)   -- jump
-                DisablePlayerFiring(ped, true)
-
-                local cx      = GetControlNormal(0, 239)
-                local cy      = GetControlNormal(0, 240)
-                local holding = IsDisabledControlPressed(0, 24)
-
-                -- 1ª passada: localizar o parafuso sob o cursor
-                local hovered, bestDist = nil, hoverR
-                local anyProjected = false
-                for _, b in ipairs(bolts) do
-                    if not b.done then
-                        local on, sx, sy = world2screen(b.pos.x, b.pos.y, b.pos.z)
-                        if on then
-                            anyProjected = true
-                            local dx, dy = sx - cx, sy - cy
-                            local d = math.sqrt(dx * dx + dy * dy)
-                            if d < bestDist then bestDist = d; hovered = b end
-                        end
-                    end
-                end
-
-                -- Se NENHUM parafuso ativo projeta na tela por >2.5 s, a câmera/geometria
-                -- está errada (RC-FINDING-01). Degrada para o skillCheck em vez de travar
-                -- o jogador num minigame invisível.
-                if anyProjected then
-                    unprojSince = nil
-                else
-                    unprojSince = unprojSince or GetGameTimer()
-                    if GetGameTimer() - unprojSince > 2500 then result = 'fallback'; break end
-                end
-
-                -- 2ª passada: marcador. Cor vai de vermelho (0%) → verde (100%) conforme rosqueia;
-                -- o que está sob o cursor fica mais opaco. Dá feedback de giro mesmo sem o modelo 3D.
-                for _, b in ipairs(bolts) do
-                    if not b.done then
-                        local prog = math.min(1.0, b.deg / needed)
-                        local mr = math.floor(230 * (1.0 - prog) + 60 * prog)
-                        local mg = math.floor(60 * (1.0 - prog) + 220 * prog)
-                        local a  = (b == hovered) and 230 or 120
-                        DrawMarker(0, b.pos.x, b.pos.y, b.pos.z + 0.12, 0.0,0.0,0.0, 180.0,0.0,0.0,
-                            0.08, 0.08, 0.10, mr, mg, 70, a,
-                            true, false, 2, false, nil, nil, false)
-                    end
-                end
-
-                if hovered and holding then
-                    local dcx, dcy = cx - prevCx, cy - prevCy
-                    local move = math.sqrt(dcx * dcx + dcy * dcy)
-                    if move > 0.08 then move = 0.08 end  -- clamp: salto de cursor (1º frame / borda de tela) não conclui parafuso de uma vez
-                    if move > 0.0 then
-                        local turn = move * sens
-                        hovered.deg = hovered.deg + turn
-                        if hovered.ent and DoesEntityExist(hovered.ent) then
-                            local r = GetEntityRotation(hovered.ent, 5)
-                            SetEntityRotation(hovered.ent, r.x, r.y, r.z + turn, 5, true)
-                        end
-                        if hovered.deg >= needed then
-                            hovered.done = true
-                            remaining = remaining - 1
-                            if hovered.ent and DoesEntityExist(hovered.ent) then
-                                FreezeEntityPosition(hovered.ent, false)
-                                SetEntityCollision(hovered.ent, true, true)
-                                SetEntityVelocity(hovered.ent,
-                                    outward.x * 0.6, outward.y * 0.6, math.random() * 0.3 + 0.2)
-                                SetEntityAsNoLongerNeeded(hovered.ent)
-                                hovered.ent = nil
-                            end
-                            PlaySoundFrontend(-1, 'Pin_Good', 'DLC_HEIST_FLEECA_SOUNDSET', true)
-                            if remaining <= 0 then result = true end
-                        end
-                    end
-                end
-
-                prevCx, prevCy = cx, cy
-            end
-        end)
-
-        cleanup()
-        if not ok then return 'fallback' end
-        if result == 'fallback' then return 'fallback' end
-        return result == true
-    end
-
-    -- ─── Ponta RODA: parafusos em círculo na face da roda ─────────────────────
-    function VPChopBoltMinigame(vehicle, wheelIndex)
-        local boneNames = { 'wheel_lf', 'wheel_rf', 'wheel_lr', 'wheel_rr' }
-        local boneKey   = boneNames[(wheelIndex or 0) + 1] or 'wheel_lf'
-        if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
-            return VPChopDismantleMinigame.Start(vehicle, 'wheel', { boneKey = boneKey })
-        end
-        return VPChopMinigameFallback(vehicle, boneKey, 'minigame_core_missing')
-    end
-
-    -- ─── Ponta PLACA: parafusos nos cantos da placa (frente OU traseira) ──────
-    local function plateCfg()
-        local p = Config.Plates
-        return (p and p.Bolt3D) or {}
-    end
-
-    local function VPChopPlateBoltFallback()
-        local sc = Config.Plates and Config.Plates.SkillCheck
-        if not sc then return true end
-        local passed = lib.skillCheck(sc.difficulties, sc.keys)
-        if not passed then VPChopNotify(L('notify_skill_fail'), 'error') end
-        return passed
-    end
-
-    --- @param vehicle integer
-    --- @param isRear boolean|nil  true = placa traseira (default) · false = dianteira.
-    ---   O caller (client/plates.lua) resolve a face pela posição do jogador. É UMA
-    ---   placa só — frente/traseira muda apenas o enquadramento (câmera, normal da
-    ---   face, offset Y e heading base). O servidor é INALTERADO.
-    function VPChopPlateBoltMinigame(vehicle, isRear)
-        if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then return false end
-        if isRear == nil then isRear = true end
-        local c = plateCfg()
-
-        local vmin, vmax = GetModelDimensions(GetEntityModel(vehicle))
-        local fwd        = GetEntityForwardVector(vehicle)
-        local up         = vector3(0.0, 0.0, 1.0)
-        local rightV     = vector3(fwd.y, -fwd.x, 0.0)
-        local rlen       = #rightV
-        if rlen > 0.0 then rightV = rightV / rlen end
-        local vehHeading = GetEntityHeading(vehicle)
-
-        -- Centro aproximado da placa na face escolhida. Geometria ainda placeholder —
-        -- calibrar in-game via ZFrac / YOffset{Front,Rear} (Config.Plates.Bolt3D).
-        local zFrac  = tonumber(c.PlateZFrac) or 0.30
-        local zPlate = vmin.z + (vmax.z - vmin.z) * zFrac
-        local yOff   = isRear
-            and (tonumber(c.PlateYOffsetRear)  or tonumber(c.PlateYOffset) or 0.02)
-            or  (tonumber(c.PlateYOffsetFront) or tonumber(c.PlateYOffset) or 0.02)
-        local yPlate = isRear and (vmin.y - yOff) or (vmax.y + yOff)
-        local center = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, yPlate, zPlate)
-
-        -- Normal da face escolhida (aponta para fora do carro = lado da câmera).
-        local outward = isRear and vector3(-fwd.x, -fwd.y, 0.0) or vector3(fwd.x, fwd.y, 0.0)
-        local olen = #outward
-        if olen > 0.0 then outward = outward / olen end
-
-        -- Disposição: 2 parafusos (topo) ou 4 (cantos do retângulo da placa)
-        local hw     = tonumber(c.PlateHalfWidth)  or 0.20
-        local hh     = tonumber(c.PlateHalfHeight) or 0.07
-        local outOff = 0.03
-        local nbolts = math.floor(tonumber(c.Bolts) or 4)
-        local layout
-        if nbolts <= 2 then
-            layout = { { -1.0, 1.0 }, { 1.0, 1.0 } }
-        else
-            layout = { { -1.0, 1.0 }, { 1.0, 1.0 }, { -1.0, -1.0 }, { 1.0, -1.0 } }
-        end
-
-        local points = {}
-        for i = 1, #layout do
-            local u, v = layout[i][1], layout[i][2]
-            points[#points + 1] = center + (rightV * (u * hw)) + (up * (v * hh)) + (outward * outOff)
-        end
-
-        -- Câmera POR FORA da face escolhida (model-space: +Y = frente), ~1.2 m
-        -- afastada e um pouco acima, olhando de volta para a placa.
-        --   traseira: yPlate ≈ vmin.y  → câmera mais para trás  (yPlate - 1.2)
-        --   dianteira: yPlate ≈ vmax.y → câmera mais para frente (yPlate + 1.2)
-        local camBack = isRear and (yPlate - 1.2) or (yPlate + 1.2)
-
-        local r = runBoltSurface({
-            points  = points,
-            outward = outward,
-            camPos  = GetOffsetFromEntityInWorldCoords(vehicle, 0.0, camBack, zPlate + 0.25),
-            lookAt  = center,
-            baseRot = { x = 90.0, y = 0.0, z = vehHeading + (isRear and 180.0 or 0.0) },
-            needed  = (tonumber(c.TurnsToLoosen) or 1.5) * 360.0,
-            sens    = tonumber(c.Sensitivity) or 900.0,
-            hoverR  = tonumber(c.HoverRadius)  or 0.09,
-            timeout = tonumber(c.Timeout)      or 25000,
-        })
-
-        if r == 'fallback' then return VPChopPlateBoltFallback() end
-        if not r then VPChopNotify(L('notify_skill_fail'), 'error'); return false end
-        return true
-    end
-end
-
 -- ─── Tyre proximity detection (wheel_theft pattern) ─────────────────────────
 -- Localiza a roda MONTADA mais próxima do jogador.
 -- isMounted via GetVehicleWheelXOffset: roda intacta ≈ 0.0; removida = 9999999.
@@ -1326,8 +1011,8 @@ local function runWheelUx(veh, wheelIdx, partKey, ttlMs, isAction)
             uxSpeed = 1.0,
             timeout = uxTimeout,
         })
-    else
-        minigameOk = VPChopBoltMinigame(veh, wheelIdx)
+    elseif _G.VPChopMinigameFallback then
+        minigameOk = _G.VPChopMinigameFallback(veh, boneKey, 'wheel_no_stack')
     end
 
     if not minigameOk then return false end
@@ -1939,12 +1624,7 @@ local function doStealCatalytic(veh)
     spawnToolProp(Config.AdvancedChop and Config.AdvancedChop.SawAnim and Config.AdvancedChop.SawAnim.prop)
 
     local catCfg = Config.CatalyticTheft or {}
-    local minigameCfg = catCfg.Minigame or {
-        Enable = true,
-        Stages = 2,
-        Difficulty = { 'easy', 'medium' },
-        Inputs = { 'w', 'a', 's', 'd' },
-    }
+    local minigameCfg = catCfg.Minigame or { Enable = true, Profile = 'catalytic' }
 
     local animCfg = catCfg.Anim or {
         dict = 'anim@scripted@heist@ig16_glass_cut@male@',
@@ -1986,65 +1666,37 @@ local function doStealCatalytic(veh)
         end
     end
 
-    local totalMs = startRes.durationMs or 7000
-    local stage1Ms = math.floor(totalMs / 2)
-    local stage2Ms = totalMs - stage1Ms
+    local minMs   = tonumber(startRes.durationMs) or 7000
+    local startMs = GetGameTimer()
 
-    -- ─── ETAPA 1: Corte do Tubo Dianteiro ────────────────────────────────────
-    local ok1 = lib.progressBar({
-        duration = stage1Ms,
-        label = L('catalytic_cutting_stage_1'),
-        useWhileDead = false,
-        canCancel = true,
-        disable = { move = true, car = true, combat = true },
-        anim = animCfg,
-    })
+    -- Minigame físico: 2 braçadeiras (drill) + 2 tubos (cut) sob o carro. É
+    -- player-paced; o gate de tempo mínimo continua sendo o token de
+    -- vp_chopshop:catalytic:start (server) — garantimos o piso logo abaixo.
+    local ok
+    if minigameCfg.Enable ~= false and VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        ok = VPChopDismantleMinigame.Start(veh, minigameCfg.Profile or 'catalytic', {
+            boneKey = 'exhaust',
+            timeout = minMs + 20000,
+            anim    = animCfg,
+        })
+    else
+        ok = _G.VPChopMinigameFallback and _G.VPChopMinigameFallback(veh, 'exhaust', 'catalytic_no_stack')
+        if ok == nil then ok = true end
+    end
 
-    if not ok1 then
+    if not ok then
         cleanupTheft(true)
+        if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertOnFail or 100) then
+            VPChopTriggerDispatch(veh)
+        end
+        VPChopNotify(L('catalytic_cut_failed'), 'error')
         return
     end
 
-    if minigameCfg.Enable ~= false and lib.skillCheck then
-        local diff1 = (minigameCfg.Difficulty and minigameCfg.Difficulty[1]) or 'easy'
-        local pass1 = lib.skillCheck(diff1, minigameCfg.Inputs or { 'w', 'a', 's', 'd' })
-        if not pass1 then
-            cleanupTheft(true)
-            if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertOnFail or 100) then
-                VPChopTriggerDispatch(veh)
-            end
-            VPChopNotify(L('catalytic_cut_failed'), 'error')
-            return
-        end
-    end
-
-    -- ─── ETAPA 2: Corte do Tubo Traseiro ─────────────────────────────────────
-    local ok2 = lib.progressBar({
-        duration = stage2Ms,
-        label = L('catalytic_cutting_stage_2'),
-        useWhileDead = false,
-        canCancel = true,
-        disable = { move = true, car = true, combat = true },
-        anim = animCfg,
-    })
-
-    if not ok2 then
-        cleanupTheft(true)
-        return
-    end
-
-    if minigameCfg.Enable ~= false and lib.skillCheck then
-        local diff2 = (minigameCfg.Difficulty and minigameCfg.Difficulty[2]) or 'medium'
-        local pass2 = lib.skillCheck(diff2, minigameCfg.Inputs or { 'w', 'a', 's', 'd' })
-        if not pass2 then
-            cleanupTheft(true)
-            if VPChopCatalyticShouldDispatch(catCfg.PoliceAlertOnFail or 100) then
-                VPChopTriggerDispatch(veh)
-            end
-            VPChopNotify(L('catalytic_cut_failed'), 'error')
-            return
-        end
-    end
+    -- [SEC] catalytic:complete rejeita 'too_fast' se elapsed < minDurationMs - 250.
+    -- Como o minigame é player-paced e pode terminar antes, esperamos o restante.
+    local elapsed = GetGameTimer() - startMs
+    if elapsed < minMs then Wait(minMs - elapsed + 150) end
 
     cleanupTheft(false)
 
@@ -2266,67 +1918,6 @@ local function addRaisedCarTargets(veh)
     end
 
     exports.ox_target:addLocalEntity(veh, targets)
-end
-
--- Minigame de parafusos (módulo inline — garante carregamento junto com main.lua)
--- Usa boii_minigames se disponível; lib.skillCheck como fallback.
-function VPChopRunBoltMinigame(cfg)
-    cfg = cfg or {}
-
-    -- Verificar ferramenta obrigatória
-    local tool = cfg.RequiredTool
-    if tool and tool ~= '' then
-        local count = exports.ox_inventory:Search('count', tool)
-        if (count or 0) < 1 then
-            VPChopNotify(L('jackstand_no_tool') .. ' (' .. tool .. ')', 'error')
-            return false
-        end
-    end
-
-    local rounds  = cfg.Rounds  or 4
-    local timeout = cfg.Timeout or 30000
-    local mgType  = cfg.Type    or 'skill_circle'
-    local useBoii = GetResourceState('boii_minigames') == 'started'
-
-    for i = 1, rounds do
-        local passed
-
-        if useBoii then
-            local p        = promise.new()
-            local resolved = false
-            local function res(val)
-                if not resolved then resolved = true; p:resolve(val) end
-            end
-            if mgType == 'button_mash' then
-                exports['boii_minigames']:button_mash({
-                    style = 'default', difficulty = cfg.Difficulty or 12,
-                }, function(ok) res(ok == true) end)
-            else
-                exports['boii_minigames']:skill_circle({
-                    style = 'default', area_size = cfg.AreaSize or 5, speed = cfg.Speed or 0.025,
-                }, function(result) res(result ~= 'failed') end)
-            end
-            CreateThread(function() Wait(timeout); res(false) end)
-            passed = Citizen.Await(p)
-        else
-            local diffs = cfg.SkillCheckDifficulties or { 'easy', 'medium', 'medium', 'hard' }
-            local keys  = cfg.SkillCheckKeys         or { 'e', 'e', 'e', 'e' }
-            passed = lib.skillCheck(diffs, keys)
-        end
-
-        -- Chance extra de falha (opcional)
-        local fc = cfg.FailureChance or 0.0
-        if passed and fc > 0.0 and math.random() <= fc then passed = false end
-
-        if not passed then
-            VPChopNotify(L('tyremission_minigame_fail'), 'error')
-            return false
-        end
-
-        if i < rounds then Wait(300) end
-    end
-
-    return true
 end
 
 -- [LIMPEZA] VPChopJackstandStealTyre removida — função órfã (zero chamadas).

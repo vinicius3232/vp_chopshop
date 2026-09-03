@@ -68,7 +68,7 @@ local function run()
 
     -- 3) Testes do Profiles Registry
     check('Profiles module loaded', Profiles ~= nil)
-    local expectedProfiles = { 'demo', 'wheel', 'panel', 'engine', 'carcass' }
+    local expectedProfiles = { 'demo', 'wheel', 'panel', 'engine', 'carcass', 'catalytic', 'serial_scratch', 'bench_teardown' }
     for _, pName in ipairs(expectedProfiles) do
         local p = Profiles.Get(pName)
         check(('profile %s exists'):format(pName), p ~= nil)
@@ -1064,8 +1064,8 @@ local function run()
         Config.CatalyticTheft and Config.CatalyticTheft.Payout and Config.CatalyticTheft.Payout.min > 0 and Config.CatalyticTheft.Payout.max >= Config.CatalyticTheft.Payout.min)
     check('CATALYTIC-1 BenchMaterials contains copper and scrap',
         Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials and Config.CatalyticTheft.BenchMaterials.copper ~= nil and Config.CatalyticTheft.BenchMaterials.metalscrap ~= nil)
-    check('CATALYTIC-MINIGAME-1 2-Stage Minigame is configured',
-        Config.CatalyticTheft and Config.CatalyticTheft.Minigame and Config.CatalyticTheft.Minigame.Stages == 2)
+    check('CATALYTIC-MINIGAME-1 minigame profile is configured (PR-2)',
+        Config.CatalyticTheft and Config.CatalyticTheft.Minigame and Config.CatalyticTheft.Minigame.Profile == 'catalytic')
     check('CATALYTIC-MINIGAME-1 Sparks VFX is enabled',
         Config.CatalyticTheft and Config.CatalyticTheft.SparksVfx == true)
     check('CATALYTIC-MINIGAME-1 Police Alert on Fail configured',

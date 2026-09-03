@@ -132,6 +132,17 @@ function CamCtrl.IsActive()
     return activeCam ~= nil and DoesCamExist(activeCam)
 end
 
+--- [PR-4] Solavanco rápido da câmera (feedback de golpe de marreta). ~180 ms.
+function CamCtrl.Jolt()
+    if not activeCam or not DoesCamExist(activeCam) then return end
+    local cam = activeCam
+    pcall(function() ShakeCam(cam, 'HAND_SHAKE', 0.6) end)
+    CreateThread(function()
+        Wait(180)
+        if DoesCamExist(cam) then pcall(StopCamShaking, cam, true) end
+    end)
+end
+
 -- Limpeza defensiva global
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName == GetCurrentResourceName() then

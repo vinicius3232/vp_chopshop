@@ -2,6 +2,199 @@
 
 ---
 
+## [1.19.0] — 2026-09-03 — Expansão de minigames físicos: catalisador, série e desmonte na marreta
+
+Leva de 3 PRs sobre o stack `client/minigame/` (`docs/design/MINIGAME_EXPANSION.md`,
+PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1). Nenhuma mudança de
+balanceamento. Harness: **2004 asserts / 0 fail**.
+
+### Added / Gameplay
+
+- **[PR-2] Furto de catalisador vira minigame físico:** novo profile `catalytic`
+  (`client/minigame/profiles/catalytic.lua`) que mistura primitives — 2 pontos
+  `drill` (braçadeiras) + 2 `cut` (tubos dianteiro/traseiro), câmera por baixo do
+  carro no bone `exhaust`. `doStealCatalytic` deixa de usar 2× `lib.progressBar` +
+  `lib.skillCheck`. O fluxo server-authoritative (`catalytic:start` token →
+  `complete`) é intacto: o client espera o piso `durationMs` antes de completar
+  (evita `too_fast`). Fallback `VPChopMinigameFallback` se o stack sumir.
+  `Config.CatalyticTheft.Minigame` = `{ Enable, Profile }`.
+- **[PR-3] "Riscar série" na bancada vira minigame de lixar:** novo profile
+  `serial_scratch` reusando a primitive `rotate` (segura o clique + gira o mouse
+  em círculo). Item consumível novo **`sandpaper`** (1 por uso), checado e
+  consumido em `vp_chopshop:serial:scratch` (server) e refletido no
+  `benchAvailability` + `canInteract`. Estado da peça `stolen → scratched`
+  inalterado; a perícia continua flagrando "série adulterada".
+  `Config.PartSerial.SandpaperItem` + `ScratchMinigame`.
+- **[PR-4] "Desmonte na marreta" antes de processar peça roubada na bancada:**
+  primitive de NUI **nova `strike`** (`html/app.js` + `html/style.css`) —
+  timing-click: um anel fecha e reabre, o jogador clica quando ele entra na zona
+  verde; N golpes por ponto; errar não pune o progresso. Cada golpe toca
+  `chopshop_pneumatic_hammer.ogg` e dá um solavanco de câmera (`CamCtrl.Jolt`).
+  Novo profile `bench_teardown` (3 pontos). Item novo **`hammer`** (consumido 1×
+  por desmonte). Peça `catalytic_converter` é isenta (já foi cortada no furto).
+- **Anti-cheat do desmonte:** `vp_chopshop:bench:teardownStart` emite um token
+  temporal; `benchProcessPart` (5º arg) exige o token + tempo mínimo decorrido
+  (`too_fast`), no mesmo padrão do furto de catalisador — sem introduzir
+  ActionSession (o entitlement já impede dupe; o token cobre "pulei o minigame").
+  `Config.PhysicalCarry.Teardown { Enable, Profile, MinDurationMs, ExemptParts,
+  HammerItem, HammerProp }`.
+
+### Changed
+
+- `client/minigame/core.lua`: NUI callback `minigameStrikeHit` (som + shake por golpe).
+- `client/minigame/camera.lua`: `CamCtrl.Jolt()` — solavanco rápido (`ShakeCam`, ~180 ms).
+- `fxmanifest.lua` + `tools/run_spec.lua` + `client/minigame/minigame_spec.lua`:
+  registram os 3 profiles novos (`catalytic`, `serial_scratch`, `bench_teardown`).
+- `installation/ox_items_snippet.txt`: itens `sandpaper` e `hammer`.
+- `shared/locale.lua`: `serial_no_sandpaper`, `bench_teardown_no_hammer`,
+  `err_teardown_required` / `err_no_hammer` / `err_too_fast` / `err_expired` (5 idiomas).
+
+### Notes
+
+- Nenhuma tabela de DB nova. `sandpaper` e `hammer` precisam ser registrados no
+  `ox_inventory/data/items.lua` (snippet pronto em `installation/`).
+- Locale órfão da v1.16 deixado: `catalytic_cutting_stage_1/2` (não referenciado).
+- Props `prop_tool_hammer` a confirmar in-game (há fallback `IsModelInCdimage`).
+
+---
+
+## [1.18.1] — 2026-09-03 — Limpeza: remoção do minigame de parafusos legado (`runBoltSurface`)
+
+Primeiro PR da leva de expansão de minigames (`docs/design/MINIGAME_EXPANSION.md`). **Zero mudança
+de comportamento em jogo** — o roubo de roda já usava o stack `client/minigame/` (profile `wheel`)
+e o roubo de placa já caía em `lib.skillCheck` desde a RC-FIX-2 (v1.15). Harness: **1983 / 0**.
+
+### Removed
+
+- **`client/main.lua`:** bloco inline do minigame 3D de parafusos — `runBoltSurface`,
+  `VPChopBoltMinigame`, `VPChopPlateBoltMinigame`, `VPChopBoltMinigameFallback`,
+  `VPChopPlateBoltFallback`, `world2screen` (~315 linhas). E `VPChopRunBoltMinigame`
+  (wrapper `boii_minigames`/`skillCheck`, zero callers).
+- **`client/plates.lua`:** ramo `Config.Plates.Bolt3D` do roubo de placa — fica só o caminho
+  `Config.Plates.SkillCheck` (que já era o vivo).
+- **`shared/config.lua`:** blocos `Config.Plates.Bolt3D` e `Config.Jackstand.Minigame.Bolt3D`
+  (geometria placeholder nunca calibrada; `Enable=false` desde a v1.15).
+- **`shared/locale.lua`:** keys órfãs `bolt_minigame_help` e `bolt_minigame_bolt_fmt` (en/pt).
+
+### Changed
+
+- **`client/main.lua` `runWheelUx`:** o `else` (fluxo sem stack de minigame — nunca atingido no
+  runtime real) agora chama `VPChopMinigameFallback` (`client/minigame/fallback.lua`) em vez do
+  `VPChopBoltMinigame` removido.
+- **`README.md` / `README_pt.md`:** nota da v1.14.0 marcada como removida; linha de versão
+  `1.15.0-rc1` → `1.18.1` (estava defasada).
+- Assets `stream/bolt.ydr` + `wheel_spacer.ytyp` (pacote pago `ls_bolt_minigame`) já haviam sido
+  removidos na v1.16 (`[P0.2b] stream/ removido por completo`); comentário do `fxmanifest.lua`
+  atualizado.
+
+---
+
+## [1.18.0] — 2026-09-02 — Camada de Crime & Perícia Policial Profunda (P4.1 → P4.4)
+
+Stack de 4 PRs (#48 → #51). Harness de teste estático: **1983 asserts / 0 fail** (`lua tools/run_spec.lua .`).
+Estado detalhado em `STATUS.md`; roadmap seguinte em `docs/future/POST_V118_ROADMAP.md`.
+
+### Added / Gameplay
+
+- **[P4.1] EvidenceBridge — conector forense multi-framework (#48):** nova ponte server-side
+  `bridge/evidence.lua` com providers plugáveis (`evidences`, `vp_crimescene`, `custom`, `none`) e
+  export `RegisterEvidenceProvider`. Toda ação de crime passa a deixar vestígio coletável
+  vinculado biometricamente ao criminoso — digital (`fingerprint`) e DNA (`blood`/`saliva`):
+  `chop_part`, `vin_scratch`, `plate_steal`, `plate_forge`, `plate_apply` e (novo) `tracker_removal`,
+  com probabilidade base por ação e scaling por heat da placa (`Config.Evidence.HeatFactor`).
+  Counterplay `gloves` (bloqueia digital; DNA ainda cai). Toda chamada ao provider é `pcall` —
+  falha do resource externo nunca quebra o crime; auto-desativa se o provider não estiver `started`.
+  Test suite dedicada (`server/evidence_bridge_spec.lua`, self-gated por `vp_chopshop_selftest 1`).
+- **[P4.2] Rastreador GPS / LoJack + reforço do furto de catalisador (#49):**
+  `server/tracker.lua` (autoridade server-side do rastreador) + `client/tracker.lua` (minigame de
+  remoção + beacon policial). Furto de catalisador com timer server-authoritative e anti-replay;
+  `Config.CatalyticTheft.DisableVehicle` inutiliza o veículo (bloqueio de ignição/condução
+  client-side via statebag `catalyticStolen`) — anti-farm. Remoção do rastreador deixa evidência.
+- **[P4.3] DispatchBridge — sistema de alerta policial multi-framework (#50):**
+  `bridge/dispatch.lua` (shared) com providers `ps-dispatch`, `cd_dispatch`, `qs-dispatch`,
+  `op-dispatch`, `core_dispatch`, `custom`, `none` e export `RegisterDispatchProvider`. Ponto de
+  entrada único `VPChopTriggerDispatch(veh, alertType, meta)` → `DispatchBridge.SendAlert`.
+  Alerta padrão: code `10-90 — Desmanche Ilegal`, blip sprite `530`. O blip cai no veículo (não
+  no jogador em fuga). `Config.Dispatch` (Provider, AutoOrder, Jobs, Blip).
+- **[P4.4] Forensic Scanner, Serial Adulteration & Vehicle Disablement Anti-Farm (#51):**
+  perícia veicular — policial com `parts_scanner` ou `forensic_kit` inspeciona o veículo e revela
+  estado do motor, catalisador, VIN raspado, disfarce de placa e sinal de rastreador GPS.
+  Endurecimento read-only do domínio forense da adulteração de série. Inutilização do bloco do
+  motor (`vpChopEngineMissing`) bloqueia condução até reparo.
+
+### Changed
+
+- **`fxmanifest.lua`:** `version` `1.15.0-rc1` → `1.18.0` — estava defasada 3 releases (as stacks
+  v1.16, v1.17 e v1.18 subiram sem bump do manifest nem tag git).
+
+### Notes
+
+- Bridges novas (`evidence`, `dispatch`, `tracker`) são todas fail-safe: se o resource-alvo estiver
+  parado ou o provider for `none`, operam desacopladas sem exception, polling ou log de erro.
+- Feature P4.1 é 100% server-side (o resource `evidences`/`vp_crimescene` cuida do client).
+- Nenhuma tabela de DB nova nesta release (rastreador e perícia são in-memory / statebag).
+
+---
+
+## [1.17.0] — 2026-09-01 — Chop Broker: Dynamic Market, Contracts & Workshop SAGA Economy
+
+Stack de 6 sub-fases BROKER-1 → BROKER-6 (PRs #42 → #47). Contrato congelado e 12 invariantes
+canônicos em `docs/BROKER-6_RELEASE_INVARIANTS.md`. Harness estático crescendo para ~1900 asserts / 0 fail.
+
+### Added / Economy
+
+- **[BROKER-1] Dynamic Market Pricing Engine (#42):** `server/broker/market.lua` — precificação
+  dinâmica `basePrice × demand × trustMult × tierMult × nightMult × heatMult × jitter(0.03)`.
+  `demand_index` por commodity entre `DemandFloor` 0.40 e `DemandCeiling` 1.30 (equilíbrio 1.0),
+  recuperação temporal lazy (`recoveryPerHour` 0.15 → 1.0), pressão de venda 0.03/unidade, cotação
+  marginal em lote (`startDemand − (i−1)·pressurePerUnit`), flush periódico (300s), locks +
+  circuit breaker, boot fail-closed. Snapshot persistido em `vp_chop_broker_market`.
+- **[BROKER-2] Fence integration & dynamic payouts + physical part market (#43):** venda no fence
+  roteada pelo motor de mercado; peça física passa pelo ledger autoritativo `PartEntitlement`
+  (`server/logistics/part_entitlement.lua`, `ISSUED → CONSUMED`, um único destino terminal —
+  invariante 3). Venda geral aplica `RecordSalesBatch` (pressão de demanda); cumprimento de
+  contrato **não** aplica (sorvedouro pontual separado — invariante 9).
+- **[BROKER-3] Contracts & High-Demand Lists (#44):** `server/broker/contracts.lua` +
+  `vp_chop_broker_contracts`. Contratos pessoais (3 slots, TTL 3600s, `min_trust` 3, mult 1.25 +
+  bônus 2000) e janelas globais públicas (`for_identifier` NULL, 3 slots, TTL 7200s, mult 1.20).
+  Tipos `part_type` / `model` / `class` / `high_value`; matching server-authoritative de
+  peças/modelos/classes; estados `AVAILABLE → ACCEPTED → COMPLETED / EXPIRED`. Bônus de conclusão
+  **at-most-once**: mutex em runtime por `contractId` + `UPDATE` condicional atômico
+  (`affectedRows == 1` = vencedor — invariante 7).
+- **[BROKER-4] WorkshopBridge & Persistent SAGA Journal (#45):** `bridge/workshop.lua` +
+  `vp_chop_workshop_journal`. Integração com oficina externa por SAGA distribuída — provider
+  contract `IsAvailable` / `PreparePurchase` / `CommitPurchase` / `GetTransactionStatus` /
+  `AbortPurchase` / `GetMarketSignal`. Estado `COMMITTING` persistido **antes** do commit remoto
+  (invariante 5); status `UNKNOWN` / provider offline **nunca** libera o asset (fail-closed —
+  invariante 6); reconciliador de boot (`ReconcileIntervalSec` 15s, `MaxReconcileAttempts` 4);
+  quarentena. `StablePartIdentity` (`spi:<bootNonce>:<ts>:<seq>:<nonce>`) restart-stable
+  (invariante 4). Provider padrão `none` = standalone total (invariante 10). Exports
+  `WorkshopRegisterProvider`, `WorkshopHandoffPart`, `WorkshopHandoffStolenPlate`,
+  `WorkshopGetMarketSignal`. Template em `bridge/workshop_custom_example.lua`.
+- **[BROKER-5] NPC persona, context UI & contract discovery (#46):** callbacks
+  `vp_chopshop:broker:{getNpcContext,getContracts,acceptContract,fulfillContract}`; readiness
+  hardening do NPC do broker.
+- **[BROKER-6] Live QA, integration audit & release gate (#47):** matriz de QA em runtime,
+  auditoria de integração e os 12 invariantes canônicos congelados.
+
+### Compatibility
+
+- Encomendas legadas (`vp_chop_fence_orders`, `getOrder` / `fulfillOrder`) **preservadas** e
+  totalmente funcionais pelo menu do broker (invariante 11).
+- `deliverCar` (venda de veículo roubado intacto) continua sendo domínio autoritativo próprio,
+  com ledger `vp_chop_carcass`, cooldown por jogador e validação de `vsid` + `netId` (invariante 12).
+- Economia server-authoritative: o client só manda `{ sessionId, action }` / `{ contractId,
+  entitlementId }` — qualquer parâmetro econômico do client é ignorado (invariantes 1 e 2).
+
+### Migration
+
+- 3 tabelas novas, auto-criadas idempotente no boot (`server/db.lua` `VPChopDbInit`):
+  `vp_chop_broker_market`, `vp_chop_broker_contracts`, `vp_chop_workshop_journal`
+  (migração não-destrutiva de colunas para bases de rascunhos anteriores incluída). Bloco de
+  referência em `sql/vp_chopshop.sql`.
+
+---
+
 ## [1.16.0] — 2026-09-01 — Physical Interaction Minigames, Workshop Carrying, Damage Scaling & Catalytic Converter Theft
 
 Validação completa em runtime FiveM / QBox. Harness de teste estático: **1031 asserts / 0 fail** (`lua tools/run_spec.lua .`).

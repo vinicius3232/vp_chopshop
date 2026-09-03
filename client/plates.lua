@@ -100,26 +100,14 @@ CreateThread(function()
                     return
                 end
 
-                -- Minigame de parafusos 3D (estilo filo) ancorado na placa que o jogador
-                -- está mirando. UX no client; a verdade (item/distância/cooldown) é
-                -- validada no server abaixo. Fallback automático para lib.skillCheck
-                -- (Config.Plates.SkillCheck) embutido em VPChopPlateBoltMinigame.
-                local b3 = Config.Plates.Bolt3D
-                if b3 and b3.Enable then
-                    -- Face alvo (frente/traseira) pela posição do jogador no espaço do
-                    -- modelo: y > 0 = metade dianteira. É UMA placa; isto só enquadra.
-                    local pc  = GetEntityCoords(PlayerPedId())
-                    local rel = GetOffsetFromEntityGivenWorldCoords(veh, pc.x, pc.y, pc.z)
-                    local isRear = not (rel and rel.y and rel.y > 0.0)
-                    if not VPChopPlateBoltMinigame(veh, isRear) then return end
-                else
-                    local sc = Config.Plates.SkillCheck
-                    if sc then
-                        local passed = lib.skillCheck(sc.difficulties, sc.keys)
-                        if not passed then
-                            VPChopNotify(L('notify_skill_fail'), 'error')
-                            return
-                        end
+                -- Minigame antes de arrancar. UX no client; a verdade (item/distância/
+                -- cooldown) é validada no server abaixo.
+                local sc = Config.Plates.SkillCheck
+                if sc then
+                    local passed = lib.skillCheck(sc.difficulties, sc.keys)
+                    if not passed then
+                        VPChopNotify(L('notify_skill_fail'), 'error')
+                        return
                     end
                 end
 

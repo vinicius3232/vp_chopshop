@@ -37,6 +37,20 @@ local function setupNuiCallbacks()
         cb({ ok = true })
     end)
 
+    -- [PR-4] Golpe de marreta bem-sucedido (primitive 'strike') → som + shake leve.
+    RegisterNUICallback('minigameStrikeHit', function(_, cb)
+        if GetResourceState('xsound') == 'started' then
+            local url = ('https://cfx-nui-%s/sounds/chopshop_pneumatic_hammer.ogg'):format(GetCurrentResourceName())
+            pcall(function()
+                exports.xsound:PlayUrl('vp_chop_strike_' .. GetGameTimer(), url, 0.35, false)
+            end)
+        else
+            PlaySoundFrontend(-1, 'Place_Prop_Down', 'DLC_Dmod_Prop_Editor_Sounds', true)
+        end
+        if CamCtrl and CamCtrl.Jolt then CamCtrl.Jolt() end
+        cb({ ok = true })
+    end)
+
     RegisterNUICallback('minigameCancel', function(data, cb)
         if currentSession then
             currentSession.result = false
