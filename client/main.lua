@@ -2072,8 +2072,8 @@ CreateThread(function()
             name = 'vp_chop_steal_catalytic',
             label = L('catalytic_target_steal'),
             icon = 'fa-solid fa-fire-flame-curved',
-            bones = (Config.CatalyticTheft and Config.CatalyticTheft.Bones) or { 'exhaust', 'exhaust_2', 'chassis' },
-            distance = 2.0,
+            bones = (Config.CatalyticTheft and Config.CatalyticTheft.Bones) or { 'exhaust', 'exhaust_2', 'exhaust_3', 'exhaust_4' },
+            distance = 1.4,
             canInteract = function(entity)
                 if not entity or entity == 0 or not DoesEntityExist(entity) then return false end
                 if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return false end
@@ -2096,7 +2096,7 @@ local function addRaisedCarTargets(veh)
         name        = 'vp_chop_jack_lower_' .. tostring(veh),
         label       = L('jackstand_target_lower'),
         icon        = 'fa-solid fa-arrow-down',
-        distance    = 3.5,
+        distance    = 2.2,
         canInteract = function() return JackstandData[veh] ~= nil and not JackstandBusy end,
         onSelect    = function() VPChopJackstandLowerCar(veh) end,
     }
@@ -2127,7 +2127,7 @@ local function addRaisedCarTargets(veh)
                     label    = L('adv_target_door_fmt', lbl),
                     icon     = 'fa-solid fa-screwdriver-wrench',
                     bones    = { aBone },
-                    distance = 2.5,
+                    distance = 1.5,
                     canInteract = function()
                         return JackstandData[veh] ~= nil
                             and not JackstandBusy
@@ -2141,11 +2141,17 @@ local function addRaisedCarTargets(veh)
 
         -- Fase 3: motor (requer capô removido no desmanche OU capô já danificado/ausente)
         local bonnetDef = VPChopPartRegistry.get('bonnet')
+        local engineBones = {}
+        if GetEntityBoneIndexByName(veh, 'engine') ~= -1 then engineBones[#engineBones + 1] = 'engine' end
+        if GetEntityBoneIndexByName(veh, 'bonnet') ~= -1 then engineBones[#engineBones + 1] = 'bonnet' end
+        if #engineBones == 0 then engineBones = nil end
+
         targets[#targets + 1] = {
             name     = 'vp_adv_chop_engine_' .. tostring(veh),
             label    = L('adv_target_engine'),
             icon     = 'fa-solid fa-gear',
-            distance = 3.0,
+            bones    = engineBones,
+            distance = 1.6,
             canInteract = function()
                 return JackstandData[veh] ~= nil
                     and not JackstandBusy
@@ -2160,7 +2166,7 @@ local function addRaisedCarTargets(veh)
             name     = 'vp_adv_chop_carcass_' .. tostring(veh),
             label    = L('adv_target_carcass'),
             icon     = 'fa-solid fa-scissors',
-            distance = 3.5,
+            distance = 2.0,
             canInteract = function()
                 return JackstandData[veh] ~= nil
                     and not JackstandBusy
@@ -2176,7 +2182,7 @@ local function addRaisedCarTargets(veh)
         name        = 'vp_chop_jack_dismantle_' .. tostring(veh),
         label       = L('target_dismantle'),
         icon        = 'fa-solid fa-screwdriver-wrench',
-        distance    = 3.0,
+        distance    = 2.0,
         canInteract = function() return JackstandData[veh] ~= nil and not JackstandBusy end,
         onSelect    = function() openJackstandChopMenu(veh) end,
     }
@@ -2186,7 +2192,7 @@ local function addRaisedCarTargets(veh)
             name        = 'vp_chop_jack_discard_' .. tostring(veh),
             label       = L('target_discard_vehicle'),
             icon        = 'fa-solid fa-trash-can',
-            distance    = 3.5,
+            distance    = 2.2,
             canInteract = function() return JackstandData[veh] ~= nil and not JackstandBusy end,
             onSelect    = function()
                 local netId = NetworkGetNetworkIdFromEntity(veh)
@@ -2249,7 +2255,7 @@ local function addRaisedCarTargets(veh)
                 label    = L('tyremission_steal_label') .. ' — ' .. lbl,
                 icon     = 'fa-solid fa-circle-dot',
                 bones    = { tBone },
-                distance = 3.0,
+                distance = 1.5,
                 canInteract = function()
                     local burst = isPartMissing(veh, def)
                     local allowBurst = (Config.DamageScaling and Config.DamageScaling.AllowBurstTyreTheft) or false

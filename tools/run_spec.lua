@@ -325,11 +325,35 @@ _G.MySQL = _G.MySQL or {
     insert = { await = function(q, p) return 1 end },
     update = { await = function(q, p) return 1 end },
 }
+-- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
+if not _G.vector3 then
+    local v3meta = {
+        __add = function(a, b) return vector3(a.x + b.x, a.y + b.y, a.z + b.z) end,
+        __sub = function(a, b) return vector3(a.x - b.x, a.y - b.y, a.z - b.z) end,
+        __mul = function(a, b)
+            if type(a) == 'number' then return vector3(a * b.x, a * b.y, a * b.z)
+            elseif type(b) == 'number' then return vector3(a.x * b, a.y * b, a.z * b)
+            else return vector3(a.x * b.x, a.y * b.y, a.z * b.z) end
+        end,
+        __div = function(a, b) return vector3(a.x / b, a.y / b, a.z / b) end,
+        __unm = function(a) return vector3(-a.x, -a.y, -a.z) end,
+        __len = function(a) return math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) end,
+        __tostring = function(a) return ('vector3(%s, %s, %s)'):format(a.x, a.y, a.z) end,
+    }
+    function vector3(x, y, z)
+        return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, v3meta)
+    end
+end
+if not _G.vector4 then
+    function vector4(x, y, z, w)
+        return { x = x or 0, y = y or 0, z = z or 0, w = w or 0 }
+    end
+end
 -- [PR-G] stubs p/ server/advanced_chop.lua (commit helpers + kind specs advanced)
 _G.ServerWelders = {}
 function GetPlayers() return {} end
 function GetPlayerPed(_) return 0 end
-function GetEntityCoords(_) return { x = 0, y = 0, z = 0 } end
+function GetEntityCoords(_) return vector3(0.0, 0.0, 0.0) end
 function TriggerClientEvent(_, _, ...) end
 function VPChopAddStolenCarParts(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
 function InvAdd(_, _, _) _G._ADV_REWARD = (_G._ADV_REWARD or 0) + 1; return true end
@@ -732,30 +756,6 @@ _G.Config = {
         },
     },
 }
--- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
-if not _G.vector3 then
-    local v3meta = {
-        __add = function(a, b) return vector3(a.x + b.x, a.y + b.y, a.z + b.z) end,
-        __sub = function(a, b) return vector3(a.x - b.x, a.y - b.y, a.z - b.z) end,
-        __mul = function(a, b)
-            if type(a) == 'number' then return vector3(a * b.x, a * b.y, a * b.z)
-            elseif type(b) == 'number' then return vector3(a.x * b, a.y * b, a.z * b)
-            else return vector3(a.x * b.x, a.y * b.y, a.z * b.z) end
-        end,
-        __div = function(a, b) return vector3(a.x / b, a.y / b, a.z / b) end,
-        __unm = function(a) return vector3(-a.x, -a.y, -a.z) end,
-        __len = function(a) return math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) end,
-        __tostring = function(a) return ('vector3(%s, %s, %s)'):format(a.x, a.y, a.z) end,
-    }
-    function vector3(x, y, z)
-        return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, v3meta)
-    end
-end
-if not _G.vector4 then
-    function vector4(x, y, z, w)
-        return { x = x or 0, y = y or 0, z = z or 0, w = w or 0 }
-    end
-end
 function RegisterNUICallback(_, _) end
 function SendNUIMessage(_) end
 function SetNuiFocus(_, _) end
@@ -857,6 +857,7 @@ dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS 
 dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]
 dofile(base .. '/server/dispatch_bridge_spec.lua')          -- [v1.18 P4.3 DispatchBridge]
 dofile(base .. '/server/forensic_scanner_spec.lua')          -- [v1.18 P4.4 Forensic Scanner]
+dofile(base .. '/server/v118_release_gate_spec.lua')         -- [v1.18 FORENSICS RC]
 
 local anyFail = false
 for i = specStart, #threads do

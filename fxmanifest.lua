@@ -156,6 +156,7 @@ server_scripts {
     'server/partserial.lua',
     'server/partserial_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
     'server/forensic_scanner_spec.lua', -- [v1.18 P4.4] self-gated (vp_chopshop_selftest 1)
+    'server/v118_release_gate_spec.lua', -- [v1.18 FORENSICS RC] self-gated (vp_chopshop_selftest 1)
     -- [FASE1 placas] depois de heat.lua e progression.lua (usa VPChopMDT, Validate*, Inv*,
     -- VPChopEvt e o listener de PART_CHOPPED da progressão), antes de main.lua.
     'server/plates.lua',
