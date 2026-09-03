@@ -52,11 +52,33 @@ local function resolveExhaustData(vehicle)
     return boneId, bonePos, sideSign, fwd, rightV, up
 end
 
--- [FIX-1.2] Config do fluxo: 4 porcas + 2 golpes. Ajuste fino aqui.
+-- [FIX-1.2/1.3] Config do fluxo: 4 porcas + 2 golpes. Ajuste fino aqui.
 local BOLT_COUNT     = 4
-local BOLT_NEEDED_DEG = 720.0   -- giro por porca (mesmo "peso" do parafuso de roda)
+local BOLT_NEEDED_DEG = 900.0   -- giro por porca (subiu de 720 — furto mais demorado)
 local KNOCK_COUNT    = 2
-local KNOCK_HITS     = 3        -- golpes de marreta por ponto
+local KNOCK_HITS     = 4        -- golpes de marreta por ponto (subiu de 3)
+
+--- [FIX-1.3] Jogador DEITADO de costas trabalhando embaixo do carro (creeper de
+--- mecânico) em vez do ajoelhado genérico. Devolve `true` → o core não toca o
+--- TaskPlayAnim padrão.
+local function setupCatalyticPed(ped, vehicle)
+    if type(TaskStartScenarioInPlace) ~= 'function' then
+        return false  -- sem o native → deixa o core tocar o anim de fallback
+    end
+    if ClearPedTasksImmediately then ClearPedTasksImmediately(ped) end
+    -- posiciona os pés do jogador para o carro, na traseira, e desliza pra baixo
+    if vehicle and vehicle ~= 0 and DoesEntityExist(vehicle) and GetOffsetFromEntityInWorldCoords then
+        local ok, back = pcall(GetOffsetFromEntityInWorldCoords, vehicle, 0.0, -2.1, 0.0)
+        if ok and back and SetEntityCoordsNoOffset then
+            SetEntityCoordsNoOffset(ped, back.x, back.y, back.z, false, false, false)
+        end
+        if SetEntityHeading and GetEntityHeading then
+            SetEntityHeading(ped, GetEntityHeading(vehicle))
+        end
+    end
+    TaskStartScenarioInPlace(ped, 'WORLD_HUMAN_VEHICLE_MECHANIC', 0, true)
+    return true
+end
 
 local function calculateCatalyticCamera(vehicle, boneKey)
     local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
@@ -136,11 +158,12 @@ Profiles.list.catalytic = {
     helpText = L('mg_catalytic_help'),
     toolClass = 'cut',   -- [FIX-1.2] mantém o gate de ferramenta de corte no inventário (sem mudança de balanço)
     fov = 38.0,          -- close-up mais fechado na flange
-    minUxMs = 5000,
+    minUxMs = 8000,
     reserveMs = 3000,
     calculateCamera = calculateCatalyticCamera,
     focusPoint      = focusCatalyticPoint,
     generatePoints  = generateCatalyticPoints,
+    setupPed        = setupCatalyticPed,
 }
 
 CatalyticProfile.resolveExhaustData = resolveExhaustData

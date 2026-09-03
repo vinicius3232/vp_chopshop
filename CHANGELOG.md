@@ -151,6 +151,16 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
   no 1º clique (pra `focusPoint` funcionar nos golpes).
 - Zero mudança de servidor/economia. Specs `MG-CAT-PT-8/9/9b`, `MG-SERIAL-PT-1..6`.
   Harness **2122 PASS / 0 FAIL**.
+- **Catalytic — anim + tempo:** jogador agora **deitado de costas embaixo do carro**
+  (cenário `WORLD_HUMAN_VEHICLE_MECHANIC`) em vez do ajoelhado genérico —
+  `catalytic.lua:setupPed` devolve `true` e `client/minigame/core.lua` deixa de tocar
+  o `TaskPlayAnim` padrão quando `setupPed` sinaliza que cuidou da pose. Furto mais
+  demorado: `BOLT_NEEDED_DEG` 720 → 900, `KNOCK_HITS` 3 → 4, profile `minUxMs`
+  5000 → 8000, `Config.CatalyticTheft.ProgressMs` 7000 → 10000 (piso server-side).
+- **Câmera dos golpes:** depois da 4ª porca a câmera **panorâmica automaticamente**
+  pra junta traseira (os 2 pontos de marreta ficavam fora de quadro e o minigame
+  travava em 4/6). `app.js:completePoint` dispara `minigamePointStart` do primeiro
+  `strike` recém-destravado; golpes reposicionados perto da flange.
 
 ### Notes
 

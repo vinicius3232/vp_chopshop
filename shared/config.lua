@@ -937,7 +937,7 @@ Config.CatalyticTheft = {
     --- Duração MÍNIMA server-side do furto (ms) — o token de catalytic:start rejeita
     --- 'too_fast' abaixo disto (× speedMult da ferramenta). O minigame é player-paced;
     --- o client espera o restante antes de chamar catalytic:complete.
-    ProgressMs = 7000,
+    ProgressMs = 10000,
 
     --- Animação de corte com serra
     Anim = {

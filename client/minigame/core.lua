@@ -175,20 +175,28 @@ function Core.Start(vehicle, profileName, opts)
 
     -- 3) Animação contextual do jogador no mundo GTA
     local ped = PlayerPedId()
+    local pedHandled = false
     if profile.setupPed then
-        pcall(profile.setupPed, ped, vehicle, currentSession.boneKey)
+        -- setupPed pode devolver `true` para dizer "já cuidei da pose/anim do ped"
+        -- (ex.: catalytic usa um cenário de mecânico deitado). Nesse caso o core
+        -- NÃO toca o TaskPlayAnim padrão.
+        local okPed, ret = pcall(profile.setupPed, ped, vehicle, currentSession.boneKey)
+        pedHandled = (okPed and ret == true)
     end
-    local animDict = (opts.anim and opts.anim.dict) or 'mini@repair'
-    local animClip = (opts.anim and opts.anim.clip) or 'fixing_a_player'
-    local animFlag = (opts.anim and opts.anim.flag) or 49
 
-    RequestAnimDict(animDict)
-    local t0 = GetGameTimer()
-    while not HasAnimDictLoaded(animDict) and (GetGameTimer() - t0 < 1000) do
-        Wait(10)
-    end
-    if HasAnimDictLoaded(animDict) then
-        TaskPlayAnim(ped, animDict, animClip, 8.0, -1.0, -1, animFlag, 0.0, false, false, false)
+    if not pedHandled then
+        local animDict = (opts.anim and opts.anim.dict) or 'mini@repair'
+        local animClip = (opts.anim and opts.anim.clip) or 'fixing_a_player'
+        local animFlag = (opts.anim and opts.anim.flag) or 49
+
+        RequestAnimDict(animDict)
+        local t0 = GetGameTimer()
+        while not HasAnimDictLoaded(animDict) and (GetGameTimer() - t0 < 1000) do
+            Wait(10)
+        end
+        if HasAnimDictLoaded(animDict) then
+            TaskPlayAnim(ped, animDict, animClip, 8.0, -1.0, -1, animFlag, 0.0, false, false, false)
+        end
     end
 
     -- 4) Abrir NUI

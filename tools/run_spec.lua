@@ -484,7 +484,7 @@ _G.Config = {
         SparksVfx = true,
         PoliceAlertChance = 30,
         PoliceAlertOnFail = 100,
-        ProgressMs = 7000,
+        ProgressMs = 10000,
         Payout = { min = 1200, max = 2200 },
         BenchMaterials = {
             copper     = { amount = 4, chance = 1.0 },
@@ -711,7 +711,7 @@ _G.Config = {
         SparksVfx = true,
         PoliceAlertChance = 30,
         PoliceAlertOnFail = 100,
-        ProgressMs = 7000,
+        ProgressMs = 10000,
         Anim = {
             dict = 'anim@scripted@heist@ig16_glass_cut@male@',
             clip = 'cutting_loop',
