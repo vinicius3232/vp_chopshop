@@ -50,21 +50,21 @@ local function generatePoints(ped)
             primitive = 'rotate',
             neededDeg = 900.0,
             worldPos  = work + (rightV * -0.05),
-            label     = 'GRAVAÇÃO',
+            label     = L('mg_serial_engraving'),
         },
         {
             id        = 'serial_grind_2',
             primitive = 'rotate',
             neededDeg = 720.0,
             worldPos  = work + (rightV * 0.05),
-            label     = 'RESÍDUO',
+            label     = L('mg_serial_residue'),
         },
     }
 end
 
 Profiles.list.serial_scratch = {
-    title    = 'ADULTERAR NÚMERO DE SÉRIE',
-    helpText = 'Segure o clique e faça movimentos circulares para lixar o número',
+    title    = L('mg_serial_title'),
+    helpText = L('mg_serial_help'),
     toolClass = nil,  -- gate é bancada + item sandpaper (server), não uma tool do registry
     fov = 38.0,
     minUxMs = 4000,

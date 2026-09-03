@@ -63,6 +63,21 @@ Config.VehicleNearLiftRadius = 4.2  -- raio de proximidade jogador↔veículo/ma
 --- Distância mínima entre bancadas (0 = desligado)
 Config.MinBenchSpacing = 4.0
 
+--- [FIX-1 / RC parity] Distância de interação (`ox_target.distance`, metros) de cada
+--- target do desmanche. Valores refinados na RC v1.15 — a fonte da verdade fica aqui,
+--- para não regredir a UX espacial ao editar os call sites em client/main.lua.
+--- `catalytic` é um bone target no escapamento → distância curta.
+Config.TargetDistances = {
+    catalytic     = 2.0,   -- furto de catalisador na rua (bones exhaust*)
+    advDoor       = 2.5,   -- Fase 2: portas / capô / porta-malas (bone)
+    engine        = 3.0,   -- Fase 3: motor
+    carcass       = 3.5,   -- Fase 4: carcaça
+    jackLower     = 3.5,   -- baixar o macaco
+    baseDismantle = 3.0,   -- Fase 1: menu de desmanche básico
+    discard       = 3.5,   -- descartar veículo
+    wheel         = 3.0,   -- roubo de roda individual (bone)
+}
+
 --- Modelos de objetos colocáveis
 -- [L2 FIX] Config.LiftBaseModel removido — elevador (nacelle) foi removido do sistema.
 Config.BenchModel = `prop_tool_bench02`
@@ -895,8 +910,10 @@ Config.PhysicalCarry = {
 Config.CatalyticTheft = {
     Enable = true,
 
-    --- Bones no veículo onde a opção de cortar catalisador é exibida
-    Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+    --- [FIX-1] Bones de INTERAÇÃO do ox_target (locator). Só escapamento — `chassis`
+    --- pegaria o carro inteiro. O fallback de câmera do minigame (que pode usar
+    --- chassis) fica em client/minigame/profiles/catalytic.lua, é outra coisa.
+    Bones = { 'exhaust', 'exhaust_2', 'exhaust_3', 'exhaust_4' },
 
     --- [PR-2] Minigame físico sob o carro (profile do stack client/minigame/):
     --- 2 braçadeiras 'drill' + 2 tubos 'cut'. Enable=false → cai no
