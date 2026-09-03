@@ -510,8 +510,57 @@ local ALLOWED_BENCH_MODES = {
     stolen_serial = true,
 }
 
+-- ─── [PR-4] Desmonte na marreta — token temporal (mesmo padrão do furto de catalisador) ──
+local _benchTeardowns = {} ---@type table<number, { token:string, entId:string, startedAt:number, minMs:number, expiresAt:number }>
+
+AddEventHandler('playerDropped', function()
+    local src = source
+    _benchTeardowns[src] = nil
+end)
+
+local function teardownCfg() return (Config.PhysicalCarry or {}).Teardown or {} end
+local function teardownRequired(partKey)
+    local td = teardownCfg()
+    if td.Enable == false then return false end
+    if td.ExemptParts and td.ExemptParts[partKey] then return false end
+    return true
+end
+
+--- Inicia o desmonte: valida player/bench/entitlement/lixa e emite um token temporal.
+lib.callback.register('vp_chopshop:bench:teardownStart', function(source, benchId, entitlementId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    benchId = tonumber(benchId)
+    local bench = benchId and benchById(benchId)
+    if not bench then return { ok = false, err = 'bench' } end
+    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
+    if type(entitlementId) ~= 'string' or entitlementId == '' then return { ok = false, err = 'invalid' } end
+    if not (PartEntitlement and PartEntitlement.Validate) then return { ok = false, err = 'internal' } end
+
+    local okVal, ent = PartEntitlement.Validate(entitlementId, source)
+    if not okVal then return { ok = false, err = ent } end
+
+    local td = teardownCfg()
+    local hammerItem = td.HammerItem or 'hammer'
+    if InvCount(source, hammerItem) < 1 then return { ok = false, err = 'no_hammer' } end
+
+    local now   = GetGameTimer()
+    local minMs = math.floor(tonumber(td.MinDurationMs) or 5000)
+    local token = ('bench_td:%d:%d'):format(source, now)
+    _benchTeardowns[source] = {
+        token = token, entId = entitlementId,
+        startedAt = now, minMs = minMs, expiresAt = now + minMs + 20000,
+    }
+    return { ok = true, token = token, minDurationMs = minMs }
+end)
+
+lib.callback.register('vp_chopshop:bench:teardownCancel', function(source, token)
+    local td = _benchTeardowns[source]
+    if td and td.token == token then _benchTeardowns[source] = nil end
+    return { ok = true }
+end)
+
 --- [PHYSICAL CARRY] Processamento de peça física carregada na bancada de trabalho
-lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, entitlementId, mode)
+lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, entitlementId, mode, teardownToken)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
     if PartEntitlement and PartEntitlement.CheckRateLimit and not PartEntitlement.CheckRateLimit(source, 'benchProcess', 400) then
         return { ok = false, err = 'cooldown' }
@@ -551,6 +600,35 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
 
     local partKey = ent.partKey
     local netId   = ent.sourceNetId or 0
+
+    -- [PR-4] Gate do desmonte na marreta: peça não-isenta exige token de
+    -- bench:teardownStart + tempo mínimo decorrido. Consome o item hammer no OK.
+    if teardownRequired(partKey) then
+        local td = _benchTeardowns[source]
+        if type(teardownToken) ~= 'string' or not td or td.token ~= teardownToken or td.entId ~= entitlementId then
+            if PartEntitlement and PartEntitlement.LogSuspicious then
+                PartEntitlement.LogSuspicious(source, 'bench_teardown_missing_token', tostring(teardownToken))
+            end
+            return { ok = false, err = 'teardown_required' }
+        end
+        local now = GetGameTimer()
+        if now < (td.startedAt + td.minMs - 250) then
+            if PartEntitlement and PartEntitlement.LogSuspicious then
+                PartEntitlement.LogSuspicious(source, 'bench_teardown_too_fast',
+                    ('elapsed=%d min=%d'):format(now - td.startedAt, td.minMs))
+            end
+            return { ok = false, err = 'too_fast' }
+        end
+        if now > td.expiresAt then
+            _benchTeardowns[source] = nil
+            return { ok = false, err = 'expired' }
+        end
+        local hammerItem = teardownCfg().HammerItem or 'hammer'
+        if not InvRemove(source, hammerItem, 1) then
+            return { ok = false, err = 'no_hammer' }
+        end
+        _benchTeardowns[source] = nil
+    end
 
     -- [v1.16 SEC-1.1] Política estrita por partKey: catalisador só aceita raw_materials!
     if partKey == 'catalytic_converter' and mode ~= 'raw_materials' then

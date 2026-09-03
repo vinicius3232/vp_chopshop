@@ -215,6 +215,10 @@ lib.callback.register('vp_chopshop:serial:scratch', function(src)
     -- Proximidade de bancada (verdade server-side)
     if not isPlayerNearAnyBench(src) then return { ok = false, err = 'distance' } end
 
+    -- [PR-3] Item consumível: lixa
+    local sandItem = Config.PartSerial.SandpaperItem or 'sandpaper'
+    if InvCount(src, sandItem) < 1 then return { ok = false, err = 'no_sandpaper' } end
+
     -- Gate de tier
     local needTier = tonumber(Config.PartSerial.ScratchTier) or 2
     local prog = VPChopGetProgression(src)
@@ -223,6 +227,11 @@ lib.callback.register('vp_chopshop:serial:scratch', function(src)
     -- Achar uma car_parts roubada (ou legada) e zerar a série → 'scratched'.
     local slot, meta = findCarPartBySlotState(src, { stolen = true })
     if not slot then return { ok = false, err = 'no_part' } end
+
+    -- Consome a lixa DEPOIS de validar tudo, ANTES de mutar a peça (rollback simples:
+    -- se o SetMetadata falhasse, não temos como saber — mas SetMetadata do ox_inventory
+    -- não retorna status; o consumo antecipado evita riscar de graça em corrida).
+    if not InvRemove(src, sandItem, 1) then return { ok = false, err = 'no_sandpaper' } end
 
     -- Preservar o modelo de origem (continua sendo "de um X") mas apagar a série.
     local newMeta = {
@@ -308,8 +317,10 @@ lib.callback.register('vp_chopshop:serial:benchAvailability', function(src)
     local tier = (prog and prog.tier) or 1
     local scratchSlot = findCarPartBySlotState(src, { stolen = true })
     local forgeSlot   = findCarPartBySlotState(src, { stolen = true, scratched = true })
+    local sandItem    = Config.PartSerial.SandpaperItem or 'sandpaper'
     return {
-        scratch = scratchSlot ~= nil and tier >= (tonumber(Config.PartSerial.ScratchTier) or 2),
+        scratch = scratchSlot ~= nil and tier >= (tonumber(Config.PartSerial.ScratchTier) or 2)
+                  and InvCount(src, sandItem) >= 1,
         forge   = forgeSlot   ~= nil and tier >= (tonumber(Config.PartSerial.ForgeTier)   or 4),
     }
 end)

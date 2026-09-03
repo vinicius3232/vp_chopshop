@@ -214,6 +214,48 @@ html, body {
   filter: drop-shadow(0 0 7px rgba(56, 189, 248, 0.85));
 }
 
+/* ─── [PR-4] Strike primitive (timing-click / desmonte na marreta) ───────── */
+.hotspot.primitive-strike {
+  cursor: pointer;
+}
+
+.hotspot.primitive-strike .hotspot-progress-circle {
+  stroke: var(--accent-amber);
+}
+
+.strike-closer {
+  fill: none;
+  stroke: var(--accent-red);
+  stroke-width: 3;
+  opacity: 0.8;
+  transition: stroke 0.08s ease, stroke-width 0.08s ease;
+}
+
+.strike-closer.in-band {
+  stroke: var(--accent-green);
+  stroke-width: 4.5;
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.9));
+}
+
+.hotspot.strike-armed {
+  animation: strikeArmed 0.13s ease;
+}
+
+@keyframes strikeArmed {
+  0% { transform: translate(-50%, -50%) scale(1.35); filter: brightness(1.6); }
+  100% { transform: translate(-50%, -50%) scale(1.0); filter: brightness(1); }
+}
+
+.hotspot.strike-miss {
+  animation: strikeMiss 0.17s ease;
+}
+
+@keyframes strikeMiss {
+  0%, 100% { transform: translate(-50%, -50%); }
+  25% { transform: translate(-56%, -50%); }
+  75% { transform: translate(-44%, -50%); }
+}
+
 /* ─── Trace / Structural Polyline Cutting ────────────────────────────────── */
 .hotspot.primitive-trace {
   position: absolute;

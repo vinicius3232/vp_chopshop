@@ -18,28 +18,45 @@ local PS = Config.PartSerial
 -- [SERIAL] BLOCO 1 — opções da bancada (riscar / forjar)
 -- ─────────────────────────────────────────────────────────────────────────────
 
---- Executa o RISCAR: barra de progresso + callback. Notifica por chave de locale.
+--- [PR-3] Executa o RISCAR: minigame de lixa (profile serial_scratch, primitive
+--- 'rotate') + callback. UX no client; item/tier/proximidade/cooldown = server.
 local function doScratch()
-    local ok = lib.progressBar({
-        duration     = 5000,
-        label        = L('serial_scratch_progress'),
-        useWhileDead = false,
-        canCancel    = true,
-        disable      = { move = true, car = true, combat = true },
-        anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
-    })
+    local sandItem = (PS.SandpaperItem) or 'sandpaper'
+    if (exports.ox_inventory:Search('count', sandItem) or 0) < 1 then
+        VPChopNotify(L('serial_no_sandpaper'), 'error')
+        return
+    end
+
+    local mg = PS.ScratchMinigame or { Enable = true, Profile = 'serial_scratch' }
+    local ok
+    if mg.Enable ~= false and VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
+        ok = VPChopDismantleMinigame.Start(cache.ped, mg.Profile or 'serial_scratch', {
+            timeout = 25000,
+        })
+    else
+        ok = lib.progressBar({
+            duration     = 5000,
+            label        = L('serial_scratch_progress'),
+            useWhileDead = false,
+            canCancel    = true,
+            disable      = { move = true, car = true, combat = true },
+            anim         = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
+        })
+    end
     if not ok then return end
+
     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:serial:scratch', false)
     if not cbOk then res = nil end
     if res and res.ok then
         VPChopNotify(L('serial_scratch_success'), 'success')
     else
         local errKey = ({
-            tier     = 'serial_scratch_tier',
-            no_part  = 'serial_no_part',
-            distance = 'serial_too_far',
-            cooldown = 'serial_cooldown',
-            player   = 'serial_generic_error',
+            tier          = 'serial_scratch_tier',
+            no_part       = 'serial_no_part',
+            no_sandpaper  = 'serial_no_sandpaper',
+            distance      = 'serial_too_far',
+            cooldown      = 'serial_cooldown',
+            player        = 'serial_generic_error',
         })[(res and res.err) or ''] or 'serial_generic_error'
         VPChopNotify(L(errKey), 'error')
     end
@@ -113,6 +130,8 @@ function VPChopSerialBenchOptions(benchId)
             distance    = Config.InteractDistance,
             canInteract = function()
                 if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
+                local sandItem = PS.SandpaperItem or 'sandpaper'
+                if (exports.ox_inventory:Search('count', sandItem) or 0) < 1 then return false end
                 refresh()
                 return avail.scratch == true
             end,

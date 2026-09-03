@@ -464,42 +464,6 @@ Config.Plates = {
         keys         = { 'e', 'e', 'e' },
     },
 
-    --- Minigame de parafusos 3D autoral (estilo "filo"): câmera dedicada na face da
-    --- placa que o jogador mira + cursor do mouse + girar segurando o botão esquerdo.
-    --- Tem prioridade sobre o SkillCheck acima quando Enable = true. Sempre roda em
-    --- MODO MARCADOR (DrawMarker) — não depende de asset pago. Degrada para o
-    --- SkillCheck automaticamente se a geometria/câmera não projetar os parafusos.
-    ---
-    --- [RC-FINDING-01 / P0.2] resolvido no código: o minigame agora é FRENTE/TRASEIRA-
-    --- aware (client/plates.lua resolve a face pela posição do jogador; câmera, normal
-    --- e heading base seguem a face). Asset pago bolt.ydr REMOVIDO. Continua DESLIGADO
-    --- (Enable=false) só até uma passada de calibração in-game dos offsets abaixo —
-    --- ligar, ajustar PlateZFrac / PlateYOffset{Front,Rear} / PlateHalf* olhando os
-    --- parafusos no carro, e então deixar Enable=true.
-    Bolt3D = {
-        Enable          = false,
-        --- 2 = parafusos no topo · 4 = um em cada canto da placa.
-        Bolts           = 4,
-        --- Voltas de mouse para soltar cada parafuso (placa pede menos que a roda).
-        TurnsToLoosen   = 1.5,
-        --- Sensibilidade: graus por unidade de movimento do cursor (maior = mais rápido).
-        Sensitivity     = 900.0,
-        --- Raio (coords de tela 0..1) para o cursor "agarrar" um parafuso.
-        HoverRadius     = 0.09,
-        --- Tempo máximo (ms) antes de falhar por timeout.
-        Timeout         = 25000,
-        --- Geometria da placa (calibrar in-game): altura na bounding box (0..1),
-        --- meia-largura e meia-altura do retângulo da placa (m).
-        PlateZFrac      = 0.30,
-        PlateHalfWidth  = 0.20,
-        PlateHalfHeight = 0.07,
-        --- Recuo da placa para fora da bounding box (m), por face. PlateYOffset (legado)
-        --- é usado como fallback se a variante da face não estiver definida.
-        PlateYOffset      = 0.02,
-        PlateYOffsetFront = 0.02,
-        PlateYOffsetRear  = 0.02,
-    },
-
     --- Ferramenta exigida (verificada no client p/ UX e no servidor como verdade).
     ToolItem = 'screwdriver',
 
@@ -610,6 +574,17 @@ Config.PartSerial = {
     --- Tier mínimo de progressão (VPChopGetProgression(src).tier) para RISCAR a série
     --- de uma car_parts 'stolen' na bancada (apaga a série visível → estado 'scratched').
     ScratchTier = 2,
+
+    --- [PR-3] Item consumível gasto ao RISCAR (1 por ação). Registrar no ox_inventory
+    --- (ver installation/ox_items_snippet.txt).
+    SandpaperItem = 'sandpaper',
+
+    --- [PR-3] Minigame físico de lixar (profile do stack client/minigame/, primitive
+    --- 'rotate'). Enable=false → cai na barra de progresso simples de 5 s.
+    ScratchMinigame = {
+        Enable  = true,
+        Profile = 'serial_scratch',
+    },
 
     --- Tier mínimo para FORJAR uma série falsa nova ('stolen'/'scratched' → 'forged').
     --- A forjada engana o scan normal (parece legal); só a perícia revela.
@@ -894,6 +869,26 @@ Config.PhysicalCarry = {
         clip = 'idle',
         flag = 49,
     },
+
+    --- [PR-4] Minigame de "desmonte na marreta" ANTES de processar a peça roubada na
+    --- bancada (primitive 'strike' — clique no ritmo, quando o anel entra na zona).
+    --- Enable=false → processa direto com a barra de progresso de 4 s de antes.
+    --- Anti-cheat: server exige token de bench:teardownStart + tempo mínimo em
+    --- benchProcessPart (mesmo padrão do furto de catalisador).
+    Teardown = {
+        Enable        = true,
+        Profile       = 'bench_teardown',
+        --- Duração MÍNIMA server-side (ms). O client espera o restante antes de
+        --- chamar benchProcessPart (o server rejeita 'too_fast' abaixo disto).
+        MinDurationMs = 5000,
+        --- Peças isentas do desmonte (já vêm "abertas"). O catalisador foi cortado
+        --- durante o furto (PR-2) → processa direto.
+        ExemptParts   = { catalytic_converter = true },
+        --- Item consumível gasto por desmonte (1x). Registrar no ox_inventory.
+        HammerItem    = 'hammer',
+        --- Prop na mão durante o minigame.
+        HammerProp    = { model = 'prop_tool_hammer', offset = { 0.10, 0.02, 0.0 }, rotation = { 0, 0, 0 } },
+    },
 }
 
 --- Sistema de Furto de Catalisador Automotivo (Street & Workshop Theft)
@@ -903,12 +898,13 @@ Config.CatalyticTheft = {
     --- Bones no veículo onde a opção de cortar catalisador é exibida
     Bones = { 'exhaust', 'exhaust_2', 'chassis' },
 
-    --- Minigame de corte duplo de escapamento (tubo dianteiro e tubo traseiro)
+    --- [PR-2] Minigame físico sob o carro (profile do stack client/minigame/):
+    --- 2 braçadeiras 'drill' + 2 tubos 'cut'. Enable=false → cai no
+    --- VPChopMinigameFallback (lib.skillCheck). Profile aponta um entry de
+    --- VPChopProfiles.list (default 'catalytic').
     Minigame = {
-        Enable = true,
-        Stages = 2,
-        Difficulty = { 'easy', 'medium' },
-        Inputs = { 'w', 'a', 's', 'd' },
+        Enable  = true,
+        Profile = 'catalytic',
     },
 
     --- Efeito visual de faíscas de serra durante o corte do escape
@@ -920,7 +916,9 @@ Config.CatalyticTheft = {
     --- Chance de alerta policial caso o jogador falhe no minigame (ruído súbito de metal/serra travando)
     PoliceAlertOnFail = 100,
 
-    --- Tempo total de corte do escapamento em milissegundos (dividido entre as 2 etapas)
+    --- Duração MÍNIMA server-side do furto (ms) — o token de catalytic:start rejeita
+    --- 'too_fast' abaixo disto (× speedMult da ferramenta). O minigame é player-paced;
+    --- o client espera o restante antes de chamar catalytic:complete.
     ProgressMs = 7000,
 
     --- Animação de corte com serra
@@ -1039,29 +1037,6 @@ Config.Jackstand = {
         -- fallback lib.skillCheck (quando boii_minigames não estiver ativo)
         SkillCheckDifficulties = { 'easy', 'medium', 'medium', 'hard' },
         SkillCheckKeys         = { 'e', 'e', 'e', 'e' },
-
-        --- Minigame de parafusos 3D autoral (estilo "filo": câmera dedicada + cursor do
-        --- mouse + girar segurando o botão esquerdo). NÃO precisa de boii_minigames nem
-        --- de NUI nem de asset pago — roda em MODO MARCADOR (DrawMarker). Tem prioridade
-        --- sobre o boii/skill_circle quando Enable = true. Degrada para lib.skillCheck
-        --- automaticamente se a geometria/câmera não projetar os parafusos.
-        --- [RC-FINDING-01 / P0.2] núcleo (runBoltSurface) endurecido: clamp de giro e
-        --- degradação automática se nenhum parafuso projeta por >2.5 s. Asset pago
-        --- bolt.ydr REMOVIDO. Continua DESLIGADO só até calibração in-game da geometria
-        --- da roda (radius/outOff em client/main.lua) — então Enable=true.
-        Bolt3D = {
-            Enable        = false,
-            --- Quantidade de parafusos por roda.
-            Bolts         = 5,
-            --- Voltas de mouse necessárias para soltar cada parafuso (2.0 = duas voltas).
-            TurnsToLoosen = 2.0,
-            --- Sensibilidade: graus de giro por unidade de movimento do cursor (maior = mais rápido).
-            Sensitivity   = 900.0,
-            --- Raio (em coords de tela 0..1) para o cursor "agarrar" um parafuso.
-            HoverRadius   = 0.09,
-            --- Tempo máximo (ms) antes de falhar por timeout.
-            Timeout       = 30000,
-        },
     },
 }
 

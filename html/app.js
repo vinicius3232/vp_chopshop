@@ -10,6 +10,15 @@
   const CIRCLE_RADIUS = 26;
   const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * CIRCLE_RADIUS; // ~163.36
 
+  // [PR-4] primitive 'strike' — anel que fecha de STRIKE_R_MAX -> STRIKE_R_MIN e
+  // volta (onda triangular). Acerto se o raio do anel estiver na faixa STRIKE_BAND
+  // no momento do clique. Erro não pune progresso.
+  const STRIKE_R_MAX = 24;
+  const STRIKE_R_MIN = 5;
+  const STRIKE_BAND = [8.5, 14.5];
+  const STRIKE_CYCLE_MS = 850;
+  let strikeRaf = null;
+
   let activeMinigame = false;
   let pointsMap = {};
   let activeHotspotId = null;
@@ -136,6 +145,58 @@
     }
   }
 
+  // ─── [PR-4] Strike primitive (timing-click com anel que fecha) ──────────────
+  function strikeLoop(now) {
+    if (!activeMinigame) { strikeRaf = null; return; }
+    let anyStrike = false;
+    for (const k in pointsMap) {
+      const pt = pointsMap[k];
+      if (!pt || pt.primitive !== 'strike' || !pt.closerCircle) continue;
+      if (pt.completed) { pt.closerCircle.style.display = 'none'; continue; }
+      anyStrike = true;
+      if (pt._t0 == null) pt._t0 = now;
+      const phase = ((now - pt._t0) % STRIKE_CYCLE_MS) / STRIKE_CYCLE_MS; // 0..1
+      const tri = phase < 0.5 ? (phase * 2) : (2 - phase * 2);            // 0->1->0
+      pt._closerR = STRIKE_R_MAX - tri * (STRIKE_R_MAX - STRIKE_R_MIN);
+      pt.closerCircle.setAttribute('r', pt._closerR.toFixed(1));
+      const inBand = pt._closerR >= STRIKE_BAND[0] && pt._closerR <= STRIKE_BAND[1];
+      pt.closerCircle.classList.toggle('in-band', inBand);
+    }
+    strikeRaf = anyStrike ? requestAnimationFrame(strikeLoop) : null;
+  }
+
+  function stopStrikeLoop() {
+    if (strikeRaf) { cancelAnimationFrame(strikeRaf); strikeRaf = null; }
+  }
+
+  function strikeAttempt(pt) {
+    if (!pt || pt.completed || pt.primitive !== 'strike') return;
+    const r = (typeof pt._closerR === 'number') ? pt._closerR : STRIKE_R_MAX;
+    const inBand = r >= STRIKE_BAND[0] && r <= STRIKE_BAND[1];
+
+    if (inBand) {
+      pt.hits = (pt.hits || 0) + 1;
+      pt.element.classList.remove('strike-miss');
+      pt.element.classList.add('strike-armed');
+      setTimeout(() => pt.element && pt.element.classList.remove('strike-armed'), 130);
+      postNui('minigameStrikeHit', { id: pt.id });
+
+      pt.progress = Math.min(100, (pt.hits / pt.hitsNeeded) * 100);
+      if (pt.progressCircle) {
+        pt.progressCircle.style.strokeDashoffset = CIRCLE_CIRCUMFERENCE * (1 - pt.progress / 100);
+      }
+      if (pt.hits >= pt.hitsNeeded) {
+        completePoint(pt);
+      } else {
+        updateOverallProgress();
+      }
+    } else {
+      pt.element.classList.remove('strike-armed');
+      pt.element.classList.add('strike-miss');
+      setTimeout(() => pt.element && pt.element.classList.remove('strike-miss'), 170);
+    }
+  }
+
   function startMinigame(data) {
     activeMinigame = true;
     hudTitle.textContent = data.title || 'OPERAÇÃO FÍSICA';
@@ -165,7 +226,7 @@
         iconLabel = '&#9986;';
       } else if (primitive === 'drill') {
         iconLabel = '&#9881;';
-      } else if (primitive === 'trace') {
+      } else if (primitive === 'trace' || primitive === 'strike') {
         iconLabel = '&#9874;'; // Hammer / pick / torch
       }
 
@@ -299,21 +360,34 @@
           visible: true
         };
       } else {
+        const closerCircleSvg = primitive === 'strike'
+          ? `<circle class="strike-closer" cx="32" cy="32" r="${STRIKE_R_MAX}" />`
+          : '';
+        const defaultLabel = primitive === 'cut' ? 'CORTE'
+          : primitive === 'drill' ? 'CALÇO'
+          : primitive === 'strike' ? 'GOLPE' : 'PARAFUSO';
         el.innerHTML = `
           <svg class="hotspot-svg" viewBox="0 0 64 64">
             <circle class="hotspot-bg-circle" cx="32" cy="32" r="${CIRCLE_RADIUS}" />
             <circle class="hotspot-progress-circle" cx="32" cy="32" r="${CIRCLE_RADIUS}" />
+            ${closerCircleSvg}
           </svg>
           <div class="hotspot-inner">
             <span class="hotspot-icon">${iconLabel}</span>
-            <span class="hotspot-label">${pt.label || (primitive === 'cut' ? 'CORTE' : (primitive === 'drill' ? 'CALÇO' : 'PARAFUSO'))}</span>
+            <span class="hotspot-label">${pt.label || defaultLabel}</span>
           </div>
         `;
 
         el.addEventListener('mousedown', (e) => {
           if (e.button !== 0) return; // Only Left Click
           if (pointsMap[ptId] && pointsMap[ptId].completed) return;
-          
+
+          if (primitive === 'strike') {
+            strikeAttempt(pointsMap[ptId]);
+            e.preventDefault();
+            return;
+          }
+
           activeHotspotId = ptId;
           el.classList.add('active');
           postNui('minigamePointStart', { id: ptId });
@@ -340,9 +414,12 @@
           primitive: primitive,
           element: el,
           progressCircle: el.querySelector('.hotspot-progress-circle'),
+          closerCircle: el.querySelector('.strike-closer'),
           icon: el.querySelector('.hotspot-icon'),
           neededDeg: neededDeg,
           holdTimeMs: holdTimeMs,
+          hitsNeeded: Math.max(1, pt.hitsNeeded || 4),
+          hits: 0,
           accumulatedDeg: 0,
           progress: 0,
           completed: false,
@@ -353,6 +430,11 @@
 
     updateOverallProgress();
     app.classList.remove('hidden');
+
+    stopStrikeLoop();
+    if (points.some(p => (p.primitive === 'strike'))) {
+      strikeRaf = requestAnimationFrame(strikeLoop);
+    }
   }
 
   function updatePointsPosition(data) {
@@ -381,6 +463,7 @@
     activeMinigame = false;
     activeHotspotId = null;
     stopCuttingLoop();
+    stopStrikeLoop();
     app.classList.add('hidden');
     hotspotContainer.innerHTML = '';
     pointsMap = {};

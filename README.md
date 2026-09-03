@@ -595,7 +595,7 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.15.0-rc1` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.19.0` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
 > **v1.15.0-rc1** — **RELEASE CANDIDATE.** Refatoração server-authority em stack de 10 PRs
 > (#2→#11, nada mergeado até a validação runtime QBox passar): `ChopSession` (fonte única do
@@ -617,10 +617,9 @@ O script **não depende de framework** para a lógica principal — inventário 
 > clamp do witnessScore, `canInteract` do prop de pneu com cache (resmon), `cache.ped`,
 > refresh não-bloqueante e saneamentos. Sem exploits críticos. Ver CHANGELOG.
 >
-> **v1.14.0** — **minigame de parafusos 3D (estilo "filo")**: câmera dedicada + cursor do mouse,
-> segura o botão esquerdo e gira para desrosquear. Conectado ao **roubo de pneu** (via macaco) e ao
-> **roubo de placa** (substitui o skillcheck), com fallback automático para `lib.skillCheck`.
-> Configurável em `Config.Jackstand.Minigame.Bolt3D` e `Config.Plates.Bolt3D`. Ver CHANGELOG.
+> **v1.14.0** — minigame de parafusos 3D (estilo "filo") no roubo de pneu e placa. _Removido na
+> limpeza pós-v1.18: o roubo de pneu usa o stack `client/minigame/` (profile `wheel`) e o roubo
+> de placa usa `lib.skillCheck` (`Config.Plates.SkillCheck`)._ Ver CHANGELOG.
 >
 > **v1.7.0–1.13.2:** auditoria (limpeza/segurança/performance), recompensa imediata + emboscada,
 > o **sistema completo de placas** (roubo físico → forja → placa falsa que engana o MDT,
