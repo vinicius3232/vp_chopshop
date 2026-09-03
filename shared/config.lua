@@ -901,7 +901,7 @@ Config.CatalyticTheft = {
     Enable = true,
 
     --- Bones no veículo onde a opção de cortar catalisador é exibida
-    Bones = { 'exhaust', 'exhaust_2', 'chassis' },
+    Bones = { 'exhaust', 'exhaust_2', 'exhaust_3', 'exhaust_4' },
 
     --- Minigame de corte duplo de escapamento (tubo dianteiro e tubo traseiro)
     Minigame = {
