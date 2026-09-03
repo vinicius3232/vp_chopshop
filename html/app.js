@@ -70,7 +70,7 @@
     }
 
     if (pt.element && pt.primitive !== 'trace') {
-      pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing');
+      pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing', 'sanding');
       pt.element.classList.add('completed');
     }
 
@@ -171,21 +171,37 @@
     if (strikeRaf) { cancelAnimationFrame(strikeRaf); strikeRaf = null; }
   }
 
-  // [FIX-1.2] Um ponto lockUntilOthers só libera quando todos os pontos SEM esse
-  // flag já estão completos (ex.: golpes de marreta só depois de tirar as porcas).
+  function completedCountNow() {
+    let n = 0;
+    for (const k in pointsMap) { if (pointsMap[k] && pointsMap[k].completed) n++; }
+    return n;
+  }
+
+  // [FIX-1.2/1.3] Gate de destravamento de ponto:
+  //   lockUntilOthers → só libera quando todos os pontos SEM o flag estão completos.
+  //   unlockAfter (int) → só libera após N outros pontos completos (sequência).
   function isPointUnlocked(pt) {
-    if (!pt || !pt.lockUntilOthers) return true;
-    for (const k in pointsMap) {
-      const o = pointsMap[k];
-      if (o && !o.lockUntilOthers && !o.completed) return false;
+    if (!pt) return true;
+    if (typeof pt.unlockAfter === 'number' && pt.unlockAfter > 0) {
+      if (completedCountNow() < pt.unlockAfter) return false;
+    }
+    if (pt.lockUntilOthers) {
+      for (const k in pointsMap) {
+        const o = pointsMap[k];
+        if (o && !o.lockUntilOthers && !o.completed) return false;
+      }
     }
     return true;
+  }
+
+  function isPointGated(pt) {
+    return !!pt && ((typeof pt.unlockAfter === 'number' && pt.unlockAfter > 0) || pt.lockUntilOthers);
   }
 
   function refreshLockedPoints() {
     for (const k in pointsMap) {
       const pt = pointsMap[k];
-      if (!pt || !pt.lockUntilOthers || pt.completed) continue;
+      if (!pt || !isPointGated(pt) || pt.completed) continue;
       const unlocked = isPointUnlocked(pt);
       if (pt.element) pt.element.classList.toggle('locked', !unlocked);
     }
@@ -255,6 +271,8 @@
         iconLabel = '&#9881;';
       } else if (primitive === 'trace' || primitive === 'strike') {
         iconLabel = '&#9874;'; // Hammer / pick / torch
+      } else if (primitive === 'sand') {
+        iconLabel = '&#8644;'; // vai-e-vem (lixar)
       }
 
       if (primitive === 'trace' && pt.path && pt.path.length >= 2) {
@@ -407,10 +425,21 @@
 
         el.addEventListener('mousedown', (e) => {
           if (e.button !== 0) return; // Only Left Click
-          if (pointsMap[ptId] && pointsMap[ptId].completed) return;
+          const thisPt = pointsMap[ptId];
+          if (thisPt && thisPt.completed) return;
+          if (thisPt && !isPointUnlocked(thisPt)) {
+            el.classList.add('strike-miss');
+            setTimeout(() => el && el.classList.remove('strike-miss'), 170);
+            e.preventDefault();
+            return;
+          }
 
           if (primitive === 'strike') {
-            strikeAttempt(pointsMap[ptId]);
+            if (thisPt && !thisPt._focused) {
+              thisPt._focused = true;
+              postNui('minigamePointStart', { id: ptId });
+            }
+            strikeAttempt(thisPt);
             e.preventDefault();
             return;
           }
@@ -429,6 +458,10 @@
           } else if (primitive === 'drill') {
             el.classList.add('drilling');
             startCuttingLoop(ptId);
+          } else if (primitive === 'sand') {
+            el.classList.add('sanding');
+            thisPt._sandLastX = e.clientX;
+            thisPt._sandDir = 0;
           }
 
           e.preventDefault();
@@ -446,14 +479,21 @@
           neededDeg: neededDeg,
           holdTimeMs: holdTimeMs,
           hitsNeeded: Math.max(1, pt.hitsNeeded || 4),
+          strokesNeeded: Math.max(3, pt.strokesNeeded || 8),
+          strokes: 0,
+          _sandDir: 0,
+          _sandLastX: 0,
           hits: 0,
           accumulatedDeg: 0,
           progress: 0,
           completed: false,
           visible: true,
-          lockUntilOthers: pt.lockUntilOthers === true
+          lockUntilOthers: pt.lockUntilOthers === true,
+          unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null
         };
-        if (pt.lockUntilOthers === true) el.classList.add('locked');
+        if (pt.lockUntilOthers === true || (typeof pt.unlockAfter === 'number' && pt.unlockAfter > 0)) {
+          el.classList.add('locked');
+        }
       }
     });
 
@@ -579,6 +619,30 @@
         }
       }
       prevMouseAngle = currentAngle;
+    } else if (pt.primitive === 'sand') {
+      // [FIX-1.3] Lixar: esfregar o mouse pra frente e pra trás sobre o número.
+      // Cada inversão de direção com deslocamento mínimo conta 1 passada.
+      const dx = e.clientX - (pt._sandLastX || e.clientX);
+      if (Math.abs(dx) >= 6) {
+        const dir = dx > 0 ? 1 : -1;
+        if (pt._sandDir !== 0 && dir !== pt._sandDir) {
+          pt.strokes = (pt.strokes || 0) + 1;
+          pt.progress = Math.min(100, Math.floor((pt.strokes / pt.strokesNeeded) * 100));
+          if (pt.progressCircle) {
+            pt.progressCircle.style.strokeDashoffset = CIRCLE_CIRCUMFERENCE * (1 - pt.progress / 100);
+          }
+          pt.element.classList.remove('sand-tick');
+          void pt.element.offsetWidth;
+          pt.element.classList.add('sand-tick');
+          if (pt.progress >= 100) {
+            completePoint(pt);
+          } else {
+            updateOverallProgress();
+          }
+        }
+        pt._sandDir = dir;
+        pt._sandLastX = e.clientX;
+      }
     } else if (pt.primitive === 'trace' && pt.isTracing && pt.path && pt.path.length >= 2) {
       // ─── Structural Trace: Anti-Cheese & Intra-Segment Hardening ─────────
       const now = Date.now();
@@ -672,7 +736,7 @@
     if (activeHotspotId && pointsMap[activeHotspotId]) {
       const pt = pointsMap[activeHotspotId];
       pt.isTracing = false;
-      pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing');
+      pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing', 'sanding');
       if (pt.torchTip) pt.torchTip.classList.add('hidden');
     }
     stopCuttingLoop();

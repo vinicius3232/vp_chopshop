@@ -132,6 +132,26 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
 - Specs: `MG-CAT-PT-1..7` (+ `-3b` lockUntilOthers), `MG-LOCALE-1` atualizado.
   Harness **2110 PASS / 0 FAIL**.
 
+### Rework (FIX-1.3) — série interativa + catalisador sequencial
+
+- **Primitive de NUI NOVA `sand`** (`html/app.js` + `style.css`): o jogador segura o
+  clique e **esfrega o mouse pra frente e pra trás** sobre a zona; cada inversão de
+  direção com deslocamento mínimo conta 1 passada. `strokesNeeded` por ponto.
+- **`serial_scratch` reescrito** para 2 zonas `sand` (`serial_grind_1` gravação /
+  `serial_grind_2` resíduo), a 2ª em sequência (`unlockAfter = 1`). Câmera mais
+  fechada + `focusPoint` que empurra a câmera pra cada zona ao começar a lixar.
+  Antes eram 2 `rotate` (segurar + girar em círculo).
+- **`catalytic`: porcas em sequência.** As 4 porcas agora têm `unlockAfter` 0/1/2/3
+  (uma de cada vez), os 2 golpes `unlockAfter = 4`. Novo `focusPoint` — a câmera
+  aproxima porca a porca em close, depois vai pra junta traseira. Fica mais perto
+  do fluxo "desparafusa uma a uma → solta na marreta".
+- **`client/minigame/core.lua`** passou a repassar `strokesNeeded` e `unlockAfter`.
+  `app.js`: `isPointUnlocked` entende `unlockAfter` (int) além de `lockUntilOthers`;
+  `mousedown` de qualquer primitive respeita o gate; `strike` dispara `minigamePointStart`
+  no 1º clique (pra `focusPoint` funcionar nos golpes).
+- Zero mudança de servidor/economia. Specs `MG-CAT-PT-8/9/9b`, `MG-SERIAL-PT-1..6`.
+  Harness **2122 PASS / 0 FAIL**.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi

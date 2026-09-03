@@ -264,6 +264,29 @@ html, body {
   75% { transform: translate(-44%, -50%); }
 }
 
+/* ─── [FIX-1.3] Sand primitive (lixar o número de série — vai-e-vem) ─────── */
+.hotspot.primitive-sand {
+  cursor: ew-resize;
+}
+
+.hotspot.primitive-sand .hotspot-progress-circle {
+  stroke: var(--accent-amber, #f59e0b);
+}
+
+.hotspot.primitive-sand.sanding .hotspot-progress-circle {
+  stroke: #fbbf24;
+  filter: drop-shadow(0 0 7px rgba(251, 191, 36, 0.85));
+}
+
+.hotspot.sand-tick {
+  animation: sandTick 0.11s ease;
+}
+
+@keyframes sandTick {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.14); filter: brightness(1.4); }
+}
+
 /* ─── Trace / Structural Polyline Cutting ────────────────────────────────── */
 .hotspot.primitive-trace {
   position: absolute;

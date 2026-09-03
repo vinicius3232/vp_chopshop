@@ -1331,9 +1331,10 @@ local function run()
         end
     end
 
-    -- ─── [FIX-1.2] Catalytic — shape dos pontos: 4 porcas (rotate) + 2 golpes (strike) ──
+    -- ─── [FIX-1.2/1.3] Catalytic — 4 porcas (rotate, sequência) + 2 golpes (strike) ──
     do
-        local catPts = Profiles.Get('catalytic').generatePoints(1, 'exhaust')
+        local catProf = Profiles.Get('catalytic')
+        local catPts = catProf.generatePoints(1, 'exhaust')
         check('MG-CAT-PT-1 catalytic gera 6 pontos (4 rotate + 2 strike)', #catPts == 6)
         local rotN, strikeN = 0, 0
         for _, pt in ipairs(catPts) do
@@ -1343,7 +1344,7 @@ local function run()
             elseif pt.primitive == 'strike' then
                 strikeN = strikeN + 1
                 check(('MG-CAT-PT-3 %s tem hitsNeeded numérico'):format(pt.id), type(pt.hitsNeeded) == 'number' and pt.hitsNeeded > 0)
-                check(('MG-CAT-PT-3b %s trava até as porcas saírem (lockUntilOthers)'):format(pt.id), pt.lockUntilOthers == true)
+                check(('MG-CAT-PT-3b %s só depois das 4 porcas (unlockAfter == 4)'):format(pt.id), pt.unlockAfter == 4)
             end
             check(('MG-CAT-PT-4 %s tem worldPos + label'):format(tostring(pt.id)),
                 type(pt.worldPos) == 'table' and type(pt.label) == 'string' and #pt.label > 0)
@@ -1352,6 +1353,30 @@ local function run()
         check('MG-CAT-PT-6 exatamente 2 strike', strikeN == 2)
         check('MG-CAT-PT-7 ids esperados cat_bolt_1 / cat_knock_1',
             catPts[1].id == 'cat_bolt_1' and catPts[5].id == 'cat_knock_1')
+        check('MG-CAT-PT-8 porcas em sequência (unlockAfter 0,1,2,3)',
+            catPts[1].unlockAfter == 0 and catPts[2].unlockAfter == 1
+            and catPts[3].unlockAfter == 2 and catPts[4].unlockAfter == 3)
+        check('MG-CAT-PT-9 catalytic tem focusPoint (câmera empurra por ponto)',
+            type(catProf.focusPoint) == 'function')
+        local fCam, fLook, fFov = catProf.focusPoint(1, 'cat_bolt_2')
+        check('MG-CAT-PT-9b focusPoint devolve camPos/lookAt/fov',
+            type(fCam) == 'table' and type(fLook) == 'table' and type(fFov) == 'number')
+    end
+
+    -- ─── [FIX-1.3] Serial scratch — primitive 'sand' (esfrega vai-e-vem), 2 zonas ──
+    do
+        local ssProf = Profiles.Get('serial_scratch')
+        local ssPts = ssProf.generatePoints(1)
+        check('MG-SERIAL-PT-1 serial_scratch gera 2 pontos', #ssPts == 2)
+        for _, pt in ipairs(ssPts) do
+            check(('MG-SERIAL-PT-2 %s é primitive sand'):format(pt.id), pt.primitive == 'sand')
+            check(('MG-SERIAL-PT-3 %s tem strokesNeeded numérico'):format(pt.id),
+                type(pt.strokesNeeded) == 'number' and pt.strokesNeeded >= 3)
+            check(('MG-SERIAL-PT-4 %s tem worldPos + label'):format(pt.id),
+                type(pt.worldPos) == 'table' and type(pt.label) == 'string' and #pt.label > 0)
+        end
+        check('MG-SERIAL-PT-5 2ª zona em sequência (unlockAfter == 1)', ssPts[2].unlockAfter == 1)
+        check('MG-SERIAL-PT-6 serial_scratch tem focusPoint', type(ssProf.focusPoint) == 'function')
     end
 
     -- ─── [FIX-1.1] Catalytic — paridade de bone da CÂMERA (exhaust_3/_4-only) ──────

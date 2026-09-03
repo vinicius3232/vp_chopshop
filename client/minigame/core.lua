@@ -158,7 +158,9 @@ function Core.Start(vehicle, profileName, opts)
             holdTimeMs = pt.holdTimeMs,
             neededDeg = pt.neededDeg or 720.0,
             hitsNeeded = pt.hitsNeeded,              -- [FIX-1.2] antes não era repassado (strike caía no default 4)
-            lockUntilOthers = pt.lockUntilOthers,    -- [FIX-1.2] ponto só destrava quando os demais estão completos
+            strokesNeeded = pt.strokesNeeded,        -- [FIX-1.3] primitive 'sand' (esfrega a lixa vai-e-vem)
+            lockUntilOthers = pt.lockUntilOthers,    -- [FIX-1.2] ponto só destrava quando TODOS os demais estão completos
+            unlockAfter = pt.unlockAfter,            -- [FIX-1.3] ponto só destrava após N outros pontos completos (sequência)
             x = sx,
             y = sy,
             path = path,

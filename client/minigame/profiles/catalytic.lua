@@ -67,41 +67,62 @@ local function calculateCatalyticCamera(vehicle, boneKey)
     return camPos, lookAt
 end
 
+--- Offset local de cada ponto em relação ao escapamento (usado pelos pontos E pela câmera).
+local function pointOffset(id, fwd, rightV, up)
+    local boltN = id:match('^cat_bolt_(%d)$')
+    if boltN then
+        boltN = tonumber(boltN)
+        local ang = (math.pi * 2.0) * ((boltN - 1) / BOLT_COUNT) + (math.pi / 4.0)
+        return (fwd * 0.16)
+            + (rightV * (math.cos(ang) * 0.055))
+            + (up * (math.sin(ang) * 0.055))
+    end
+    local knockN = id:match('^cat_knock_(%d)$')
+    if knockN then
+        return -(fwd * 0.20) + (up * ((tonumber(knockN) == 1) and 0.03 or -0.03))
+    end
+    return vector3(0, 0, 0)
+end
+
 local function generateCatalyticPoints(vehicle, boneKey)
     local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
-
-    -- A flange fica na junta dianteira do corpo do catalisador. As porcas ficam
-    -- distribuídas num pequeno círculo no plano perpendicular ao tubo (rightV/up).
-    local flange = exPos + (fwd * 0.16)
-    local radius = 0.055
     local pts = {}
 
+    -- 4 porcas da flange, EM SEQUÊNCIA (porca N só libera após N-1 saírem).
     for i = 1, BOLT_COUNT do
-        local ang = (math.pi * 2.0) * ((i - 1) / BOLT_COUNT) + (math.pi / 4.0)
-        local off = (rightV * (math.cos(ang) * radius)) + (up * (math.sin(ang) * radius))
+        local id = ('cat_bolt_%d'):format(i)
         pts[#pts + 1] = {
-            id        = ('cat_bolt_%d'):format(i),
-            primitive = 'rotate',
-            neededDeg = BOLT_NEEDED_DEG,
-            worldPos  = flange + off,
-            label     = ('%s %d'):format(L('mg_catalytic_bolt'), i),
+            id          = id,
+            primitive   = 'rotate',
+            neededDeg   = BOLT_NEEDED_DEG,
+            unlockAfter = i - 1,
+            worldPos    = exPos + pointOffset(id, fwd, rightV, up),
+            label       = ('%s %d'):format(L('mg_catalytic_bolt'), i),
         }
     end
 
-    -- Golpes de marreta na junta traseira para soltar o catalisador do resto do
-    -- tubo. Só destravam depois que TODAS as porcas saíram (`lockUntilOthers`).
+    -- Golpes de marreta — só depois de tirar as 4 porcas.
     for i = 1, KNOCK_COUNT do
+        local id = ('cat_knock_%d'):format(i)
         pts[#pts + 1] = {
-            id         = ('cat_knock_%d'):format(i),
-            primitive  = 'strike',
+            id          = id,
+            primitive   = 'strike',
             hitsNeeded  = KNOCK_HITS,
-            lockUntilOthers = true,
-            worldPos   = exPos - (fwd * 0.20) + (up * ((i == 1) and 0.03 or -0.03)),
-            label      = ('%s %d'):format(L('mg_catalytic_knock'), i),
+            unlockAfter = BOLT_COUNT,
+            worldPos    = exPos + pointOffset(id, fwd, rightV, up),
+            label       = ('%s %d'):format(L('mg_catalytic_knock'), i),
         }
     end
 
     return pts
+end
+
+--- Câmera empurra pra cada ponto ativo (porca a porca em close, depois a junta).
+local function focusCatalyticPoint(vehicle, pointId)
+    local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
+    local target = exPos + pointOffset(pointId, fwd, rightV, up)
+    local camPos = target - (fwd * 0.42) - (up * 0.04) + (rightV * 0.08)
+    return camPos, target, 26.0
 end
 
 Profiles.list.catalytic = {
@@ -112,6 +133,7 @@ Profiles.list.catalytic = {
     minUxMs = 5000,
     reserveMs = 3000,
     calculateCamera = calculateCatalyticCamera,
+    focusPoint      = focusCatalyticPoint,
     generatePoints  = generateCatalyticPoints,
 }
 
