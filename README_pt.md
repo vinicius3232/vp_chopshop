@@ -632,7 +632,7 @@ O script **não depende de framework** para a lógica principal — inventário 
 
 ## Versão
 
-`1.19.0` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
+`1.18.2` — definida em `fxmanifest.lua`. Histórico completo em [`CHANGELOG.md`](CHANGELOG.md).
 
 > **v1.15.0-rc1** — **RELEASE CANDIDATE.** Refatoração server-authority em stack de 10 PRs
 > (#2→#11, nada mergeado até a validação runtime QBox passar): `ChopSession`, `ActionSession`,

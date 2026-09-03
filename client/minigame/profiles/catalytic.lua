@@ -63,36 +63,36 @@ local function generateCatalyticPoints(vehicle, boneKey)
             id        = 'cat_clamp_f',
             primitive = 'drill',
             worldPos  = exPos + (fwd * 0.14) + (up * 0.02),
-            label     = 'BRAÇADEIRA DIANT.',
+            label     = L('mg_catalytic_clamp_f'),
             holdTimeMs = 1800.0,
         },
         {
             id        = 'cat_clamp_r',
             primitive = 'drill',
             worldPos  = exPos - (fwd * 0.14) + (up * 0.02),
-            label     = 'BRAÇADEIRA TRAS.',
+            label     = L('mg_catalytic_clamp_r'),
             holdTimeMs = 1800.0,
         },
         {
             id        = 'cat_pipe_f',
             primitive = 'cut',
             worldPos  = exPos + (fwd * 0.32) - (up * 0.01),
-            label     = 'TUBO DIANTEIRO',
+            label     = L('mg_catalytic_pipe_f'),
             holdTimeMs = 1900.0,
         },
         {
             id        = 'cat_pipe_r',
             primitive = 'cut',
             worldPos  = exPos - (fwd * 0.32) - (up * 0.01),
-            label     = 'TUBO TRASEIRO',
+            label     = L('mg_catalytic_pipe_r'),
             holdTimeMs = 1900.0,
         },
     }
 end
 
 Profiles.list.catalytic = {
-    title    = 'FURTO DE CATALISADOR',
-    helpText = 'Solte as braçadeiras e corte os tubos do catalisador',
+    title    = L('mg_catalytic_title'),
+    helpText = L('mg_catalytic_help'),
     toolClass = 'cut',
     fov = 44.0,
     minUxMs = 4500,

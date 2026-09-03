@@ -511,6 +511,9 @@ local ALLOWED_BENCH_MODES = {
 }
 
 -- ─── [PR-4] Desmonte na marreta — token temporal (mesmo padrão do furto de catalisador) ──
+-- O token server-side garante CONTEXTO (jogador/bancada/entitlement) e DURAÇÃO MÍNIMA
+-- da sessão; a UX/NUI é client-side e não é prova criptográfica de execução do minigame.
+-- O anti-dupe real é o at-most-once do PartEntitlement, não o token.
 local _benchTeardowns = {} ---@type table<number, { token:string, entId:string, startedAt:number, minMs:number, expiresAt:number }>
 
 AddEventHandler('playerDropped', function()
@@ -601,9 +604,24 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
     local partKey = ent.partKey
     local netId   = ent.sourceNetId or 0
 
-    -- [PR-4] Gate do desmonte na marreta: peça não-isenta exige token de
-    -- bench:teardownStart + tempo mínimo decorrido. Consome o item hammer no OK.
-    if teardownRequired(partKey) then
+    -- [v1.16 SEC-1.1] Política estrita por partKey: catalisador só aceita raw_materials!
+    -- [FIX-1] mode/policy validados ANTES do gate de token do desmonte.
+    if partKey == 'catalytic_converter' and mode ~= 'raw_materials' then
+        if PartEntitlement and PartEntitlement.LogSuspicious then
+            PartEntitlement.LogSuspicious(source, 'disallowed_mode_for_catalytic', tostring(mode))
+        end
+        return { ok = false, err = 'invalid_mode_for_part' }
+    end
+
+    -- [PR-4 / FIX-1] Gate do desmonte na marreta — VALIDAÇÃO apenas (sem consumo).
+    -- Peça não-isenta exige token de bench:teardownStart + duração mínima decorrida.
+    -- O item `hammer` é consumido só na transação TERMINAL (bloco "Consumo terminal"
+    -- mais abaixo), depois de outputs + capacidade de inventário — assim uma falha
+    -- ANTES do commit não perde o hammer.
+    -- O token server-side garante CONTEXTO (jogador/bancada/entitlement) e DURAÇÃO
+    -- MÍNIMA; a UX/NUI é client-side e não é prova de execução do minigame.
+    local needTeardown = teardownRequired(partKey)
+    if needTeardown then
         local td = _benchTeardowns[source]
         if type(teardownToken) ~= 'string' or not td or td.token ~= teardownToken or td.entId ~= entitlementId then
             if PartEntitlement and PartEntitlement.LogSuspicious then
@@ -620,22 +638,9 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
             return { ok = false, err = 'too_fast' }
         end
         if now > td.expiresAt then
-            _benchTeardowns[source] = nil
+            _benchTeardowns[source] = nil  -- expired é terminal, fail-closed
             return { ok = false, err = 'expired' }
         end
-        local hammerItem = teardownCfg().HammerItem or 'hammer'
-        if not InvRemove(source, hammerItem, 1) then
-            return { ok = false, err = 'no_hammer' }
-        end
-        _benchTeardowns[source] = nil
-    end
-
-    -- [v1.16 SEC-1.1] Política estrita por partKey: catalisador só aceita raw_materials!
-    if partKey == 'catalytic_converter' and mode ~= 'raw_materials' then
-        if PartEntitlement and PartEntitlement.LogSuspicious then
-            PartEntitlement.LogSuspicious(source, 'disallowed_mode_for_catalytic', tostring(mode))
-        end
-        return { ok = false, err = 'invalid_mode_for_part' }
     end
 
     -- [v1.16 SEC-1.1] Pré-cálculo e validação de capacidade de inventário ANTES do consume irreversível
@@ -695,9 +700,26 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
         end
     end
 
-    -- [v1.16 SEC-1] Agora que a capacidade e o modo foram validados, consome atomicamente o entitlement
+    -- [PR-4 / FIX-1] CONSUMO TERMINAL do hammer — só aqui, depois de TODAS as
+    -- validações (token/tempo, mode, policy, outputs, capacidade de inventário).
+    -- Revalida a posse (o inventário pode ter mudado durante o minigame) e só então
+    -- remove. Falha ANTES deste ponto NÃO perde o hammer.
+    if needTeardown then
+        local hammerItem = teardownCfg().HammerItem or 'hammer'
+        if InvCount(source, hammerItem) < 1 or not InvRemove(source, hammerItem, 1) then
+            return { ok = false, err = 'no_hammer' }
+        end
+        _benchTeardowns[source] = nil  -- token consumido: replay do mesmo token → 'teardown_required'
+    end
+
+    -- [v1.16 SEC-1] Capacidade e modo validados — consome atomicamente o entitlement
+    -- (at-most-once). Este é o commit terminal.
     local res = PartEntitlement.Consume(entitlementId, source, 'bench_' .. tostring(mode))
     if not res.ok then
+        -- Commit não ocorreu → devolve o hammer (falha antes do commit terminal).
+        if needTeardown then
+            InvAdd(source, teardownCfg().HammerItem or 'hammer', 1)
+        end
         return { ok = false, err = res.err }
     end
 

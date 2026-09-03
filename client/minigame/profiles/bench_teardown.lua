@@ -49,28 +49,28 @@ local function generatePoints(ped)
             primitive = 'strike',
             hitsNeeded = 4,
             worldPos  = work + (rightV * -0.09) + (up * 0.04),
-            label     = 'SOLDA 1',
+            label     = L('mg_teardown_seam1'),
         },
         {
             id        = 'strike_seam_2',
             primitive = 'strike',
             hitsNeeded = 4,
             worldPos  = work + (rightV * 0.09) + (up * 0.04),
-            label     = 'SOLDA 2',
+            label     = L('mg_teardown_seam2'),
         },
         {
             id        = 'strike_open',
             primitive = 'strike',
             hitsNeeded = 5,
             worldPos  = work - (up * 0.06),
-            label     = 'ABERTURA',
+            label     = L('mg_teardown_open'),
         },
     }
 end
 
 Profiles.list.bench_teardown = {
-    title    = 'DESMONTE NA MARRETA',
-    helpText = 'Clique quando o anel entrar na zona verde',
+    title    = L('mg_teardown_title'),
+    helpText = L('mg_teardown_help'),
     toolClass = nil,  -- gate é bancada + item hammer + token (server)
     fov = 42.0,
     minUxMs = 5000,

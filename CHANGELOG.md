@@ -2,11 +2,14 @@
 
 ---
 
-## [1.19.0] — 2026-09-03 — Expansão de minigames físicos: catalisador, série e desmonte na marreta
+## [1.18.2] — 2026-09-03 — Expansão de minigames físicos: catalisador, série e desmonte na marreta
 
 Leva de 3 PRs sobre o stack `client/minigame/` (`docs/design/MINIGAME_EXPANSION.md`,
-PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1). Nenhuma mudança de
-balanceamento. Harness: **2004 asserts / 0 fail**.
+PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1. Nenhuma
+mudança de balanceamento. Harness: **0 fail**.
+
+> **Versão:** `v1.19` está reservada no roadmap para _Workshop Live_ — esta leva é
+> `1.18.2` (linha v1.18.x). Versão definitiva a decidir na integração.
 
 ### Added / Gameplay
 
@@ -32,12 +35,14 @@ balanceamento. Harness: **2004 asserts / 0 fail**.
   `chopshop_pneumatic_hammer.ogg` e dá um solavanco de câmera (`CamCtrl.Jolt`).
   Novo profile `bench_teardown` (3 pontos). Item novo **`hammer`** (consumido 1×
   por desmonte). Peça `catalytic_converter` é isenta (já foi cortada no furto).
-- **Anti-cheat do desmonte:** `vp_chopshop:bench:teardownStart` emite um token
-  temporal; `benchProcessPart` (5º arg) exige o token + tempo mínimo decorrido
-  (`too_fast`), no mesmo padrão do furto de catalisador — sem introduzir
-  ActionSession (o entitlement já impede dupe; o token cobre "pulei o minigame").
-  `Config.PhysicalCarry.Teardown { Enable, Profile, MinDurationMs, ExemptParts,
-  HammerItem, HammerProp }`.
+- **Contexto server-side do desmonte:** `vp_chopshop:bench:teardownStart` emite um
+  token temporal; `benchProcessPart` (5º arg) exige o token + duração mínima
+  (`too_fast`), no mesmo padrão do furto de catalisador. O token **garante contexto
+  (jogador/bancada/entitlement) e duração mínima da sessão** — a UX/NUI é
+  client-side e **não é prova de execução do minigame**. O anti-dupe real é o
+  at-most-once do `PartEntitlement`, não o token. Sem `ActionSession` (evitou
+  refactor grande). `Config.PhysicalCarry.Teardown { Enable, Profile, MinDurationMs,
+  ExemptParts, HammerItem, HammerProp }`.
 
 ### Changed
 
@@ -49,12 +54,41 @@ balanceamento. Harness: **2004 asserts / 0 fail**.
 - `shared/locale.lua`: `serial_no_sandpaper`, `bench_teardown_no_hammer`,
   `err_teardown_required` / `err_no_hammer` / `err_too_fast` / `err_expired` (5 idiomas).
 
+### Hardening (FIX-1)
+
+- **Ordem da transação do desmonte na marreta (`server/main.lua`):** o item
+  `hammer` deixa de ser consumido logo após validar o entitlement. Nova ordem:
+  `validate player/bench → entitlement → mode/policy → token/tempo (validação) →
+  build outputs → capacidade de inventário → revalida + remove hammer → consume
+  entitlement → grant`. Falha ANTES do commit terminal **não perde o hammer**;
+  falha no `Consume` devolve o hammer (refund). At-most-once do entitlement
+  preservado.
+- **Catalytic — locator de interação (`client/main.lua` + `Config.CatalyticTheft.Bones`):**
+  o `ox_target` global passa a usar só bones do escapamento
+  (`exhaust`/`exhaust_2`/`exhaust_3`/`exhaust_4`) — **`chassis` sai** (pegava o carro
+  inteiro). O fallback de **câmera** do profile (`exhaust → exhaust_2 → chassis →
+  offset geométrico`) é coisa separada e continua. Distância curta preservada.
+- **Distâncias de target centralizadas (`Config.TargetDistances`):** catalytic,
+  advDoor, engine, carcass, jackLower, baseDismantle, discard, wheel — valores
+  refinados da RC v1.15, agora numa fonte única, para não regredir a UX espacial.
+- **i18n dos profiles novos:** `catalytic.lua`, `serial_scratch.lua`,
+  `bench_teardown.lua` deixam de ter strings hardcoded — `title` / `helpText` /
+  labels dos pontos resolvem via `L(...)`. 15 keys `mg_*` novas em `pt`/`en`/`es`/`fr`/`tr`.
+- **Docs/comentários do token** reescritos: "o token cobre 'pulei o minigame'" →
+  "o token garante contexto + duração mínima; a NUI não é prova de execução".
+- **Specs novos (`client/minigame/minigame_spec.lua`):** `MG-LOCALE-1/2` (paridade
+  das keys `mg_*` nos 5 idiomas + resolução via `L`), `FIX1-TXN-01..08` (hammer
+  não consumido em `inventory_full` / `invalid_mode` / entitlement inválido;
+  consumido 1× no commit; replay de token não gera 2º processamento; token
+  expirado fail-closed; refund em falha de `Consume`; peça isenta não toca hammer).
+
 ### Notes
 
-- Nenhuma tabela de DB nova. `sandpaper` e `hammer` precisam ser registrados no
-  `ox_inventory/data/items.lua` (snippet pronto em `installation/`).
+- Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi
+  adicionado ao `ox_inventory/data/items.lua` (fora deste resource).
 - Locale órfão da v1.16 deixado: `catalytic_cutting_stage_1/2` (não referenciado).
-- Props `prop_tool_hammer` a confirmar in-game (há fallback `IsModelInCdimage`).
+- Prop `prop_tool_hammer` a confirmar in-game (há fallback `IsModelInCdimage`).
+- QA in-game: `docs/audit/MINIGAME_EXPANSION_LIVE_QA.md`.
 
 ---
 

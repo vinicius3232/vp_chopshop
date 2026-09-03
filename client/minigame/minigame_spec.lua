@@ -1301,6 +1301,105 @@ local function run()
         check('BENCH-MODES stolen_serial delivers part with traceable serial', stolenRes.item == 'car_parts' and stolenRes.state == 'stolen' and stolenRes.serial ~= nil)
     end
 
+    -- ─── [FIX-1] i18n dos profiles novos: paridade das keys mg_* nos 5 idiomas ──
+    do
+        local mgKeys = {
+            'mg_catalytic_title', 'mg_catalytic_help', 'mg_catalytic_clamp_f', 'mg_catalytic_clamp_r',
+            'mg_catalytic_pipe_f', 'mg_catalytic_pipe_r',
+            'mg_serial_title', 'mg_serial_help', 'mg_serial_engraving', 'mg_serial_residue',
+            'mg_teardown_title', 'mg_teardown_help', 'mg_teardown_seam1', 'mg_teardown_seam2', 'mg_teardown_open',
+        }
+        for _, lang in ipairs({ 'en', 'pt', 'es', 'fr', 'tr' }) do
+            Config.Locale = lang
+            for _, k in ipairs(mgKeys) do
+                local val = L(k)
+                check(('MG-LOCALE-1 %s present in %s'):format(k, lang), val ~= nil and val ~= k and val ~= '')
+            end
+        end
+        Config.Locale = 'en'
+
+        -- os profiles devem resolver via L(...), não literal
+        for _, pName in ipairs({ 'catalytic', 'serial_scratch', 'bench_teardown' }) do
+            local p = Profiles.Get(pName)
+            check(('MG-LOCALE-2 %s title/helpText são strings resolvidas'):format(pName),
+                type(p.title) == 'string' and #p.title > 0 and type(p.helpText) == 'string' and #p.helpText > 0)
+            local pts = p.generatePoints(1, 'wheel_lf')
+            local allLabels = true
+            for _, pt in ipairs(pts) do
+                if type(pt.label) ~= 'string' or #pt.label == 0 then allLabels = false end
+            end
+            check(('MG-LOCALE-2 %s: todos os point labels resolvidos'):format(pName), allLabels)
+        end
+    end
+
+    -- ─── [FIX-1] Ordem da transação do desmonte na marreta (benchProcessPart) ──
+    -- Espelha server/main.lua: validate ent → mode/policy → token/time (VALIDAÇÃO) →
+    -- outputs → capacidade → REVALIDA+REMOVE hammer → consume entitlement → grant.
+    do
+        local function mockTeardownTxn(o)
+            local h = { count = o.hammer or 1, removed = 0, added = 0 }
+            local entConsumed = 0
+            local now = o.now or 6000
+            -- validate entitlement
+            if not o.entValid then return { ok = false, err = 'invalid' }, h, entConsumed end
+            -- mode/policy
+            if o.badMode then return { ok = false, err = 'invalid_mode' }, h, entConsumed end
+            -- token/time — VALIDAÇÃO apenas, SEM consumo
+            if o.needTeardown then
+                local td = o.td
+                if not td or td.token ~= o.token or td.entId ~= o.entId then
+                    return { ok = false, err = 'teardown_required' }, h, entConsumed
+                end
+                if now < (td.startedAt + td.minMs - 250) then return { ok = false, err = 'too_fast' }, h, entConsumed end
+                if now > td.expiresAt then return { ok = false, err = 'expired' }, h, entConsumed end
+            end
+            -- build outputs + capacidade
+            if o.invFull then return { ok = false, err = 'inventory_full' }, h, entConsumed end
+            -- CONSUMO TERMINAL do hammer (revalida + remove)
+            if o.needTeardown then
+                if h.count < 1 then return { ok = false, err = 'no_hammer' }, h, entConsumed end
+                h.count = h.count - 1; h.removed = h.removed + 1
+            end
+            -- consume entitlement (commit terminal)
+            if o.consumeFails then
+                if o.needTeardown then h.count = h.count + 1; h.added = h.added + 1 end  -- refund
+                return { ok = false, err = 'consume_fail' }, h, entConsumed
+            end
+            entConsumed = entConsumed + 1
+            return { ok = true }, h, entConsumed
+        end
+
+        local goodTd = function() return { token = 'T', entId = 'E', startedAt = 0, minMs = 5000, expiresAt = 99999 } end
+        local r, h, ec
+
+        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, invFull = true, token = 'T', entId = 'E', td = goodTd() })
+        check('FIX1-TXN-01 hammer NAO consumido em inventory_full', r.err == 'inventory_full' and h.removed == 0)
+
+        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, badMode = true, token = 'T', entId = 'E', td = goodTd() })
+        check('FIX1-TXN-02 hammer NAO consumido em invalid_mode', r.err == 'invalid_mode' and h.removed == 0)
+
+        r, h = mockTeardownTxn({ entValid = false, needTeardown = true })
+        check('FIX1-TXN-03 hammer NAO consumido em entitlement invalido', r.err == 'invalid' and h.removed == 0)
+
+        r, h, ec = mockTeardownTxn({ entValid = true, needTeardown = true, token = 'T', entId = 'E', td = goodTd() })
+        check('FIX1-TXN-04 commit valido: hammer 1x + entitlement 1x', r.ok == true and h.removed == 1 and ec == 1)
+
+        -- replay: token já consumido no server → _benchTeardowns limpo → td = nil na 2a chamada
+        r, h, ec = mockTeardownTxn({ entValid = true, needTeardown = true, token = 'T', entId = 'E', td = nil })
+        check('FIX1-TXN-05 replay do token: sem 2o processamento', r.err == 'teardown_required' and h.removed == 0 and ec == 0)
+
+        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, token = 'T', entId = 'E',
+            td = { token = 'T', entId = 'E', startedAt = 0, minMs = 5000, expiresAt = 5000 }, now = 20000 })
+        check('FIX1-TXN-06 token expirado: fail-closed, hammer intacto', r.err == 'expired' and h.removed == 0)
+
+        r, h = mockTeardownTxn({ entValid = true, needTeardown = true, consumeFails = true, token = 'T', entId = 'E', td = goodTd() })
+        check('FIX1-TXN-07 falha no consume terminal: hammer devolvido', r.err == 'consume_fail' and h.removed == 1 and h.added == 1)
+
+        -- peça isenta (catalytic): needTeardown=false → nunca toca hammer
+        r, h = mockTeardownTxn({ entValid = true, needTeardown = false })
+        check('FIX1-TXN-08 peca isenta: hammer nao envolvido', r.ok == true and h.removed == 0)
+    end
+
     print(('[minigame/spec] ─── RESUMO: %d/%d PASS, %d FAIL ───'):format(pass, total, fail))
 end
 

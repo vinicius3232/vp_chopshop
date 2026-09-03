@@ -1724,8 +1724,12 @@ CreateThread(function()
             name = 'vp_chop_steal_catalytic',
             label = L('catalytic_target_steal'),
             icon = 'fa-solid fa-fire-flame-curved',
-            bones = (Config.CatalyticTheft and Config.CatalyticTheft.Bones) or { 'exhaust', 'exhaust_2', 'chassis' },
-            distance = 2.0,
+            -- [FIX-1] locator de INTERAÇÃO: só bones do escapamento (nunca `chassis`,
+            -- que pegaria o carro inteiro). O fallback de CÂMERA (exhaust → exhaust_2
+            -- → chassis → offset) fica no profile catalytic.lua e é coisa separada.
+            bones = (Config.CatalyticTheft and Config.CatalyticTheft.Bones)
+                or { 'exhaust', 'exhaust_2', 'exhaust_3', 'exhaust_4' },
+            distance = (Config.TargetDistances and Config.TargetDistances.catalytic) or 2.0,
             canInteract = function(entity)
                 if not entity or entity == 0 or not DoesEntityExist(entity) then return false end
                 if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return false end
@@ -1743,12 +1747,14 @@ end)
 -- ─────────────────────────────────────────────────────────────────────────────
 
 local function addRaisedCarTargets(veh)
+    -- [FIX-1 / RC parity] distâncias de interação centralizadas em Config.TargetDistances
+    local TD = Config.TargetDistances or {}
     local targets = {}
     targets[#targets + 1] = {
         name        = 'vp_chop_jack_lower_' .. tostring(veh),
         label       = L('jackstand_target_lower'),
         icon        = 'fa-solid fa-arrow-down',
-        distance    = 3.5,
+        distance    = TD.jackLower or 3.5,
         canInteract = function() return JackstandData[veh] ~= nil and not JackstandBusy end,
         onSelect    = function() VPChopJackstandLowerCar(veh) end,
     }
@@ -1779,7 +1785,7 @@ local function addRaisedCarTargets(veh)
                     label    = L('adv_target_door_fmt', lbl),
                     icon     = 'fa-solid fa-screwdriver-wrench',
                     bones    = { aBone },
-                    distance = 2.5,
+                    distance = TD.advDoor or 2.5,
                     canInteract = function()
                         return JackstandData[veh] ~= nil
                             and not JackstandBusy
@@ -1797,7 +1803,7 @@ local function addRaisedCarTargets(veh)
             name     = 'vp_adv_chop_engine_' .. tostring(veh),
             label    = L('adv_target_engine'),
             icon     = 'fa-solid fa-gear',
-            distance = 3.0,
+            distance = TD.engine or 3.0,
             canInteract = function()
                 return JackstandData[veh] ~= nil
                     and not JackstandBusy
@@ -1812,7 +1818,7 @@ local function addRaisedCarTargets(veh)
             name     = 'vp_adv_chop_carcass_' .. tostring(veh),
             label    = L('adv_target_carcass'),
             icon     = 'fa-solid fa-scissors',
-            distance = 3.5,
+            distance = TD.carcass or 3.5,
             canInteract = function()
                 return JackstandData[veh] ~= nil
                     and not JackstandBusy
@@ -1828,7 +1834,7 @@ local function addRaisedCarTargets(veh)
         name        = 'vp_chop_jack_dismantle_' .. tostring(veh),
         label       = L('target_dismantle'),
         icon        = 'fa-solid fa-screwdriver-wrench',
-        distance    = 3.0,
+        distance    = TD.baseDismantle or 3.0,
         canInteract = function() return JackstandData[veh] ~= nil and not JackstandBusy end,
         onSelect    = function() openJackstandChopMenu(veh) end,
     }
@@ -1838,7 +1844,7 @@ local function addRaisedCarTargets(veh)
             name        = 'vp_chop_jack_discard_' .. tostring(veh),
             label       = L('target_discard_vehicle'),
             icon        = 'fa-solid fa-trash-can',
-            distance    = 3.5,
+            distance    = TD.discard or 3.5,
             canInteract = function() return JackstandData[veh] ~= nil and not JackstandBusy end,
             onSelect    = function()
                 local netId = NetworkGetNetworkIdFromEntity(veh)
@@ -1901,7 +1907,7 @@ local function addRaisedCarTargets(veh)
                 label    = L('tyremission_steal_label') .. ' — ' .. lbl,
                 icon     = 'fa-solid fa-circle-dot',
                 bones    = { tBone },
-                distance = 3.0,
+                distance = TD.wheel or 3.0,
                 canInteract = function()
                     local burst = isPartMissing(veh, def)
                     local allowBurst = (Config.DamageScaling and Config.DamageScaling.AllowBurstTyreTheft) or false

@@ -237,7 +237,7 @@ Profiles.list.bench_teardown = {
 ## 6. Riscos / pontos de atenção
 
 - **`core.lua` sem veículo:** `serial_scratch` e `bench_teardown` operam sobre uma **peça** (prop), não um veículo. `VPChopDismantleMinigame.Start` hoje exige `DoesEntityExist(vehicle)` e faz gate de distância a veículo no loop. Precisa de um "modo peça": passar o prop como entidade e trocar o gate de distância por distância à bancada / ao ped. ~15 linhas no `core.lua`, sem quebrar os profiles de veículo.
-- **Anti-cheat server-side:** `catalytic` já é coberto pelo token temporal de `catalytic:start`. `bench_teardown` e `serial_scratch` **têm** que passar pela `ActionSession` (ou pelo menos por um gate de proximidade + cooldown server-side), senão um cheater pula o minigame e chama o callback direto. Não confiar no retorno booleano do client.
+- **Autoridade server-side (resolvido):** `catalytic` e `bench_teardown` usam um **token temporal** (`catalytic:start` / `bench:teardownStart`). O token **garante contexto (jogador/bancada/entitlement) e a duração mínima da sessão** — a UX/NUI é client-side e **não é prova de execução do minigame**. O anti-dupe real é o **at-most-once do `PartEntitlement`** (a peça só é consumida uma vez, pelo dono, perto da bancada). `serial_scratch` não emite token: revalida bancada + tier + item no `serial:scratch` e consome a lixa só no commit. Nenhum caminho confia no retorno booleano do client.
 - **Tédio:** servidor pequeno / horário vazio. `minUxMs` conservador (4–6s), `hitsNeeded` baixo. Peça legal pulando o teardown já ajuda. Reavaliar in-game.
 - **Props:** validar todos os modelos com `IsModelInCdimage` (o `spawnToolProp` já tem esse fallback pattern) antes de assumir.
 - **NUI regression:** só o PR-4 toca `app.js`/`style.css`. Testar os 4 profiles antigos (roda/portas/motor/carcaça) depois da mudança.
@@ -250,7 +250,26 @@ Profiles.list.bench_teardown = {
 - [x] **PR-2** `catalytic` — branch `feat/pr2-catalytic-profile`. Profile novo (2 `drill` + 2 `cut`), fxmanifest + `tools/run_spec.lua` + `minigame_spec.lua` (expectedProfiles), `doStealCatalytic` trocado (minigame + espera do piso `minMs` antes do `complete` p/ evitar `too_fast`), `Config.CatalyticTheft.Minigame` = `{Enable, Profile}`. Harness 1990/0. **Falta:** teste in-game. Locale órfão `catalytic_cutting_stage_1/2` deixado (5 idiomas).
 - [x] **PR-3** `serial_scratch` — branch `feat/pr3-serial-scratch-minigame`. Profile `rotate`, item `sandpaper` (consumido em `serial:scratch`, gate no `canInteract` + `benchAvailability`), `doScratch()` trocado, Config `SandpaperItem`+`ScratchMinigame`, locale `serial_no_sandpaper` (5 idiomas), ox_items snippet. **`core.lua` NÃO precisou de "modo peça"** — passamos `cache.ped` como entidade (passa em todos os gates do core). Harness 1997/0. **Falta:** teste in-game + registrar `sandpaper` no `ox_inventory/data/items.lua`.
 - [x] **PR-4** `bench_teardown` — branch `feat/pr4-bench-teardown-strike`. Primitive `strike` nova (`html/app.js` +89 / `style.css` +42): anel que fecha, clique na zona verde, N golpes/ponto, erro não pune. Profile `bench_teardown`, item `hammer`. **Anti-cheat: token temporal `bench:teardownStart` + `too_fast` em `benchProcessPart`** (padrão do catalisador, NÃO ActionSession — evitou refactor grande). Peça `catalytic_converter` isenta (já cortada no PR-2). Som `chopshop_pneumatic_hammer.ogg` + `CamCtrl.Jolt` (novo, shake ~180ms) por golpe. Harness 2004/0. **Falta:** teste in-game + registrar `hammer` no ox_inventory + confirmar `prop_tool_hammer`.
-- [x] Bump `CHANGELOG.md` (1.19.0) + `fxmanifest.lua` + READMEs.
+- [x] Bump `CHANGELOG.md` + `fxmanifest.lua` + READMEs → **`1.18.2`** (v1.19 fica
+  reservada para _Workshop Live_ no roadmap — `docs/future/POST_V118_ROADMAP.md`).
+
+### FIX-1 — hardening (branch `fix/minigame-expansion-hardening`)
+
+PR de correção sobre `71d56e2` (merge da leva). **Não mexe em economia.**
+
+1. **Transação do desmonte (`server/main.lua`):** `hammer` consumido só na etapa
+   terminal — depois de token/tempo, mode/policy, outputs e capacidade de
+   inventário; refund se o `Consume` do entitlement falhar. Falha antes do commit
+   não perde o hammer.
+2. **Catalytic locator:** `ox_target` só com bones `exhaust*` (sem `chassis`). O
+   fallback de câmera do profile (que pode usar `chassis`/offset) é separado.
+3. **`Config.TargetDistances`:** distâncias RC centralizadas (catalytic 2.0 /
+   advDoor 2.5 / engine 3.0 / carcass 3.5 / jackLower 3.5 / baseDismantle 3.0 /
+   discard 3.5 / wheel 3.0). Zero mudança de valor — só não-regressão.
+4. **i18n:** os 3 profiles novos resolvem `title`/`helpText`/labels via `L(...)`;
+   15 keys `mg_*` × 5 idiomas.
+5. **Docs do token** reescritos (contexto + duração mínima, não "prova de execução").
+6. **Specs:** `MG-LOCALE-1/2`, `FIX1-TXN-01..08`.
 
 ### Entrega final
 
