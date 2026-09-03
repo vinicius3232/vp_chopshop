@@ -154,6 +154,8 @@
       if (!pt || pt.primitive !== 'strike' || !pt.closerCircle) continue;
       if (pt.completed) { pt.closerCircle.style.display = 'none'; continue; }
       anyStrike = true;
+      if (!isPointUnlocked(pt)) { pt.closerCircle.style.display = 'none'; continue; }
+      pt.closerCircle.style.display = '';
       if (pt._t0 == null) pt._t0 = now;
       const phase = ((now - pt._t0) % STRIKE_CYCLE_MS) / STRIKE_CYCLE_MS; // 0..1
       const tri = phase < 0.5 ? (phase * 2) : (2 - phase * 2);            // 0->1->0
@@ -169,8 +171,33 @@
     if (strikeRaf) { cancelAnimationFrame(strikeRaf); strikeRaf = null; }
   }
 
+  // [FIX-1.2] Um ponto lockUntilOthers só libera quando todos os pontos SEM esse
+  // flag já estão completos (ex.: golpes de marreta só depois de tirar as porcas).
+  function isPointUnlocked(pt) {
+    if (!pt || !pt.lockUntilOthers) return true;
+    for (const k in pointsMap) {
+      const o = pointsMap[k];
+      if (o && !o.lockUntilOthers && !o.completed) return false;
+    }
+    return true;
+  }
+
+  function refreshLockedPoints() {
+    for (const k in pointsMap) {
+      const pt = pointsMap[k];
+      if (!pt || !pt.lockUntilOthers || pt.completed) continue;
+      const unlocked = isPointUnlocked(pt);
+      if (pt.element) pt.element.classList.toggle('locked', !unlocked);
+    }
+  }
+
   function strikeAttempt(pt) {
     if (!pt || pt.completed || pt.primitive !== 'strike') return;
+    if (!isPointUnlocked(pt)) {
+      pt.element.classList.add('strike-miss');
+      setTimeout(() => pt.element && pt.element.classList.remove('strike-miss'), 170);
+      return;
+    }
     const r = (typeof pt._closerR === 'number') ? pt._closerR : STRIKE_R_MAX;
     const inBand = r >= STRIKE_BAND[0] && r <= STRIKE_BAND[1];
 
@@ -423,8 +450,10 @@
           accumulatedDeg: 0,
           progress: 0,
           completed: false,
-          visible: true
+          visible: true,
+          lockUntilOthers: pt.lockUntilOthers === true
         };
+        if (pt.lockUntilOthers === true) el.classList.add('locked');
       }
     });
 
@@ -481,6 +510,7 @@
     const avg = Math.floor(totalProgress / keys.length);
     overallProgressText.textContent = `${avg}% (${completedCount}/${keys.length})`;
     overallProgressFill.style.width = `${avg}%`;
+    refreshLockedPoints();
 
     if (completedCount === keys.length && keys.length > 0) {
       setTimeout(() => {

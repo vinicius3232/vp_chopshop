@@ -157,6 +157,8 @@ function Core.Start(vehicle, profileName, opts)
             primitive = pt.primitive,
             holdTimeMs = pt.holdTimeMs,
             neededDeg = pt.neededDeg or 720.0,
+            hitsNeeded = pt.hitsNeeded,              -- [FIX-1.2] antes não era repassado (strike caía no default 4)
+            lockUntilOthers = pt.lockUntilOthers,    -- [FIX-1.2] ponto só destrava quando os demais estão completos
             x = sx,
             y = sy,
             path = path,

@@ -1343,6 +1343,7 @@ local function run()
             elseif pt.primitive == 'strike' then
                 strikeN = strikeN + 1
                 check(('MG-CAT-PT-3 %s tem hitsNeeded numérico'):format(pt.id), type(pt.hitsNeeded) == 'number' and pt.hitsNeeded > 0)
+                check(('MG-CAT-PT-3b %s trava até as porcas saírem (lockUntilOthers)'):format(pt.id), pt.lockUntilOthers == true)
             end
             check(('MG-CAT-PT-4 %s tem worldPos + label'):format(tostring(pt.id)),
                 type(pt.worldPos) == 'table' and type(pt.label) == 'string' and #pt.label > 0)

@@ -88,14 +88,16 @@ local function generateCatalyticPoints(vehicle, boneKey)
         }
     end
 
-    -- Golpes de marreta na junta traseira para soltar o catalisador do resto do tubo.
+    -- Golpes de marreta na junta traseira para soltar o catalisador do resto do
+    -- tubo. Só destravam depois que TODAS as porcas saíram (`lockUntilOthers`).
     for i = 1, KNOCK_COUNT do
         pts[#pts + 1] = {
-            id        = ('cat_knock_%d'):format(i),
-            primitive = 'strike',
-            hitsNeeded = KNOCK_HITS,
-            worldPos  = exPos - (fwd * 0.20) + (up * ((i == 1) and 0.03 or -0.03)),
-            label     = ('%s %d'):format(L('mg_catalytic_knock'), i),
+            id         = ('cat_knock_%d'):format(i),
+            primitive  = 'strike',
+            hitsNeeded  = KNOCK_HITS,
+            lockUntilOthers = true,
+            worldPos   = exPos - (fwd * 0.20) + (up * ((i == 1) and 0.03 or -0.03)),
+            label      = ('%s %d'):format(L('mg_catalytic_knock'), i),
         }
     end
 

@@ -123,8 +123,14 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
   tratado no client.
 - Locale: `mg_catalytic_clamp_*`/`pipe_*` (4 keys) → `mg_catalytic_bolt` +
   `mg_catalytic_knock` (2 keys) em pt/en/es/fr/tr; `mg_catalytic_help` reescrito.
-- Specs: `MG-CAT-PT-1..7` (shape: 6 pontos, 4 rotate + 2 strike, ids/campos),
-  `MG-LOCALE-1` atualizado. Harness **2108 PASS / 0 FAIL**.
+- **Sequência:** os 2 pontos `strike` (`lockUntilOthers = true`) só destravam
+  depois que as 4 porcas saíram — antes eram clicáveis desde o início e dava pra
+  "soltar na marreta" com o catalisador ainda parafusado. `client/minigame/core.lua`
+  passou a repassar `hitsNeeded` e `lockUntilOthers` ao NUI (`hitsNeeded` antes caía
+  no default 4); `html/app.js` + `style.css` renderizam o ponto travado (dim, sem
+  clique) e liberam quando os pré-requisitos completam.
+- Specs: `MG-CAT-PT-1..7` (+ `-3b` lockUntilOthers), `MG-LOCALE-1` atualizado.
+  Harness **2110 PASS / 0 FAIL**.
 
 ### Notes
 
