@@ -1217,12 +1217,23 @@ RegisterCommand('choptest', function(src, args)
         { item = Config.Items.placeBench,  qty = 1 },
         { item = Config.Items.placeWelder, qty = 1 },
     }
-    -- [M2 FIX] Config.ChopTool never existed; iterate Config.Tools (the real tool registry).
+    -- [M2 FIX] Config.ChopTool never existed; iterate Config.Tools (a fonte real das ferramentas).
     for toolName, _ in pairs(Config.Tools or {}) do
         kit[#kit + 1] = { item = toolName, qty = 1 }
     end
     if Config.Jackstand and Config.Jackstand.Enable and Config.Jackstand.Item then
         kit[#kit + 1] = { item = Config.Jackstand.Item, qty = 1 }
+    end
+
+    -- [FIX-1.2] Consumíveis de gate dos minigames novos (marreta do desmonte na
+    -- bancada + lixa do riscar-série). Não estão em Config.Tools — são itens de
+    -- gate, resolvidos aqui direto da config, com fallback pro nome padrão.
+    local teardown = (Config.PhysicalCarry or {}).Teardown or {}
+    if teardown.Enable ~= false then
+        kit[#kit + 1] = { item = teardown.HammerItem or 'hammer', qty = 5 }
+    end
+    if Config.PartSerial and Config.PartSerial.Enable then
+        kit[#kit + 1] = { item = Config.PartSerial.SandpaperItem or 'sandpaper', qty = 5 }
     end
 
     local given, failed = {}, {}

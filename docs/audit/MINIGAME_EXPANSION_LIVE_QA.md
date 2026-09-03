@@ -15,8 +15,10 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
   incluído; `sandpaper` já existia como "Lixa")
 - [ ] Prop `prop_tool_hammer` existe no build (senão o minigame roda sem prop na mão — não bloqueia)
 - [ ] `xsound` opcional (som de martelada usa `xsound`; sem ele, cai em `PlaySoundFrontend`)
-- [ ] Itens de teste no inventário: `saw_pro`, `mechanic_drill`, `sandpaper` ×5, `hammer` ×5,
-  `chopshop_jackstand`, `chopshop_bench`, `chopshop_welder`
+- [ ] Itens de teste no inventário: `/choptest` (ACE `command.chopshop_admin`) entrega o
+  kit completo — `chopshop_bench`, `chopshop_welder`, todas as serras/`mechanic_drill`
+  de `Config.Tools`, `chopshop_jackstand`, **`hammer` ×5** e **`sandpaper` ×5**
+  (FIX-1.2). `/choptest <id>` entrega a outro jogador.
 
 ---
 
