@@ -1,12 +1,12 @@
 -- client/minigame/profiles/catalytic.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [PR-2] Catalytic Profile — Furto de Catalisador em veículo parado
---  Mistura de primitives num só minigame (inspirado no fluxo "chapa com parafusos
---  + corte" de scripts do gênero — implementação autoral):
---    2 pontos 'drill' — braçadeiras de fixação do catalisador
---    2 pontos 'cut'   — seccionamento dos tubos dianteiro e traseiro
---  Câmera por baixo/atrás no escapamento (fallback exhaust → _2 → _3 → _4 →
---  chassis → offset; só a câmera usa chassis, o locator de ox_target não).
+--  [PR-2 / FIX-1.2] Catalytic Profile — Furto de Catalisador em veículo parado
+--  Fluxo autoral em close-up no escapamento (implementação própria; primitives
+--  reaproveitadas, sem cópia de script de terceiros):
+--    4 pontos 'rotate' — desparafusar as porcas da flange (gira o mouse em círculo)
+--    2 pontos 'strike' — soltar o catalisador batendo na junta (clique no ritmo)
+--  Câmera fechada, atrás/abaixo do escapamento (fallback de bone exhaust → _2 →
+--  _3 → _4 → chassis → offset; só a câmera usa chassis, o locator de ox_target não).
 --  Usado por doStealCatalytic (client/main.lua). O gate de tempo mínimo continua
 --  sendo o token temporal de `vp_chopshop:catalytic:start` (server).
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -52,58 +52,62 @@ local function resolveExhaustData(vehicle)
     return boneId, bonePos, sideSign, fwd, rightV, up
 end
 
+-- [FIX-1.2] Config do fluxo: 4 porcas + 2 golpes. Ajuste fino aqui.
+local BOLT_COUNT     = 4
+local BOLT_NEEDED_DEG = 720.0   -- giro por porca (mesmo "peso" do parafuso de roda)
+local KNOCK_COUNT    = 2
+local KNOCK_HITS     = 3        -- golpes de marreta por ponto
+
 local function calculateCatalyticCamera(vehicle, boneKey)
     local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
-    -- Câmera atrás e um pouco abaixo do plano do escapamento, olhando de baixo para
-    -- cima (o jogador está agachado na traseira do carro).
-    local camPos = exPos - (fwd * 1.15) - (up * 0.10) + (rightV * (0.25))
-    local lookAt = exPos + (up * 0.10)
+    -- Close-up: câmera logo atrás/abaixo da flange do catalisador, olhando o
+    -- jogador agachado na traseira desparafusar as porcas.
+    local camPos = exPos - (fwd * 0.78) - (up * 0.06) + (rightV * 0.16)
+    local lookAt = exPos + (up * 0.04)
     return camPos, lookAt
 end
 
 local function generateCatalyticPoints(vehicle, boneKey)
     local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
 
-    -- Eixo longitudinal do escapamento = forward do veículo. As braçadeiras ficam
-    -- perto do corpo do catalisador; os cortes de tubo, um pouco mais afastados.
-    return {
-        {
-            id        = 'cat_clamp_f',
-            primitive = 'drill',
-            worldPos  = exPos + (fwd * 0.14) + (up * 0.02),
-            label     = L('mg_catalytic_clamp_f'),
-            holdTimeMs = 1800.0,
-        },
-        {
-            id        = 'cat_clamp_r',
-            primitive = 'drill',
-            worldPos  = exPos - (fwd * 0.14) + (up * 0.02),
-            label     = L('mg_catalytic_clamp_r'),
-            holdTimeMs = 1800.0,
-        },
-        {
-            id        = 'cat_pipe_f',
-            primitive = 'cut',
-            worldPos  = exPos + (fwd * 0.32) - (up * 0.01),
-            label     = L('mg_catalytic_pipe_f'),
-            holdTimeMs = 1900.0,
-        },
-        {
-            id        = 'cat_pipe_r',
-            primitive = 'cut',
-            worldPos  = exPos - (fwd * 0.32) - (up * 0.01),
-            label     = L('mg_catalytic_pipe_r'),
-            holdTimeMs = 1900.0,
-        },
-    }
+    -- A flange fica na junta dianteira do corpo do catalisador. As porcas ficam
+    -- distribuídas num pequeno círculo no plano perpendicular ao tubo (rightV/up).
+    local flange = exPos + (fwd * 0.16)
+    local radius = 0.055
+    local pts = {}
+
+    for i = 1, BOLT_COUNT do
+        local ang = (math.pi * 2.0) * ((i - 1) / BOLT_COUNT) + (math.pi / 4.0)
+        local off = (rightV * (math.cos(ang) * radius)) + (up * (math.sin(ang) * radius))
+        pts[#pts + 1] = {
+            id        = ('cat_bolt_%d'):format(i),
+            primitive = 'rotate',
+            neededDeg = BOLT_NEEDED_DEG,
+            worldPos  = flange + off,
+            label     = ('%s %d'):format(L('mg_catalytic_bolt'), i),
+        }
+    end
+
+    -- Golpes de marreta na junta traseira para soltar o catalisador do resto do tubo.
+    for i = 1, KNOCK_COUNT do
+        pts[#pts + 1] = {
+            id        = ('cat_knock_%d'):format(i),
+            primitive = 'strike',
+            hitsNeeded = KNOCK_HITS,
+            worldPos  = exPos - (fwd * 0.20) + (up * ((i == 1) and 0.03 or -0.03)),
+            label     = ('%s %d'):format(L('mg_catalytic_knock'), i),
+        }
+    end
+
+    return pts
 end
 
 Profiles.list.catalytic = {
     title    = L('mg_catalytic_title'),
     helpText = L('mg_catalytic_help'),
-    toolClass = 'cut',
-    fov = 44.0,
-    minUxMs = 4500,
+    toolClass = 'cut',   -- [FIX-1.2] mantém o gate de ferramenta de corte no inventário (sem mudança de balanço)
+    fov = 38.0,          -- close-up mais fechado na flange
+    minUxMs = 5000,
     reserveMs = 3000,
     calculateCamera = calculateCatalyticCamera,
     generatePoints  = generateCatalyticPoints,

@@ -1304,8 +1304,7 @@ local function run()
     -- ─── [FIX-1] i18n dos profiles novos: paridade das keys mg_* nos 5 idiomas ──
     do
         local mgKeys = {
-            'mg_catalytic_title', 'mg_catalytic_help', 'mg_catalytic_clamp_f', 'mg_catalytic_clamp_r',
-            'mg_catalytic_pipe_f', 'mg_catalytic_pipe_r',
+            'mg_catalytic_title', 'mg_catalytic_help', 'mg_catalytic_bolt', 'mg_catalytic_knock',
             'mg_serial_title', 'mg_serial_help', 'mg_serial_engraving', 'mg_serial_residue',
             'mg_teardown_title', 'mg_teardown_help', 'mg_teardown_seam1', 'mg_teardown_seam2', 'mg_teardown_open',
         }
@@ -1330,6 +1329,28 @@ local function run()
             end
             check(('MG-LOCALE-2 %s: todos os point labels resolvidos'):format(pName), allLabels)
         end
+    end
+
+    -- ─── [FIX-1.2] Catalytic — shape dos pontos: 4 porcas (rotate) + 2 golpes (strike) ──
+    do
+        local catPts = Profiles.Get('catalytic').generatePoints(1, 'exhaust')
+        check('MG-CAT-PT-1 catalytic gera 6 pontos (4 rotate + 2 strike)', #catPts == 6)
+        local rotN, strikeN = 0, 0
+        for _, pt in ipairs(catPts) do
+            if pt.primitive == 'rotate' then
+                rotN = rotN + 1
+                check(('MG-CAT-PT-2 %s tem neededDeg numérico'):format(pt.id), type(pt.neededDeg) == 'number' and pt.neededDeg > 0)
+            elseif pt.primitive == 'strike' then
+                strikeN = strikeN + 1
+                check(('MG-CAT-PT-3 %s tem hitsNeeded numérico'):format(pt.id), type(pt.hitsNeeded) == 'number' and pt.hitsNeeded > 0)
+            end
+            check(('MG-CAT-PT-4 %s tem worldPos + label'):format(tostring(pt.id)),
+                type(pt.worldPos) == 'table' and type(pt.label) == 'string' and #pt.label > 0)
+        end
+        check('MG-CAT-PT-5 exatamente 4 rotate', rotN == 4)
+        check('MG-CAT-PT-6 exatamente 2 strike', strikeN == 2)
+        check('MG-CAT-PT-7 ids esperados cat_bolt_1 / cat_knock_1',
+            catPts[1].id == 'cat_bolt_1' and catPts[5].id == 'cat_knock_1')
     end
 
     -- ─── [FIX-1.1] Catalytic — paridade de bone da CÂMERA (exhaust_3/_4-only) ──────

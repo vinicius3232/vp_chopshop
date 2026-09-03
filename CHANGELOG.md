@@ -110,6 +110,22 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
 - **Specs:** `FIX1-TXN-00..10` (real, +`refund_failed`), `MG-CAT-BONE-0..4`.
   Harness **2102 PASS / 0 FAIL**.
 
+### Rework (FIX-1.2) — minigame do catalisador
+
+- **`client/minigame/profiles/catalytic.lua` reescrito** para o *feel* pedido:
+  **4 pontos `rotate`** (desparafusar as porcas da flange, close-up) + **2 pontos
+  `strike`** (soltar o catalisador na marreta) — antes eram 2 `drill` + 2 `cut`.
+  Câmera mais fechada (`fov` 44 → 38). Implementação autoral; primitives
+  reaproveitadas, sem cópia de script de terceiros.
+- **Sem mudança de servidor / economia / balanço:** `catalytic:start`/`complete`,
+  token temporal, `toolClass = 'cut'` (ainda exige ferramenta de corte no
+  inventário), payout e `BenchMaterials` intactos. O piso de `too_fast` continua
+  tratado no client.
+- Locale: `mg_catalytic_clamp_*`/`pipe_*` (4 keys) → `mg_catalytic_bolt` +
+  `mg_catalytic_knock` (2 keys) em pt/en/es/fr/tr; `mg_catalytic_help` reescrito.
+- Specs: `MG-CAT-PT-1..7` (shape: 6 pontos, 4 rotate + 2 strike, ids/campos),
+  `MG-LOCALE-1` atualizado. Harness **2108 PASS / 0 FAIL**.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi

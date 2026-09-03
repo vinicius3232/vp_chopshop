@@ -1669,9 +1669,9 @@ local function doStealCatalytic(veh)
     local minMs   = tonumber(startRes.durationMs) or 7000
     local startMs = GetGameTimer()
 
-    -- Minigame físico: 2 braçadeiras (drill) + 2 tubos (cut) sob o carro. É
-    -- player-paced; o gate de tempo mínimo continua sendo o token de
-    -- vp_chopshop:catalytic:start (server) — garantimos o piso logo abaixo.
+    -- Minigame físico [FIX-1.2]: 4 porcas da flange (rotate) + 2 golpes de marreta
+    -- (strike), close-up no escapamento. É player-paced; o gate de tempo mínimo
+    -- continua sendo o token de vp_chopshop:catalytic:start (server) — piso abaixo.
     local ok
     if minigameCfg.Enable ~= false and VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
         ok = VPChopDismantleMinigame.Start(veh, minigameCfg.Profile or 'catalytic', {
