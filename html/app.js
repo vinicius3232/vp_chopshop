@@ -493,6 +493,7 @@
         </div>
         <div class="cat-stage" id="cat-stage"></div>
         <div class="serial-hint">Desparafuse a flange (segure o clique e gire) e abra na marreta</div>
+        <span class="cat-ver">v11</span>
       </div>
       <img class="cat-tool" alt="" src="${CAT_BASE}catalytic_wrench.png" data-mode="wrench" hidden>`;
 

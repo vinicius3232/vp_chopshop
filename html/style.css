@@ -559,6 +559,13 @@ html, body {
   line-height: normal;   /* pai tem line-height:0 p/ a <img> */
 }
 .cat-part .serial-hint { line-height: normal; }
+.cat-ver {
+  position: absolute; right: 6px; bottom: 4px; z-index: 5;
+  font-size: 9px; color: rgba(255,255,255,0.35); letter-spacing: 1px;
+  pointer-events: none;
+}
+/* contorno do palco só p/ diagnóstico visual (bordas == área da foto) */
+.cat-stage[data-debug="1"] { outline: 1px dashed rgba(0,255,255,0.5); }
 .cat-stage {
   position: absolute;
   inset: 0;
