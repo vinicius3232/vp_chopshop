@@ -603,19 +603,22 @@
     const surfacePanel = document.getElementById('surface-panel');
     if (surfacePanel) { surfacePanel.hidden = true; surfacePanel.innerHTML = ''; }
 
-    // [FIX-1.3] Modo painel: "peça na bancada" com o número de série (serial scratch).
-    if (data.panel === 'serial' && surfacePanel) {
-      buildSerialPanel(surfacePanel, points);
-      updateOverallProgress();
-      app.classList.remove('hidden');
-      return;
-    }
-    // [VISUAL-02] Modo painel: catalisador na bancada (desparafusar + abrir na marreta).
-    if (data.panel === 'catalytic' && surfacePanel) {
-      buildCatalyticPanel(surfacePanel, points);
-      updateOverallProgress();
-      app.classList.remove('hidden');
-      return;
+    // Modo painel (serial / catalytic). Um erro no builder NÃO pode brickar o
+    // resto da NUI — cai no fluxo de hotspots genérico se lançar.
+    const panelBuilder = data.panel === 'serial' ? buildSerialPanel
+      : data.panel === 'catalytic' ? buildCatalyticPanel : null;
+    if (panelBuilder && surfacePanel) {
+      try {
+        panelBuilder(surfacePanel, points);
+        updateOverallProgress();
+        app.classList.remove('hidden');
+        return;
+      } catch (err) {
+        console.error('[vp_chopshop] panel builder failed, falling back:', err);
+        surfacePanel.hidden = true;
+        surfacePanel.innerHTML = '';
+        pointsMap = {};
+      }
     }
 
     points.forEach((pt, index) => {
