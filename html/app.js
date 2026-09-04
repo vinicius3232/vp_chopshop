@@ -504,7 +504,6 @@
         </div>
         <div class="cat-stage" id="cat-stage"></div>
         <div class="serial-hint">Segure o clique no ponto de partida e contorne a peça com o maçarico</div>
-        <span class="cat-ver">v20</span>
       </div>
       <img class="cat-tool" alt="" src="${CAT_BASE}catalytic_wrench.png" data-mode="wrench" hidden>`;
 
