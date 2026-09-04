@@ -897,9 +897,14 @@ Config.PhysicalCarry = {
         --- Duração MÍNIMA server-side (ms). O client espera o restante antes de
         --- chamar benchProcessPart (o server rejeita 'too_fast' abaixo disto).
         MinDurationMs = 5000,
-        --- Peças isentas do desmonte (já vêm "abertas"). O catalisador foi cortado
-        --- durante o furto (PR-2) → processa direto.
-        ExemptParts   = { catalytic_converter = true },
+        --- Peças isentas do desmonte (processam direto na barra de progresso).
+        ExemptParts   = {},
+        --- [FIX-1.3] Profile / duração mínima POR PEÇA (fallback: Profile / MinDurationMs).
+        --- O catalisador saiu da isenção: na bancada agora abre o minigame de
+        --- desmonte próprio (desparafusa a flange + solta na marreta) antes de
+        --- reciclar em matérias-primas.
+        PartProfiles      = { catalytic_converter = 'bench_catalytic' },
+        PartMinDurationMs = { catalytic_converter = 9000 },
         --- Item consumível gasto por desmonte (1x). Registrar no ox_inventory.
         HammerItem    = 'hammer',
         --- Prop na mão durante o minigame.

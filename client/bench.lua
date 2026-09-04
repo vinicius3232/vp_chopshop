@@ -239,9 +239,12 @@ local function runTeardownGate(benchId, partKey, entId)
     local startMs = GetGameTimer()
     local prop = spawnHammerProp()
 
+    -- [FIX-1.3] profile por peça (catalisador usa 'bench_catalytic'); fallback: td.Profile
+    local profileName = (td.PartProfiles and td.PartProfiles[partKey]) or td.Profile or 'bench_teardown'
+
     local done
     if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
-        done = VPChopDismantleMinigame.Start(cache.ped, td.Profile or 'bench_teardown', {
+        done = VPChopDismantleMinigame.Start(cache.ped, profileName, {
             timeout = minMs + 20000,
             anim    = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
         })
@@ -307,9 +310,24 @@ local function doProcessCarriedPartOnBench(benchId)
     if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
     local partKey = VPChopCarryingPart.partKey
 
-    -- Catalisador tem fluxo direto de reciclagem em matérias-primas
+    -- [FIX-1.3] Catalisador: opção própria de desmonte na bancada (minigame de
+    -- flange + marreta via runTeardownGate) antes de reciclar em matérias-primas.
     if partKey == 'catalytic_converter' then
-        executeBenchPartMode(benchId, 'raw_materials')
+        lib.registerContext({
+            id = 'vp_chop_bench_catalytic_menu',
+            title = L('bench_process_part'),
+            options = {
+                {
+                    title = L('bench_opt_catalytic_dismantle'),
+                    description = L('bench_desc_catalytic_dismantle'),
+                    icon = 'fa-solid fa-fire-flame-curved',
+                    onSelect = function()
+                        executeBenchPartMode(benchId, 'raw_materials')
+                    end,
+                },
+            },
+        })
+        lib.showContext('vp_chop_bench_catalytic_menu')
         return
     end
 

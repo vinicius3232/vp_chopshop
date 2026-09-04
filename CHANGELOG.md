@@ -174,6 +174,25 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
   minigame mais longo o `catalytic:complete` chegava depois de `expiresAt` e voltava
   `expired` (o anti-abuso real continua sendo `too_fast` + at-most-once).
 
+### Added (FIX-1.3) — desmontar catalisador na bancada
+
+- **Opção nova na bancada: "Desmontar catalisador".** O catalisador roubado deixou
+  de processar direto na barra de 4 s — agora abre um **minigame de desmonte próprio**
+  (profile `bench_catalytic`: 4 porcas `rotate` em sequência + 2 golpes `strike`,
+  peça nas mãos, câmera na bancada) antes de reciclar em matérias-primas.
+- `Config.PhysicalCarry.Teardown`: `catalytic_converter` saiu de `ExemptParts`;
+  novos mapas `PartProfiles` (`catalytic_converter = 'bench_catalytic'`) e
+  `PartMinDurationMs` (`catalytic_converter = 9000`). `runTeardownGate` e
+  `bench:teardownStart` passaram a resolver profile / duração mínima por peça.
+- **Requer e consome 1 `hammer`** por desmonte (igual porta/motor). Sem hammer →
+  `bench_teardown_no_hammer`.
+- Janela de replay do token de teardown `+20000` → `+30000` ms (minigame mais longo).
+- Novo `client/minigame/profiles/bench_catalytic.lua` (fxmanifest + run_spec).
+  Locale `mg_benchcat_*` + `bench_opt/desc_catalytic_dismantle` (5 idiomas).
+  Specs `MG-BENCHCAT-PT-0..6` + `MG-BENCHCAT-CFG-1/2`. Harness **2144 PASS / 0 FAIL**.
+- Fluxo autoral (primitives reaproveitadas), sem cópia de script de terceiros.
+- **Sem mudança de economia:** os outputs seguem `Config.CatalyticTheft.BenchMaterials`.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi

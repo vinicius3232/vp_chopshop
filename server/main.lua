@@ -547,11 +547,18 @@ lib.callback.register('vp_chopshop:bench:teardownStart', function(source, benchI
     if InvCount(source, hammerItem) < 1 then return { ok = false, err = 'no_hammer' } end
 
     local now   = GetGameTimer()
-    local minMs = math.floor(tonumber(td.MinDurationMs) or 5000)
+    -- [FIX-1.3] duração mínima por peça (catalisador é mais demorado); fallback: MinDurationMs
+    local minMs = math.floor(
+        (td.PartMinDurationMs and tonumber(td.PartMinDurationMs[ent.partKey]))
+        or tonumber(td.MinDurationMs) or 5000
+    )
     local token = ('bench_td:%d:%d'):format(source, now)
     _benchTeardowns[source] = {
+        -- [FIX-1.3] janela generosa: o minigame é player-paced e pode passar de 25 s
+        -- (catalytic na bancada: 4 porcas + golpes + câmera). Anti-abuso real =
+        -- too_fast (minMs) + at-most-once do PartEntitlement, não esta expiração.
         token = token, entId = entitlementId,
-        startedAt = now, minMs = minMs, expiresAt = now + minMs + 20000,
+        startedAt = now, minMs = minMs, expiresAt = now + minMs + 30000,
     }
     return { ok = true, token = token, minDurationMs = minMs }
 end)

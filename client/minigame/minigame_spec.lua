@@ -68,7 +68,7 @@ local function run()
 
     -- 3) Testes do Profiles Registry
     check('Profiles module loaded', Profiles ~= nil)
-    local expectedProfiles = { 'demo', 'wheel', 'panel', 'engine', 'carcass', 'catalytic', 'serial_scratch', 'bench_teardown' }
+    local expectedProfiles = { 'demo', 'wheel', 'panel', 'engine', 'carcass', 'catalytic', 'serial_scratch', 'bench_teardown', 'bench_catalytic' }
     for _, pName in ipairs(expectedProfiles) do
         local p = Profiles.Get(pName)
         check(('profile %s exists'):format(pName), p ~= nil)
@@ -1378,6 +1378,36 @@ local function run()
         check('MG-SERIAL-PT-5 2ª zona em sequência (unlockAfter == 1)', ssPts[2].unlockAfter == 1)
         check('MG-SERIAL-PT-6 serial_scratch tem focusPoint', type(ssProf.focusPoint) == 'function')
         check('MG-SERIAL-PT-7 serial_scratch usa painel de peça (panel == serial)', ssProf.panel == 'serial')
+    end
+
+    -- ─── [FIX-1.3] bench_catalytic — desmontar catalisador na bancada (4 porcas + 2 golpes) ──
+    do
+        local bcProf = Profiles.Get('bench_catalytic')
+        check('MG-BENCHCAT-PT-0 profile bench_catalytic existe', type(bcProf) == 'table')
+        if bcProf then
+            local pts = bcProf.generatePoints(1)
+            check('MG-BENCHCAT-PT-1 gera 6 pontos', #pts == 6)
+            local rotN, strikeN = 0, 0
+            for _, pt in ipairs(pts) do
+                if pt.primitive == 'rotate' then rotN = rotN + 1
+                elseif pt.primitive == 'strike' then strikeN = strikeN + 1 end
+                check(('MG-BENCHCAT-PT-2 %s tem worldPos + label'):format(tostring(pt.id)),
+                    type(pt.worldPos) == 'table' and type(pt.label) == 'string' and #pt.label > 0)
+            end
+            check('MG-BENCHCAT-PT-3 4 rotate + 2 strike', rotN == 4 and strikeN == 2)
+            check('MG-BENCHCAT-PT-4 porcas em sequência (unlockAfter 0..3)',
+                pts[1].unlockAfter == 0 and pts[4].unlockAfter == 3)
+            check('MG-BENCHCAT-PT-5 golpes só após as 4 porcas (unlockAfter == 4)',
+                pts[5].unlockAfter == 4 and pts[6].unlockAfter == 4)
+            check('MG-BENCHCAT-PT-6 tem focusPoint', type(bcProf.focusPoint) == 'function')
+        end
+
+        -- catalisador saiu da isenção do teardown e ganhou profile próprio
+        local td = (Config.PhysicalCarry or {}).Teardown or {}
+        check('MG-BENCHCAT-CFG-1 catalytic_converter NÃO é mais isento',
+            not (td.ExemptParts and td.ExemptParts.catalytic_converter))
+        check('MG-BENCHCAT-CFG-2 PartProfiles.catalytic_converter == bench_catalytic',
+            td.PartProfiles and td.PartProfiles.catalytic_converter == 'bench_catalytic')
     end
 
     -- ─── [FIX-1.1] Catalytic — paridade de bone da CÂMERA (exhaust_3/_4-only) ──────
