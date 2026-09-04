@@ -5,6 +5,11 @@ O renderer (html/app.js → buildExhaustBolt / updateExhaustBoltVisual) consome
 EXATAMENTE estes 4 arquivos. Enquanto eles NÃO existirem, o minigame continua
 100% funcional no visual genérico (círculo) — fallback gracioso via .xbolt-ready.
 
+STATUS: os 4 arquivos JÁ estão instalados (256x256 RGBA, gerados a partir dos
+recortes enviados pelo usuário em 2026-09-04; o 'hole' foi sintetizado da
+arruela + furo central preto). Para trocar por versões melhores, basta
+sobrescrever mantendo o nome, o tamanho quadrado e o fundo transparente.
+
 Arquivos esperados (nomes exatos, minúsculo):
 
   exhaust_bolt_head.png    — cabeça sextavada do parafuso (vista de topo/leve 3/4)
