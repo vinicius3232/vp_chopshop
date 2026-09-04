@@ -558,8 +558,8 @@ html, body {
   z-index: 2;
 }
 /* nós menores no painel: evita que os 4 parafusos + 2 golpes virem um borrão */
-.cat-node.hotspot { width: 44px; height: 44px; }
-.cat-node .xbolt { width: 56px; height: 56px; }
+.cat-node.hotspot { width: 30px; height: 30px; }
+.cat-node .xbolt { width: 40px; height: 40px; }
 
 .cat-tool {
   position: fixed;

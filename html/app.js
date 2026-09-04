@@ -253,9 +253,10 @@
   function buildExhaustBolt(el, ptRef) {
     const wrap = document.createElement('div');
     wrap.className = 'xbolt';
+    // Sem a rosca (xbolt-thread): o feedback é a cabeça girando/subindo e saindo
+    // -> some -> furo. A rosca visível "em cima" da peça ficava estranha.
     wrap.innerHTML = `
       <img class="xbolt-layer xbolt-hole"   alt="" src="${XBOLT_BASE}${XBOLT_IMG.hole}">
-      <img class="xbolt-layer xbolt-thread" alt="" src="${XBOLT_BASE}${XBOLT_IMG.thread}">
       <img class="xbolt-layer xbolt-washer" alt="" src="${XBOLT_BASE}${XBOLT_IMG.washer}">
       <img class="xbolt-layer xbolt-head"   alt="" src="${XBOLT_BASE}${XBOLT_IMG.head}">`;
     el.appendChild(wrap);
@@ -264,7 +265,7 @@
     wrap.querySelectorAll('img').forEach((img) => {
       img.addEventListener('load', () => {
         okCount += 1;
-        if (okCount >= 4) el.classList.add('xbolt-ready');
+        if (okCount >= 3) el.classList.add('xbolt-ready');
       });
       img.addEventListener('error', () => {
         el.classList.remove('xbolt-ready');
