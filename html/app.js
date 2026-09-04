@@ -503,9 +503,12 @@
     bodyImg.addEventListener('error', () => _catPartEl.classList.remove('cat-photo-ok'));
     _catTool.addEventListener('load', () => { _catTool.dataset.ok = '1'; });
 
-    // posições: 4 porcas num quadrado central; 2 golpes na costura
-    const boltPos = [ [34, 34], [66, 34], [34, 66], [66, 66] ];
-    const knockPos = [ [24, 50], [78, 50] ];
+    // [VISUAL-02] Posições % (left,top) sobre o corpo do catalisador em
+    // catalytic_body.png. Ajuste fino aqui se trocar a foto.
+    //   - 4 porcas: face do corpo, evitando a costura (~y 50%)
+    //   - 2 golpes: EM CIMA da costura soldada
+    const boltPos  = [ [25, 41], [43, 41], [25, 61], [43, 61] ];
+    const knockPos = [ [23, 50], [45, 50] ];
     let bi = 0, ki = 0;
 
     points.forEach((pt) => {
