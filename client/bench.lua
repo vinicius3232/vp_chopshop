@@ -51,7 +51,7 @@ local function spawnBenchSurfaceProp(benchId, partKey)
     local fwd = GetEntityForwardVector(benchEnt)
     local pos = vector3(bc.x - fwd.x * 0.10, bc.y - fwd.y * 0.10, bc.z + topZ + 0.04)
 
-    local prop = CreateObject(hash, pos.x, pos.y, pos.z, true, false, false)
+    local prop = CreateObject(hash, pos.x, pos.y, pos.z, false, false, false)
     SetModelAsNoLongerNeeded(hash)
     if not prop or prop == 0 then return nil end
     SetEntityHeading(prop, GetEntityHeading(benchEnt))
@@ -62,12 +62,34 @@ local function spawnBenchSurfaceProp(benchId, partKey)
     return prop
 end
 
+local takePartFromBench  -- fwd decl (usado no ox_target do prop)
+
 local function clearBenchPart(benchId)
     local slot = BenchPartProps[benchId]
     if slot and slot.prop and DoesEntityExist(slot.prop) then
+        exports.ox_target:removeLocalEntity(slot.prop)
         DeleteEntity(slot.prop)
     end
     BenchPartProps[benchId] = nil
+end
+
+--- ox_target no prop da peça na bancada → "Pegar peça" (a peça FICA na bancada até
+--- o jogador escolher isto; nada automático).
+local function registerBenchPartTarget(benchId, prop)
+    if not prop or not DoesEntityExist(prop) then return end
+    exports.ox_target:addLocalEntity(prop, {
+        {
+            name = ('vp_chop_bench_take_part_%s'):format(benchId),
+            label = L('bench_take_part') or 'Pegar peça',
+            icon = 'fa-solid fa-hand-holding',
+            distance = 2.2,
+            canInteract = function()
+                return GetVehiclePedIsIn(cache.ped, false) == 0
+                    and not (VPChopCarryingPart and VPChopCarryingPart.isPart)
+            end,
+            onSelect = function() takePartFromBench(benchId) end,
+        },
+    })
 end
 
 --- "Colocar peça na bancada": tira dos braços e posiciona o prop na bancada.
@@ -87,11 +109,12 @@ local function placePartOnBench(benchId)
     VPChopDropCarryPart()  -- limpa braços + prop da mão
     local prop = spawnBenchSurfaceProp(benchId, partKey)
     BenchPartProps[benchId] = { prop = prop, partKey = partKey, entitlementId = entId }
+    registerBenchPartTarget(benchId, prop)
     VPChopNotify(L('bench_part_placed'), 'inform')
 end
 
---- "Pegar peça da bancada" (menu ou ALT): volta pros braços.
-local function takePartFromBench(benchId)
+--- "Pegar peça da bancada" (menu ou ox_target no prop): volta pros braços.
+function takePartFromBench(benchId)
     local slot = BenchPartProps[benchId]
     if not slot then return end
     local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:bench:takePart', false, benchId)
@@ -620,39 +643,10 @@ function VPChopUpsertBench(bench)
     })
 end
 
--- [FIX-1.3] ALT (control 19) perto de uma bancada com peça → pega a peça de volta.
-CreateThread(function()
-    local altShown = false
-    local function hideAlt() if altShown then lib.hideTextUI(); altShown = false end end
-    while true do
-        local wait = 800
-        local occupied
-        for id, slot in pairs(BenchPartProps) do
-            if slot and slot.prop and DoesEntityExist(slot.prop) then occupied = id; break end
-        end
-        local near = false
-        if occupied and not (VPChopCarryingPart and VPChopCarryingPart.isPart)
-            and GetVehiclePedIsIn(cache.ped, false) == 0 then
-            local prop = BenchPartProps[occupied].prop
-            near = #(GetEntityCoords(cache.ped) - GetEntityCoords(prop)) < 2.2
-        end
-        if near then
-            wait = 0
-            if not altShown then
-                lib.showTextUI('[ALT] ' .. (L('bench_take_part') or 'Pegar peça'), { position = 'left-center', icon = 'hand-holding' })
-                altShown = true
-            end
-            if IsControlJustReleased(0, 19) then  -- INPUT_CHARACTER_WHEEL (Left Alt)
-                hideAlt()
-                takePartFromBench(occupied)
-                wait = 500
-            end
-        else
-            hideAlt()
-        end
-        Wait(wait)
-    end
-end)
+-- [FIX-1.3] A peça FICA na bancada. Pra pegar de volta: mirar o prop com o
+-- ox_target ("Pegar peça", registrado em registerBenchPartTarget) ou pelo menu
+-- da bancada. Nada de tecla crua — control 19 (LALT) é a hotkey do ox_target e
+-- estava pegando a peça sozinho ao abrir/fechar o menu.
 
 AddEventHandler('onResourceStop', function(res)
     if res ~= GetCurrentResourceName() then return end
