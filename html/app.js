@@ -52,8 +52,12 @@
     pt.progress = 100;
 
     if (pt.primitive === 'trace') {
-      if (pt.fgPath) {
+      if (pt.fgPath && !pt._panel) {
         pt.fgPath.style.strokeDashoffset = 0;
+      }
+      if (pt._panel && _catCut && pt.id === _catCut.id) {
+        _catCut.progress = 100;
+        catCutRedrawFg();
       }
       if (pt.torchTip) {
         pt.torchTip.classList.add('hidden');
@@ -68,6 +72,12 @@
       // Ocultar imediatamente a seção cortada da tela
       if (pt.element) {
         pt.element.style.display = 'none';
+      }
+      // [maçarico] contorno no painel do catalisador → abre a carcaça
+      if (_catCut && pt.id === _catCut.id) {
+        _catCut._tracing = false;
+        if (pt.startNode) pt.startNode.style.display = 'none';
+        if (_catPanelActive) catCheckOpen();
       }
     } else {
       if (pt.progressCircle) {
@@ -468,9 +478,10 @@
   let _catPanelActive = false;
   let _catTool = null;      // <img> chave/marreta que segue o cursor
   let _catPartEl = null;
+  let _catCut = null;       // [maçarico] estado do contorno (primitive 'trace' no painel)
 
   function catUpdateTool() {
-    if (!_catTool) return;
+    if (!_catTool || _catCut) return;
     const anyBoltPending = Object.keys(pointsMap).some(
       (k) => pointsMap[k].primitive === 'rotate' && !pointsMap[k].completed);
     _catTool.dataset.mode = anyBoltPending ? 'wrench' : 'hammer';
@@ -492,8 +503,8 @@
           <span class="serial-part-kind">CATALISADOR</span>
         </div>
         <div class="cat-stage" id="cat-stage"></div>
-        <div class="serial-hint">Desparafuse a flange (segure o clique e gire) e abra na marreta</div>
-        <span class="cat-ver">v11</span>
+        <div class="serial-hint">Segure o clique no ponto de partida e contorne a peça com o maçarico</div>
+        <span class="cat-ver">v17</span>
       </div>
       <img class="cat-tool" alt="" src="${CAT_BASE}catalytic_wrench.png" data-mode="wrench" hidden>`;
 
@@ -504,6 +515,16 @@
     bodyImg.addEventListener('load', () => _catPartEl.classList.add('cat-photo-ok'));
     bodyImg.addEventListener('error', () => _catPartEl.classList.remove('cat-photo-ok'));
     _catTool.addEventListener('load', () => { _catTool.dataset.ok = '1'; });
+
+    // [maçarico] modo contorno: 1 ponto 'trace' → desenha a linha de corte sobre a
+    // foto e a tocha segue o cursor. Sem parafusos.
+    if (points.some((p) => p.primitive === 'trace')) {
+      _catTool.hidden = true;
+      buildCatalyticContour(stage, points.find((p) => p.primitive === 'trace'));
+      _catPanelActive = true;
+      updateOverallProgress();
+      return;
+    }
 
     // [VISUAL-02] Posições % (left,top) sobre catalytic_body.png (o painel usa a
     // proporção exata da foto, então % do painel == % da imagem). Ajuste aqui.
@@ -589,6 +610,138 @@
     if (points.some((p) => p.primitive === 'strike')) {
       strikeRaf = requestAnimationFrame(strikeLoop);
     }
+  }
+
+  // [maçarico] Contorno da peça no painel: linha de corte em SVG sobre a foto +
+  // tocha que segue o cursor. O jogador segura o clique no marcador de início e
+  // arrasta a tocha ao redor do contorno até fechar a volta.
+  const CAT_CUT_MIN_TOTAL_MS = 8500;  // o corte enche no máx. nessa taxa → casa c/ o gate server-side
+  function buildCatalyticContour(stage, ptData) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'cat-cut-svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    // "cápsula" colada na silhueta do tambor (em % do palco == % da foto):
+    // corpo do catalisador ~ x 15-53% / y 34-70% → pontas arredondadas.
+    const x1 = 14, y1 = 33, x2 = 54, y2 = 71, r = 11;
+    const d =
+      `M ${x1 + r} ${y1} L ${x2 - r} ${y1} Q ${x2} ${y1} ${x2} ${y1 + r}` +
+      ` L ${x2} ${y2 - r} Q ${x2} ${y2} ${x2 - r} ${y2}` +
+      ` L ${x1 + r} ${y2} Q ${x1} ${y2} ${x1} ${y2 - r}` +
+      ` L ${x1} ${y1 + r} Q ${x1} ${y1} ${x1 + r} ${y1} Z`;
+    const bg = document.createElementNS(NS, 'path');
+    bg.setAttribute('class', 'cat-cut-bg'); bg.setAttribute('d', d);
+    const fg = document.createElementNS(NS, 'path');
+    fg.setAttribute('class', 'cat-cut-fg'); fg.setAttribute('d', '');  // cresce ao longo do contorno
+    svg.appendChild(bg); svg.appendChild(fg);
+    stage.appendChild(svg);
+
+    const startEl = document.createElement('div');
+    startEl.className = 'cat-cut-start';
+    startEl.innerHTML = '<span>&#9656;</span>';
+    startEl.style.left = (x1 + r) + '%';
+    startEl.style.top = y1 + '%';
+    stage.appendChild(startEl);
+
+    const torch = document.createElement('div');
+    torch.className = 'cat-torch hidden';
+    document.body.appendChild(torch);
+
+    // amostras ao longo do contorno (viewBox 0..100 == % do palco)
+    const N = 44;
+    const samples = [];
+    if (bg.getTotalLength && bg.getPointAtLength) {
+      const L = bg.getTotalLength();
+      for (let i = 0; i <= N; i++) {
+        const p = bg.getPointAtLength((L * i) / N);
+        samples.push([p.x, p.y]);
+      }
+    } else {
+      samples.push([x1 + r, y1], [x2, y1 + r], [x2, y2 - r], [x1 + r, y2], [x1, y2 - r], [x1, y1 + r], [x1 + r, y1]);
+    }
+
+    const entry = {
+      id: ptData.id, primitive: 'trace', element: svg,
+      fgPath: fg, torchTip: torch, startNode: startEl,
+      progress: 0, completed: false, visible: true,
+      _panel: true,   // entrada do PAINEL: os handlers full-screen de 'trace' devem ignorá-la
+      _samples: samples, _idx: 0, _tracing: false, _started: false,
+      _t0: 0, _finRaf: null,
+      _toPct(cx, cy) {
+        const b = stage.getBoundingClientRect();
+        return [((cx - b.left) / b.width) * 100, ((cy - b.top) / b.height) * 100];
+      },
+    };
+    pointsMap[ptData.id] = entry;
+    _catCut = entry;
+  }
+
+  // redesenha a linha de corte laranja até a fração `frac` (0..1) do contorno
+  function catCutRedrawFg() {
+    if (!_catCut) return;
+    const S = _catCut._samples, N = S.length - 1;
+    const upto = Math.max(1, Math.round((_catCut.progress / 100) * N));
+    let d = `M ${S[0][0]} ${S[0][1]}`;
+    for (let i = 1; i <= upto && i < S.length; i++) d += ` L ${S[i][0]} ${S[i][1]}`;
+    _catCut.fgPath.setAttribute('d', _catCut.progress > 0 ? d : '');
+  }
+
+  function catCutOnDown(e) {
+    if (!_catCut || _catCut.completed || e.button !== 0) return;
+    const [px, py] = _catCut._toPct(e.clientX, e.clientY);
+    const s0 = _catCut._samples[0];
+    if (Math.hypot(px - s0[0], py - s0[1]) < 12) {
+      _catCut._tracing = true;
+      if (!_catCut._t0) _catCut._t0 = Date.now();
+      _catCut.torchTip.classList.remove('hidden');
+      if (!_catCut._started) { _catCut._started = true; postNui('minigamePointStart', { id: _catCut.id }); }
+    }
+  }
+  function catCutOnMove(e) {
+    if (!_catCut || !_catCut._tracing || _catCut.completed) return;
+    _catCut.torchTip.style.left = e.clientX + 'px';
+    _catCut.torchTip.style.top = e.clientY + 'px';
+    const [px, py] = _catCut._toPct(e.clientX, e.clientY);
+    const S = _catCut._samples, N = S.length - 1;
+    // "alcance": até onde o cursor já percorreu o contorno (catch-up, sem trava)
+    let guard = 0;
+    while (_catCut._idx < N && guard++ < 8) {
+      const nx = S[_catCut._idx + 1];
+      if (Math.hypot(px - nx[0], py - nx[1]) < 11) _catCut._idx++;
+      else break;
+    }
+    // progresso = min(percorrido, teto por tempo) → o corte nunca enche antes de ~8.5s
+    const swept = (_catCut._idx / N) * 100;
+    const byTime = ((Date.now() - _catCut._t0) / CAT_CUT_MIN_TOTAL_MS) * 100;
+    const prog = Math.max(0, Math.min(swept, byTime, 100));
+    _catCut.progress = Math.round(prog);
+    catCutRedrawFg();
+    // deu a volta inteira mas o tempo mínimo ainda não passou → deixa o corte
+    // terminar de "queimar" sozinho (sem exigir que o jogador fique mexendo).
+    if (_catCut._idx >= N && !_catCut._finRaf) {
+      _catCut._finRaf = requestAnimationFrame(catCutFinishLoop);
+    }
+    updateOverallProgress();
+  }
+  function catCutFinishLoop() {
+    if (!_catCut || _catCut.completed) { if (_catCut) _catCut._finRaf = null; return; }
+    const prog = Math.min(((Date.now() - _catCut._t0) / CAT_CUT_MIN_TOTAL_MS) * 100, 100);
+    _catCut.progress = Math.round(prog);
+    catCutRedrawFg();
+    updateOverallProgress();
+    if (prog >= 100) {
+      _catCut._tracing = false;
+      _catCut._finRaf = null;
+      completePoint(_catCut);
+      return;
+    }
+    _catCut._finRaf = requestAnimationFrame(catCutFinishLoop);
+  }
+  function catCutOnUp() {
+    if (!_catCut) return;
+    _catCut._tracing = false;
+    if (!_catCut.completed && !_catCut._finRaf) _catCut.torchTip.classList.add('hidden');
   }
 
   function startMinigame(data) {
@@ -890,6 +1043,7 @@
     const pts = data.points || [];
     pts.forEach(pt => {
       const entry = pointsMap[pt.id];
+      if (entry && entry._panel) return;   // painel gerencia o próprio SVG/posição
       if (entry && entry.element) {
         if (pt.visible === false) {
           entry.element.style.display = 'none';
@@ -924,6 +1078,13 @@
     _catPanelActive = false;
     _catTool = null;
     _catPartEl = null;
+    if (_catCut) {
+      if (_catCut._finRaf) cancelAnimationFrame(_catCut._finRaf);
+      if (_catCut.torchTip && _catCut.torchTip.parentNode) {
+        _catCut.torchTip.parentNode.removeChild(_catCut.torchTip);
+      }
+    }
+    _catCut = null;
     pointsMap = {};
   }
 
@@ -955,7 +1116,7 @@
     const h = window.innerHeight;
     for (const k in pointsMap) {
       const pt = pointsMap[k];
-      if (pt && pt.primitive === 'trace' && !pt.completed) {
+      if (pt && pt.primitive === 'trace' && !pt.completed && !pt._panel) {
         const initialP0 = { x: (pt.path[0].x || 0.5) * w, y: (pt.path[0].y || 0.5) * h };
         const targetPos = pt.lastCutScreenPos || initialP0;
         const dist = Math.hypot(e.clientX - targetPos.x, e.clientY - targetPos.y);
@@ -1135,6 +1296,7 @@
     _serialSanding = false;
     if (!_serialPanelActive) hideSander();
     stopCuttingLoop();
+    catCutOnUp();
     activeHotspotId = null;
   });
 
@@ -1145,13 +1307,16 @@
       showSander(e.clientX, e.clientY);
       serialSandAt(e.clientX, e.clientY);
     }
-    if (_catPanelActive && _catTool && _catTool.dataset.ok === '1') {
+    if (_catCut) {
+      catCutOnMove(e);
+    } else if (_catPanelActive && _catTool && _catTool.dataset.ok === '1') {
       _catTool.hidden = false;
       _catTool.style.left = e.clientX + 'px';
       _catTool.style.top = e.clientY + 'px';
     }
   });
   document.addEventListener('mousedown', (e) => {
+    if (_catCut) { catCutOnDown(e); return; }
     if (!_serialPanelActive || e.button !== 0) return;
     _serialSanding = true;
     serialSandAt(e.clientX, e.clientY);

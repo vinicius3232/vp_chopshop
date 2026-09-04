@@ -580,6 +580,42 @@ html, body {
 .cat-node.hotspot { width: 30px; height: 30px; }
 .cat-node .xbolt { width: 40px; height: 40px; }
 
+/* [maçarico] contorno de corte sobre a foto */
+.cat-cut-svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 4; pointer-events: none; overflow: visible; }
+.cat-cut-bg {
+  fill: none; stroke: rgba(255, 255, 255, 0.30);
+  stroke-width: 2.2; stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.cat-cut-fg {
+  fill: none; stroke: #ff7a1a;
+  stroke-width: 3.6; stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 4px rgba(255, 122, 26, 0.9));
+  transition: stroke-dashoffset 0.09s linear;
+}
+.cat-cut-start {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 26px; height: 26px; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: rgba(15, 23, 42, 0.88);
+  border: 2px solid #fbbf24; color: #fbbf24; font-size: 11px;
+  pointer-events: none; animation: catCutPulse 1.1s infinite;
+}
+@keyframes catCutPulse {
+  0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55); }
+  100% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
+}
+.cat-torch {
+  position: fixed; width: 16px; height: 16px;
+  transform: translate(-50%, -50%); border-radius: 50%;
+  background: #fff2d6; border: 2px solid #ea580c; z-index: 22;
+  pointer-events: none;
+  box-shadow: 0 0 12px 4px rgba(234, 88, 12, 0.95), 0 0 22px 9px rgba(245, 158, 11, 0.55);
+  animation: torchSpark 0.1s infinite alternate;
+}
+.cat-torch.hidden { display: none; }
+
 .cat-tool {
   position: fixed;
   width: 150px;

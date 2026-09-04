@@ -1307,6 +1307,7 @@ local function run()
             'mg_catalytic_title', 'mg_catalytic_help', 'mg_catalytic_bolt', 'mg_catalytic_knock',
             'mg_serial_title', 'mg_serial_help', 'mg_serial_engraving', 'mg_serial_residue',
             'mg_teardown_title', 'mg_teardown_help', 'mg_teardown_seam1', 'mg_teardown_seam2', 'mg_teardown_open',
+            'mg_benchcat_title', 'mg_benchcat_help', 'mg_benchcat_cut',
         }
         for _, lang in ipairs({ 'en', 'pt', 'es', 'fr', 'tr' }) do
             Config.Locale = lang
@@ -1318,7 +1319,7 @@ local function run()
         Config.Locale = 'en'
 
         -- os profiles devem resolver via L(...), não literal
-        for _, pName in ipairs({ 'catalytic', 'serial_scratch', 'bench_teardown' }) do
+        for _, pName in ipairs({ 'catalytic', 'serial_scratch', 'bench_teardown', 'bench_catalytic' }) do
             local p = Profiles.Get(pName)
             check(('MG-LOCALE-2 %s title/helpText são strings resolvidas'):format(pName),
                 type(p.title) == 'string' and #p.title > 0 and type(p.helpText) == 'string' and #p.helpText > 0)
@@ -1383,27 +1384,20 @@ local function run()
         check('MG-SERIAL-PT-7 serial_scratch usa painel de peça (panel == serial)', ssProf.panel == 'serial')
     end
 
-    -- ─── [FIX-1.3] bench_catalytic — desmontar catalisador na bancada (4 porcas + 2 golpes) ──
+    -- ─── bench_catalytic — desmontar catalisador na bancada (maçarico: contorno) ──
     do
         local bcProf = Profiles.Get('bench_catalytic')
         check('MG-BENCHCAT-PT-0 profile bench_catalytic existe', type(bcProf) == 'table')
         if bcProf then
             local pts = bcProf.generatePoints(1)
-            check('MG-BENCHCAT-PT-1 gera 6 pontos', #pts == 6)
-            local rotN, strikeN = 0, 0
-            for _, pt in ipairs(pts) do
-                if pt.primitive == 'rotate' then rotN = rotN + 1
-                elseif pt.primitive == 'strike' then strikeN = strikeN + 1 end
-                check(('MG-BENCHCAT-PT-2 %s tem worldPos + label'):format(tostring(pt.id)),
-                    type(pt.worldPos) == 'table' and type(pt.label) == 'string' and #pt.label > 0)
-            end
-            check('MG-BENCHCAT-PT-3 4 rotate + 2 strike', rotN == 4 and strikeN == 2)
-            check('MG-BENCHCAT-PT-4 porcas em sequência (unlockAfter 0..3)',
-                pts[1].unlockAfter == 0 and pts[4].unlockAfter == 3)
-            check('MG-BENCHCAT-PT-7 [VISUAL-01] porcas têm visualType exhaust_bolt',
-                pts[1].visualType == 'exhaust_bolt' and pts[5].visualType == nil)
-            check('MG-BENCHCAT-PT-5 golpes só após as 4 porcas (unlockAfter == 4)',
-                pts[5].unlockAfter == 4 and pts[6].unlockAfter == 4)
+            check('MG-BENCHCAT-PT-1 gera 1 ponto', #pts == 1)
+            check('MG-BENCHCAT-PT-2 ponto tem worldPos + label',
+                pts[1] and type(pts[1].worldPos) == 'table'
+                and type(pts[1].label) == 'string' and #pts[1].label > 0)
+            check('MG-BENCHCAT-PT-3 primitive trace (maçarico no contorno)',
+                pts[1].primitive == 'trace')
+            check('MG-BENCHCAT-PT-4 id bcat_cut', pts[1].id == 'bcat_cut')
+            check('MG-BENCHCAT-PT-5 sem parafusos/golpes', pts[1].visualType == nil and pts[1].hitsNeeded == nil)
             check('MG-BENCHCAT-PT-6 tem focusPoint', type(bcProf.focusPoint) == 'function')
             check('MG-BENCHCAT-PT-8 [VISUAL-02] bench_catalytic usa painel (panel == catalytic)',
                 bcProf.panel == 'catalytic')
