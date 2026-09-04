@@ -345,6 +345,52 @@
   // gravado; o jogador esfrega a lixa (gesto 'sand') sobre cada faixa até apagar.
   const SERIAL_BASE = 'assets/minigame/serial/';
 
+  // [VISUAL-01C] Estado do "lixamento livre": a lixa (foto) segue o cursor pela
+  // tela; segurando LMB e passando sobre o número, cada célula do serial vai
+  // desgastando. Termina quando todas as células (mapeadas aos 2 pontos do
+  // profile) chegam a 100.
+  let _serialPanelActive = false;
+  let _serialSanding = false;
+  let _serialCells = [];       // { el, wear, done, ptId }
+  let _serialPoints = {};      // ptId -> pointsMap entry
+  let _serialStartFired = false;
+
+  function serialCellRate() { return 3.4; }   // ganho por evento de mousemove sobre a célula
+
+  function serialSandAt(cx, cy) {
+    if (!_serialSanding) return;
+    const R = 46;  // raio efetivo da lixa (px)
+    let touched = false;
+    for (const c of _serialCells) {
+      if (c.done) continue;
+      const r = c.el.getBoundingClientRect();
+      const dx = Math.max(r.left - cx, 0, cx - r.right);
+      const dy = Math.max(r.top - cy, 0, cy - r.bottom);
+      if (dx * dx + dy * dy > R * R) continue;
+      touched = true;
+      c.wear = Math.min(100, c.wear + serialCellRate());
+      c.el.style.setProperty('--w', (c.wear / 100).toFixed(3));
+      if (c.wear >= 100) { c.done = true; c.el.classList.add('done'); }
+    }
+    if (!touched) return;
+    if (!_serialStartFired) {
+      _serialStartFired = true;
+      const first = Object.keys(_serialPoints)[0];
+      if (first) postNui('minigamePointStart', { id: first });
+    }
+    // progresso por ponto = média do desgaste das suas células
+    for (const ptId in _serialPoints) {
+      const pt = _serialPoints[ptId];
+      if (pt.completed) continue;
+      const mine = _serialCells.filter((c) => c.ptId === ptId);
+      const avg = mine.length ? mine.reduce((s, c) => s + c.wear, 0) / mine.length : 0;
+      pt.progress = Math.floor(avg);
+      if (pt.onProgress) pt.onProgress(pt.progress);
+      if (pt.progress >= 100) completePoint(pt);
+    }
+    updateOverallProgress();
+  }
+
   function buildSerialPanel(root, points) {
     const serial = genSerial();
     root.hidden = false;
@@ -360,84 +406,58 @@
           <span class="serial-rivet r3"></span><span class="serial-rivet r4"></span>
           <div class="serial-plate-label">N&ordm; DE S&Eacute;RIE</div>
           <div class="serial-code" id="serial-code">${serial}</div>
-          <div class="serial-zones" id="serial-zones"></div>
+          <div class="serial-cells" id="serial-cells"></div>
         </div>
-        <div class="serial-hint">Segure o clique numa faixa e esfregue a lixa &#8644; at&eacute; apagar</div>
+        <div class="serial-hint">Segure o clique e passe a lixa sobre o n&uacute;mero at&eacute; apag&aacute;-lo</div>
       </div>
       <img class="serial-sander" alt="" src="${SERIAL_BASE}serial_sander.png" hidden>`;
 
     const partEl = root.querySelector('.serial-part');
     const plateImg = root.querySelector('.serial-plate-photo');
     const sanderImg = root.querySelector('.serial-sander');
-    // fallback gracioso: sem a foto, mantém a plaqueta desenhada em CSS
     plateImg.addEventListener('load', () => partEl.classList.add('plate-photo-ok'));
     plateImg.addEventListener('error', () => partEl.classList.remove('plate-photo-ok'));
     sanderImg.addEventListener('load', () => { sanderImg.dataset.ok = '1'; });
     _serialSander = sanderImg;
 
-    const zonesWrap = root.querySelector('#serial-zones');
     const codeEl = root.querySelector('#serial-code');
+    const cellsWrap = root.querySelector('#serial-cells');
 
+    // 2 pontos do profile → progresso (barra + estado). Sem lock: movimento livre.
+    _serialPoints = {};
     points.forEach((pt, i) => {
       const ptId = pt.id || `serial_zone_${i}`;
-      const strokesNeeded = Math.max(3, pt.strokesNeeded || 8);
-      const zone = document.createElement('button');
-      zone.type = 'button';
-      zone.className = 'serial-zone';
-      zone.dataset.id = ptId;
-      zone.innerHTML = `
-        <span class="serial-zone-hatch"></span>
-        <span class="serial-zone-mark"></span>
-        <span class="serial-zone-label">${pt.label || (i === 0 ? 'GRAVA&Ccedil;&Atilde;O' : 'RES&Iacute;DUO')}</span>`;
-      if (pt.lockUntilOthers === true || (typeof pt.unlockAfter === 'number' && pt.unlockAfter > 0)) {
-        zone.classList.add('locked');
-      }
-      zonesWrap.appendChild(zone);
-
       const entry = {
-        id: ptId,
-        primitive: 'sand',
-        element: zone,
-        icon: zone.querySelector('.serial-zone-mark'),
-        strokesNeeded: strokesNeeded,
-        strokes: 0,
-        _sandDir: 0,
-        _sandLastX: 0,
-        progress: 0,
-        completed: false,
-        visible: true,
-        lockUntilOthers: pt.lockUntilOthers === true,
-        unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null,
+        id: ptId, primitive: 'sand', progress: 0, completed: false, visible: true,
+        lockUntilOthers: false, unlockAfter: null,
         onProgress: (p) => {
-          zone.style.setProperty('--wear', (p / 100).toFixed(3));
-          // desgasta a fatia correspondente do código
-          const frac = points.length > 1 ? (i + 1) / points.length : 1;
           codeEl.style.setProperty('--wear' + (i + 1), (p / 100).toFixed(3));
-          if (i === points.length - 1) {
-            codeEl.classList.toggle('scrubbed', p >= 100);
-          }
-        }
+          if (i === points.length - 1) codeEl.classList.toggle('scrubbed', p >= 100);
+        },
       };
       pointsMap[ptId] = entry;
-
-      zone.addEventListener('mousedown', (e) => {
-        if (e.button !== 0 || entry.completed) return;
-        if (!isPointUnlocked(entry)) {
-          zone.classList.add('serial-zone-nope');
-          setTimeout(() => zone.classList.remove('serial-zone-nope'), 180);
-          e.preventDefault();
-          return;
-        }
-        activeHotspotId = ptId;
-        zone.classList.add('sanding');
-        entry._sandLastX = e.clientX;
-        entry._sandDir = 0;
-        showSander(e.clientX, e.clientY);
-        if (!entry._focused) { entry._focused = true; postNui('minigamePointStart', { id: ptId }); }
-        e.preventDefault();
-      });
+      _serialPoints[ptId] = entry;
     });
 
+    // grade de células cobrindo o número; metade esquerda → ponto 1, direita → ponto 2
+    const ptIds = Object.keys(_serialPoints);
+    const N = 12;
+    _serialCells = [];
+    for (let k = 0; k < N; k++) {
+      const cell = document.createElement('span');
+      cell.className = 'serial-cell';
+      cell.style.left = (k * (100 / N)) + '%';
+      cell.style.width = (100 / N) + '%';
+      cellsWrap.appendChild(cell);
+      _serialCells.push({
+        el: cell, wear: 0, done: false,
+        ptId: ptIds[k < N / 2 ? 0 : Math.min(1, ptIds.length - 1)],
+      });
+    }
+
+    _serialSanding = false;
+    _serialStartFired = false;
+    _serialPanelActive = true;
     stopStrikeLoop();
   }
 
@@ -756,6 +776,10 @@
     hotspotContainer.innerHTML = '';
     const sp = document.getElementById('surface-panel');
     if (sp) { sp.hidden = true; sp.innerHTML = ''; }
+    _serialPanelActive = false;
+    _serialSanding = false;
+    _serialCells = [];
+    _serialPoints = {};
     _serialSander = null;
     pointsMap = {};
   }
@@ -965,9 +989,23 @@
       pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing', 'sanding');
       if (pt.torchTip) pt.torchTip.classList.add('hidden');
     }
-    hideSander();
+    _serialSanding = false;
+    if (!_serialPanelActive) hideSander();
     stopCuttingLoop();
     activeHotspotId = null;
+  });
+
+  // [VISUAL-01C] Lixamento livre no painel de série: a lixa segue o cursor;
+  // segurando LMB e passando sobre o número, desgasta as células.
+  document.addEventListener('mousemove', (e) => {
+    if (!_serialPanelActive) return;
+    showSander(e.clientX, e.clientY);
+    serialSandAt(e.clientX, e.clientY);
+  });
+  document.addEventListener('mousedown', (e) => {
+    if (!_serialPanelActive || e.button !== 0) return;
+    _serialSanding = true;
+    serialSandAt(e.clientX, e.clientY);
   });
 
   // ─── Escape / Cancel Key Listener ──────────────────────────────────────────

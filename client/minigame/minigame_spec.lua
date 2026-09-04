@@ -1378,7 +1378,7 @@ local function run()
             check(('MG-SERIAL-PT-4 %s tem worldPos + label'):format(pt.id),
                 type(pt.worldPos) == 'table' and type(pt.label) == 'string' and #pt.label > 0)
         end
-        check('MG-SERIAL-PT-5 2ª zona em sequência (unlockAfter == 1)', ssPts[2].unlockAfter == 1)
+        check('MG-SERIAL-PT-5 [VISUAL-01C] sem lock (lixamento livre)', ssPts[2].unlockAfter == nil)
         check('MG-SERIAL-PT-6 serial_scratch tem focusPoint', type(ssProf.focusPoint) == 'function')
         check('MG-SERIAL-PT-7 serial_scratch usa painel de peça (panel == serial)', ssProf.panel == 'serial')
     end

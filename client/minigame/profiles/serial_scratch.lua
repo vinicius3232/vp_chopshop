@@ -84,7 +84,7 @@ local function generatePoints(ped)
             id        = 'serial_grind_2',
             primitive = 'sand',
             strokesNeeded = STROKES_RESIDUE,
-            unlockAfter = 1,   -- só depois de apagar a gravação
+            -- [VISUAL-01C] sem lock: lixamento livre no painel (passe a lixa sobre o número)
             worldPos  = work + (rightV * 0.045),
             label     = L('mg_serial_residue'),
         },

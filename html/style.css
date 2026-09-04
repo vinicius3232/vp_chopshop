@@ -467,10 +467,10 @@ html, body {
 .serial-part > .serial-plate,
 .serial-part > .serial-hint { position: relative; z-index: 1; }
 
-/* almofada de lixa que segue o cursor durante o esfrega */
+/* almofada de lixa que segue o cursor livremente */
 .serial-sander {
   position: fixed;
-  width: 108px;
+  width: 120px;
   height: auto;
   transform: translate(-50%, -50%) rotate(-12deg);
   pointer-events: none;
@@ -479,6 +479,28 @@ html, body {
   transition: transform 0.04s linear;
 }
 .serial-sander[hidden] { display: none; }
+
+/* [VISUAL-01C] grade de células sobre o número — desgaste livre com a lixa */
+.serial-cells {
+  position: absolute;
+  left: 22px; right: 22px;
+  top: 44px;
+  height: 42px;
+  pointer-events: none;
+  z-index: 2;
+}
+.serial-cell {
+  --w: 0;
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background:
+    repeating-linear-gradient(48deg, rgba(210,210,214,0.55) 0 2px, transparent 2px 5px);
+  opacity: calc(var(--w) * 0.9);
+  mix-blend-mode: screen;
+  transition: opacity 0.08s linear;
+}
+.serial-cell.done { opacity: 0.9; }
 
 /* ─── [VISUAL-01] Overlay fotorrealista de fixação (parafuso do escapamento) ── */
 /* Sem assets carregados → tudo continua no visual genérico (circulo). Quando os
