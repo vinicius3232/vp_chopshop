@@ -30,9 +30,34 @@ local function doScratch()
     local mg = PS.ScratchMinigame or { Enable = true, Profile = 'serial_scratch' }
     local ok
     if mg.Enable ~= false and VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
-        ok = VPChopDismantleMinigame.Start(cache.ped, mg.Profile or 'serial_scratch', {
+        -- [FIX-1.3] prop decorativo da peça na bancada só pra ambientar a câmera
+        -- (é um item de inventário, não carry físico) — removido logo após.
+        local benchProp
+        local model = (Config.PhysicalCarry and Config.PhysicalCarry.Props
+            and Config.PhysicalCarry.Props.car_parts and Config.PhysicalCarry.Props.car_parts.model) or 'prop_car_door_01'
+        local hash = GetHashKey(model)
+        RequestModel(hash)
+        local t0 = GetGameTimer()
+        while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 1500) do Wait(20) end
+        if HasModelLoaded(hash) then
+            local ped = cache.ped
+            local fwd = GetEntityForwardVector(ped)
+            local pc  = GetEntityCoords(ped)
+            benchProp = CreateObject(hash, pc.x + fwd.x * 0.6, pc.y + fwd.y * 0.6, pc.z + 0.55, false, false, false)
+            SetModelAsNoLongerNeeded(hash)
+            if benchProp and benchProp ~= 0 then
+                FreezeEntityPosition(benchProp, true)
+                SetEntityCollision(benchProp, false, false)
+            else
+                benchProp = nil
+            end
+        end
+
+        ok = VPChopDismantleMinigame.Start(benchProp or cache.ped, mg.Profile or 'serial_scratch', {
             timeout = 25000,
         })
+
+        if benchProp and DoesEntityExist(benchProp) then DeleteEntity(benchProp) end
     else
         ok = lib.progressBar({
             duration     = 5000,

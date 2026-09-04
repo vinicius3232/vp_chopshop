@@ -521,6 +521,50 @@ AddEventHandler('playerDropped', function()
     _benchTeardowns[src] = nil
 end)
 
+-- ─── [FIX-1.3] Ocupação de bancada — 1 peça física por bancada ────────────────
+-- In-memory (some no restart do resource — igual ao próprio PartEntitlement; a
+-- persistência durável é a Fase 5 / P5.4 do roadmap). Só o dono do entitlement
+-- pode retirar/processar (checado via PartEntitlement.Validate, que é keyed por
+-- license → sobrevive a relog).
+local _benchParts = {} ---@type table<number, { entitlementId:string, partKey:string, ownerSrc:number }>
+
+lib.callback.register('vp_chopshop:bench:placePart', function(source, benchId, entitlementId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    benchId = tonumber(benchId)
+    local bench = benchId and benchById(benchId)
+    if not bench then return { ok = false, err = 'bench' } end
+    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
+    if _benchParts[benchId] then return { ok = false, err = 'bench_occupied' } end
+    if type(entitlementId) ~= 'string' or entitlementId == '' then return { ok = false, err = 'invalid' } end
+    if not (PartEntitlement and PartEntitlement.Validate) then return { ok = false, err = 'internal' } end
+    local okVal, ent = PartEntitlement.Validate(entitlementId, source)
+    if not okVal then return { ok = false, err = ent } end
+    _benchParts[benchId] = { entitlementId = entitlementId, partKey = ent.partKey, ownerSrc = source }
+    return { ok = true, partKey = ent.partKey }
+end)
+
+lib.callback.register('vp_chopshop:bench:takePart', function(source, benchId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    benchId = tonumber(benchId)
+    local bench = benchId and benchById(benchId)
+    if not bench then return { ok = false, err = 'bench' } end
+    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
+    local slot = _benchParts[benchId]
+    if not slot then return { ok = false, err = 'bench_empty' } end
+    if not (PartEntitlement and PartEntitlement.Validate) then return { ok = false, err = 'internal' } end
+    local okVal = PartEntitlement.Validate(slot.entitlementId, source)
+    if not okVal then return { ok = false, err = 'not_owner' } end
+    _benchParts[benchId] = nil
+    return { ok = true, partKey = slot.partKey, entitlementId = slot.entitlementId }
+end)
+
+--- Peça está NESTA bancada e pertence a este entitlement? (gate do processamento)
+local function benchHoldsPart(benchId, entitlementId)
+    local slot = _benchParts[tonumber(benchId) or -1]
+    return slot ~= nil and slot.entitlementId == entitlementId
+end
+local function benchPartClear(benchId) _benchParts[tonumber(benchId) or -1] = nil end
+
 local function teardownCfg() return (Config.PhysicalCarry or {}).Teardown or {} end
 local function teardownRequired(partKey)
     local td = teardownCfg()
@@ -593,6 +637,12 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
             PartEntitlement.LogSuspicious(source, 'invalid_bench_mode', tostring(mode))
         end
         return { ok = false, err = 'invalid_mode' }
+    end
+
+    -- [FIX-1.3] A peça precisa estar POSICIONADA nesta bancada (fluxo: colocar peça
+    -- → processar). Desligável em Config.PhysicalCarry.RequireBenchPlacement = false.
+    if ((Config.PhysicalCarry or {}).RequireBenchPlacement ~= false) and not benchHoldsPart(benchId, entitlementId) then
+        return { ok = false, err = 'not_on_bench' }
     end
 
     -- [FIX-1.1] Transação da bancada — ORDEM inviolável centralizada em VPChopBenchTxn
@@ -679,6 +729,9 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
     if not txn.ok then
         return { ok = false, err = txn.err }
     end
+
+    -- [FIX-1.3] peça consumida → libera a bancada
+    benchPartClear(benchId)
 
     local netId        = (txn.ent and txn.ent.sourceNetId) or 0
     local itemsToGrant = txn.itemsToGrant or {}

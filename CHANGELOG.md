@@ -193,6 +193,30 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
 - Fluxo autoral (primitives reaproveitadas), sem cópia de script de terceiros.
 - **Sem mudança de economia:** os outputs seguem `Config.CatalyticTheft.BenchMaterials`.
 
+### Changed (FIX-1.3) — peça posicionada na bancada + menu em 2 níveis
+
+- **A peça agora vai FÍSICA em cima da bancada** antes de processar. Fluxo:
+  carregar nos braços → menu da bancada → **"Colocar peça na bancada"** (prop na
+  superfície) → aparecem as ações (desmanchar / limpar serial / desmontar
+  catalisador). Ao terminar (ou com **ALT** perto da bancada) o jogador **pega a
+  peça de volta**.
+- **Menu da bancada reorganizado:** o `ox_target` tem 1 opção só ("Bancada de
+  Trabalho"). O menu mostra: ações da peça **só quando há peça na bancada**;
+  senão "Colocar peça na bancada" (se carregando) + "Acessar bancada" (submenu:
+  fabricar / séries de inventário / recolher).
+- **Server: ocupação de bancada in-memory** (`_benchParts[benchId]`, 1 peça por
+  bancada). Callbacks `bench:placePart` / `bench:takePart`. `benchProcessPart`
+  exige `benchHoldsPart(benchId, entitlementId)` (`err='not_on_bench'`), gate
+  desligável em `Config.PhysicalCarry.RequireBenchPlacement = false`. Some no
+  restart do resource (persistência durável = Fase 5 / P5.4).
+- **Câmera de bancada:** `bench_teardown` / `bench_catalytic` / `serial_scratch`
+  ancoram no **prop da peça** (câmera de cima, "debruçado na bancada") quando
+  recebem um entity que não é o PED. `serial:scratch` (item de inventário) spawna
+  um prop decorativo temporário só pra ambientar. Anti-regressão: se receber o
+  PED, mantém o comportamento antigo (nas mãos).
+- Locale: `bench_place_part` / `bench_take_part` / `bench_menu_access` /
+  `bench_no_part_placed` / `err_not_on_bench` etc. Harness **2144 PASS / 0 FAIL**.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi

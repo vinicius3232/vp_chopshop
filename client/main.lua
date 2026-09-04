@@ -680,6 +680,9 @@ local function spawnCarriedPartInHands(partKey, veh, entitlementId)
     return prop
 end
 
+-- [FIX-1.3] Exposto p/ client/bench.lua (retirar peça da bancada → volta pros braços).
+_G.VPChopSpawnCarriedPartInHands = spawnCarriedPartInHands
+
 local function registerGroundTyreTarget(groundProp, groundEntitlementId)
     if not groundProp or not DoesEntityExist(groundProp) then return end
 
