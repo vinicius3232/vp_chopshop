@@ -596,10 +596,13 @@ Config.PartSerial = {
     SandpaperItem = 'sandpaper',
 
     --- [PR-3] Minigame físico de lixar (profile do stack client/minigame/, primitive
-    --- 'rotate'). Enable=false → cai na barra de progresso simples de 5 s.
+    --- 'sand'). Enable=false → cai na barra de progresso simples de 5 s.
     ScratchMinigame = {
         Enable  = true,
         Profile = 'serial_scratch',
+        --- [FIX-1.3] Prop decorativo posto na bancada durante o minigame (é item de
+        --- inventário, não carry físico). Deve LER como "peça de carro na bancada".
+        BenchProp = 'prop_car_engine_01',
     },
 
     --- Tier mínimo para FORJAR uma série falsa nova ('stolen'/'scratched' → 'forged').

@@ -43,16 +43,19 @@ local function spawnBenchSurfaceProp(benchId, partKey)
     while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 3000) do Wait(20) end
     if not HasModelLoaded(hash) then return nil end
 
+    -- topo da bancada = coords + max.z do bounding box do modelo (robusto a origem
+    -- no centro ou na base do prop). Pequeno recuo p/ trás p/ sentar sobre a mesa.
+    local _, maxDim = GetModelDimensions(GetEntityModel(benchEnt))
+    local topZ = (maxDim and maxDim.z) or 0.9
     local bc  = GetEntityCoords(benchEnt)
-    local top = select(3, GetModelDimensions(GetEntityModel(benchEnt)))  -- z máximo do modelo
-    local surfaceZ = bc.z + (type(top) == 'number' and top or 0.55) + 0.04
     local fwd = GetEntityForwardVector(benchEnt)
-    local pos = vector3(bc.x + fwd.x * 0.05, bc.y + fwd.y * 0.05, surfaceZ)
+    local pos = vector3(bc.x - fwd.x * 0.10, bc.y - fwd.y * 0.10, bc.z + topZ + 0.04)
 
-    local prop = CreateObject(hash, pos.x, pos.y, pos.z, false, false, false)
+    local prop = CreateObject(hash, pos.x, pos.y, pos.z, true, false, false)
     SetModelAsNoLongerNeeded(hash)
     if not prop or prop == 0 then return nil end
     SetEntityHeading(prop, GetEntityHeading(benchEnt))
+    SetEntityCoordsNoOffset(prop, pos.x, pos.y, pos.z, false, false, false)
     FreezeEntityPosition(prop, true)
     SetEntityCollision(prop, false, false)
     SetEntityAsMissionEntity(prop, true, true)
