@@ -504,7 +504,7 @@
         </div>
         <div class="cat-stage" id="cat-stage"></div>
         <div class="serial-hint">Segure o clique no ponto de partida e contorne a peça com o maçarico</div>
-        <span class="cat-ver">v17</span>
+        <span class="cat-ver">v20</span>
       </div>
       <img class="cat-tool" alt="" src="${CAT_BASE}catalytic_wrench.png" data-mode="wrench" hidden>`;
 
@@ -644,22 +644,17 @@
     startEl.style.top = y1 + '%';
     stage.appendChild(startEl);
 
-    const torch = document.createElement('div');
+    const torch = document.createElement('img');
     torch.className = 'cat-torch hidden';
+    torch.alt = '';
+    torch.src = CAT_BASE + 'catalytic_torch.png';
+    torch.addEventListener('error', () => torch.classList.add('cat-torch--dot')); // fallback: ponto brilhante
     document.body.appendChild(torch);
 
-    // amostras ao longo do contorno (viewBox 0..100 == % do palco)
-    const N = 44;
-    const samples = [];
-    if (bg.getTotalLength && bg.getPointAtLength) {
-      const L = bg.getTotalLength();
-      for (let i = 0; i <= N; i++) {
-        const p = bg.getPointAtLength((L * i) / N);
-        samples.push([p.x, p.y]);
-      }
-    } else {
-      samples.push([x1 + r, y1], [x2, y1 + r], [x2, y2 - r], [x1 + r, y2], [x1, y2 - r], [x1, y1 + r], [x1 + r, y1]);
-    }
+    // amostras ao longo do contorno (viewBox 0..100 == % do palco), ANALÍTICAS:
+    // não dependem de getTotalLength (que devolve 0 antes do layout no CEF).
+    const N = 48;
+    const samples = catRoundRectSamples(x1, y1, x2, y2, r, N);
 
     const entry = {
       id: ptData.id, primitive: 'trace', element: svg,
@@ -675,6 +670,36 @@
     };
     pointsMap[ptData.id] = entry;
     _catCut = entry;
+  }
+
+  // N+1 pontos [x,y] ao longo do perímetro de um retângulo arredondado, horário,
+  // começando no topo-esquerda (x1+r, y1). Puro cálculo — sem SVG/layout.
+  function catRoundRectSamples(x1, y1, x2, y2, r, n) {
+    const seg = [];   // {len, at(t)}  t em 0..1
+    const straight = (ax, ay, bx, by) => ({
+      len: Math.hypot(bx - ax, by - ay),
+      at: (t) => [ax + (bx - ax) * t, ay + (by - ay) * t],
+    });
+    const arc = (cx, cy, a0, a1) => ({
+      len: Math.abs(a1 - a0) * r,
+      at: (t) => { const a = a0 + (a1 - a0) * t; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; },
+    });
+    seg.push(straight(x1 + r, y1, x2 - r, y1));
+    seg.push(arc(x2 - r, y1 + r, -Math.PI / 2, 0));
+    seg.push(straight(x2, y1 + r, x2, y2 - r));
+    seg.push(arc(x2 - r, y2 - r, 0, Math.PI / 2));
+    seg.push(straight(x2 - r, y2, x1 + r, y2));
+    seg.push(arc(x1 + r, y2 - r, Math.PI / 2, Math.PI));
+    seg.push(straight(x1, y2 - r, x1, y1 + r));
+    seg.push(arc(x1 + r, y1 + r, Math.PI, Math.PI * 1.5));
+    const total = seg.reduce((s, g) => s + g.len, 0);
+    const out = [];
+    for (let k = 0; k <= n; k++) {
+      let d = (k / n) * total, i = 0;
+      while (i < seg.length - 1 && d > seg[i].len) { d -= seg[i].len; i++; }
+      out.push(seg[i].at(seg[i].len ? d / seg[i].len : 0));
+    }
+    return out;
   }
 
   // redesenha a linha de corte laranja até a fração `frac` (0..1) do contorno

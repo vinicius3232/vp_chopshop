@@ -606,15 +606,25 @@ html, body {
   0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55); }
   100% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
 }
+/* maçarico que segue o cursor: o BICO (~x10% / y68% da imagem) fica no ponteiro */
 .cat-torch {
-  position: fixed; width: 16px; height: 16px;
-  transform: translate(-50%, -50%); border-radius: 50%;
-  background: #fff2d6; border: 2px solid #ea580c; z-index: 22;
+  position: fixed;
+  width: 160px; height: auto;
+  transform: translate(-10%, -68%);
+  z-index: 22;
   pointer-events: none;
-  box-shadow: 0 0 12px 4px rgba(234, 88, 12, 0.95), 0 0 22px 9px rgba(245, 158, 11, 0.55);
-  animation: torchSpark 0.1s infinite alternate;
+  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.45));
 }
 .cat-torch.hidden { display: none; }
+/* sem o PNG → volta pro ponto incandescente */
+.cat-torch--dot {
+  width: 16px; height: 16px;
+  transform: translate(-50%, -50%); border-radius: 50%;
+  background: #fff2d6; border: 2px solid #ea580c;
+  box-shadow: 0 0 12px 4px rgba(234, 88, 12, 0.95), 0 0 22px 9px rgba(245, 158, 11, 0.55);
+  animation: torchSpark 0.1s infinite alternate;
+  filter: none;
+}
 
 .cat-tool {
   position: fixed;

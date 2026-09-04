@@ -47,8 +47,12 @@ oxidados). Recortar SEM os elementos azuis (eram só marcação de referência).
                            mesmo enquadramento; trocado ao concluir.
   catalytic_wrench.png   -- chave/catraca, alpha, ~600x600. Segue o cursor
                            enquanto há porca pendente.
-  catalytic_hammer.png   -- marreta, alpha, ~600x600. Segue o cursor na fase
-                           dos golpes.
+  catalytic_hammer.png   -- marreta, alpha, ~600x600. (legado)
+  catalytic_torch.png    -- maçarico de corte, alpha, 720x720. Segue o cursor no
+                           minigame de contorno (bench_catalytic). O BICO fica
+                           em ~x10% / y68% da imagem = ponto do cursor (ajuste
+                           em style.css .cat-torch transform). Sem o arquivo ->
+                           fallback pro ponto incandescente.
 
 Sem esses PNGs: o painel usa um cilindro desenhado em CSS (fallback) e o
-minigame continua funcional (4 porcas 'rotate' + 2 golpes 'strike').
+minigame de contorno continua funcional (linha SVG + ponto do cursor).
