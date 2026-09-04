@@ -217,6 +217,26 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
 - Locale: `bench_place_part` / `bench_take_part` / `bench_menu_access` /
   `bench_no_part_placed` / `err_not_on_bench` etc. Harness **2144 PASS / 0 FAIL**.
 
+### Added (VISUAL-01) — overlay fotorrealista da fixação (catalisador)
+
+- **Renderer comum de "parafuso do escapamento" na NUI.** Os pontos `rotate` de
+  `catalytic` e `bench_catalytic` enviam `visualType = 'exhaust_bolt'`; o
+  `html/app.js` (`buildExhaustBolt` / `updateExhaustBoltVisual`) compõe 4 camadas
+  de imagem (furo → rosca → arruela → cabeça). O `pt.progress` / `pt.accumulatedDeg`
+  que o `mousemove` já calcula dirige `rotate()` + `translateY()` na cabeça,
+  `clip-path` revelando a rosca, e no 100% um fly-out curto → mostra o furo.
+  Sem RAF novo. `✓` suprimido só nesse tipo.
+- **Fallback gracioso:** enquanto os PNGs não existirem, `.xbolt-ready` não é
+  setada e o minigame fica **idêntico ao visual genérico atual** (círculo). Zero
+  regressão nos outros primitives/profiles.
+- `client/minigame/core.lua` repassa `visualType`. `html/assets/minigame/catalytic/`
+  criada com `README.txt` especificando os 4 arquivos
+  (`exhaust_bolt_head/thread/washer/hole.png`, alpha, 256², mesma escala/perspectiva).
+  `fxmanifest.lua` já cobre via `files { 'html/**' }` — **sem alteração**.
+- **GAMEPLAY CHANGE: ZERO · ECONOMY CHANGE: ZERO.** `BOLT_COUNT`/`BOLT_NEEDED_DEG`/
+  `unlockAfter`/tokens/`PartEntitlement`/`VPChopBenchTxn`/hammer/payouts/câmera/
+  locator intactos. Specs `MG-CAT-PT-10`, `MG-BENCHCAT-PT-7`. Harness **2146/0**.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi

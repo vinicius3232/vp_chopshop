@@ -142,6 +142,7 @@ local function generateCatalyticPoints(vehicle, boneKey)
             primitive   = 'rotate',
             neededDeg   = BOLT_NEEDED_DEG,
             unlockAfter = i - 1,
+            visualType  = 'exhaust_bolt',  -- [VISUAL-01] overlay fotorrealista de fixação
             worldPos    = exPos + pointOffset(id, fwd, rightV, up),
             label       = ('%s %d'):format(L('mg_catalytic_bolt'), i),
         }

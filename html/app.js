@@ -65,7 +65,10 @@
         pt.progressCircle.style.strokeDashoffset = 0;
       }
       if (typeof pt.onProgress === 'function') pt.onProgress(100);
-      if (pt.icon) {
+      if (pt.visualType === 'exhaust_bolt') {
+        // [VISUAL-01] feedback = parafuso sai + furo aparece (não usa ✓)
+        finishExhaustBoltVisual(pt);
+      } else if (pt.icon) {
         pt.icon.innerHTML = '&#10003;';
       }
     }
@@ -222,6 +225,69 @@
       const unlocked = isPointUnlocked(pt);
       if (pt.element) pt.element.classList.toggle('locked', !unlocked);
     }
+  }
+
+  // ─── [VISUAL-01] Overlay fotorrealista de fixação (parafuso do escapamento) ──
+  // Renderer COMUM aos profiles catalytic / bench_catalytic. Os pontos só enviam
+  // visualType='exhaust_bolt'. Sem RAF próprio: o estado visual é atualizado no
+  // mesmo mousemove que já mexe em pt.progress / pt.accumulatedDeg.
+  const XBOLT_BASE = 'assets/minigame/catalytic/';
+  const XBOLT_IMG = {
+    hole:   'exhaust_bolt_hole.png',
+    thread: 'exhaust_bolt_thread.png',
+    washer: 'exhaust_washer.png',
+    head:   'exhaust_bolt_head.png',
+  };
+
+  function buildExhaustBolt(el, ptRef) {
+    const wrap = document.createElement('div');
+    wrap.className = 'xbolt';
+    wrap.innerHTML = `
+      <img class="xbolt-layer xbolt-hole"   alt="" src="${XBOLT_BASE}${XBOLT_IMG.hole}">
+      <img class="xbolt-layer xbolt-thread" alt="" src="${XBOLT_BASE}${XBOLT_IMG.thread}">
+      <img class="xbolt-layer xbolt-washer" alt="" src="${XBOLT_BASE}${XBOLT_IMG.washer}">
+      <img class="xbolt-layer xbolt-head"   alt="" src="${XBOLT_BASE}${XBOLT_IMG.head}">`;
+    el.appendChild(wrap);
+    // Fallback gracioso: se QUALQUER asset falhar, mantém o círculo genérico.
+    let okCount = 0;
+    wrap.querySelectorAll('img').forEach((img) => {
+      img.addEventListener('load', () => {
+        okCount += 1;
+        if (okCount >= 4) el.classList.add('xbolt-ready');
+      });
+      img.addEventListener('error', () => {
+        el.classList.remove('xbolt-ready');
+        el.classList.add('xbolt-missing');
+      });
+    });
+    ptRef._xhead   = wrap.querySelector('.xbolt-head');
+    ptRef._xwasher = wrap.querySelector('.xbolt-washer');
+    ptRef._xthread = wrap.querySelector('.xbolt-thread');
+    ptRef._xwrap   = wrap;
+  }
+
+  function updateExhaustBoltVisual(pt) {
+    const p = Math.max(0, Math.min(1, pt.progress / 100));
+    if (pt._xhead) {
+      pt._xhead.style.transform =
+        `translateY(${(-p * 15).toFixed(1)}px) rotate(${(pt.accumulatedDeg || 0).toFixed(0)}deg)`;
+    }
+    if (pt._xwasher) {
+      pt._xwasher.style.transform = `translateY(${(-p * 4).toFixed(1)}px)`;
+    }
+    if (pt._xthread) {
+      // revela a rosca de cima p/ baixo conforme o parafuso sai
+      pt._xthread.style.clipPath = `inset(${((1 - p) * 100).toFixed(0)}% 0 0 0)`;
+      pt._xthread.style.opacity = (0.15 + p * 0.85).toFixed(2);
+    }
+  }
+
+  function finishExhaustBoltVisual(pt) {
+    if (!pt._xwrap) return;
+    pt._xwrap.classList.add('xbolt-out');   // fly-out curto da cabeça/washer/rosca
+    setTimeout(() => {
+      if (pt._xwrap) pt._xwrap.classList.add('xbolt-done');  // só o furo visível
+    }, 220);
   }
 
   function strikeAttempt(pt) {
@@ -612,10 +678,16 @@
           completed: false,
           visible: true,
           lockUntilOthers: pt.lockUntilOthers === true,
-          unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null
+          unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null,
+          visualType: pt.visualType || null
         };
         if (pt.lockUntilOthers === true || (typeof pt.unlockAfter === 'number' && pt.unlockAfter > 0)) {
           el.classList.add('locked');
+        }
+        // [VISUAL-01] overlay fotorrealista de fixação (renderer comum)
+        if (pt.visualType === 'exhaust_bolt' && primitive === 'rotate') {
+          el.classList.add('visual-exhaust-bolt');
+          buildExhaustBolt(el, pointsMap[ptId]);
         }
       }
     });
@@ -734,8 +806,10 @@
         pt.accumulatedDeg += deltaDeg * uxSpeedMult;
         pt.progress = Math.min(100, Math.floor((pt.accumulatedDeg / pt.neededDeg) * 100));
 
-        const offset = CIRCLE_CIRCUMFERENCE * (1 - pt.progress / 100);
-        pt.progressCircle.style.strokeDashoffset = offset;
+        if (pt.progressCircle) {
+          pt.progressCircle.style.strokeDashoffset = CIRCLE_CIRCUMFERENCE * (1 - pt.progress / 100);
+        }
+        if (pt.visualType === 'exhaust_bolt') updateExhaustBoltVisual(pt);
 
         if (pt.progress >= 100) {
           completePoint(pt);

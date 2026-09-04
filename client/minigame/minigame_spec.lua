@@ -1356,6 +1356,9 @@ local function run()
         check('MG-CAT-PT-8 porcas em sequência (unlockAfter 0,1,2,3)',
             catPts[1].unlockAfter == 0 and catPts[2].unlockAfter == 1
             and catPts[3].unlockAfter == 2 and catPts[4].unlockAfter == 3)
+        check('MG-CAT-PT-10 [VISUAL-01] as 4 porcas têm visualType exhaust_bolt',
+            catPts[1].visualType == 'exhaust_bolt' and catPts[4].visualType == 'exhaust_bolt'
+            and catPts[5].visualType == nil)
         check('MG-CAT-PT-9 catalytic tem focusPoint (câmera empurra por ponto)',
             type(catProf.focusPoint) == 'function')
         local fCam, fLook, fFov = catProf.focusPoint(1, 'cat_bolt_2')
@@ -1397,6 +1400,8 @@ local function run()
             check('MG-BENCHCAT-PT-3 4 rotate + 2 strike', rotN == 4 and strikeN == 2)
             check('MG-BENCHCAT-PT-4 porcas em sequência (unlockAfter 0..3)',
                 pts[1].unlockAfter == 0 and pts[4].unlockAfter == 3)
+            check('MG-BENCHCAT-PT-7 [VISUAL-01] porcas têm visualType exhaust_bolt',
+                pts[1].visualType == 'exhaust_bolt' and pts[5].visualType == nil)
             check('MG-BENCHCAT-PT-5 golpes só após as 4 porcas (unlockAfter == 4)',
                 pts[5].unlockAfter == 4 and pts[6].unlockAfter == 4)
             check('MG-BENCHCAT-PT-6 tem focusPoint', type(bcProf.focusPoint) == 'function')

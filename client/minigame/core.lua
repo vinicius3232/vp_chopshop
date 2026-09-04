@@ -159,6 +159,7 @@ function Core.Start(vehicle, profileName, opts)
             neededDeg = pt.neededDeg or 720.0,
             hitsNeeded = pt.hitsNeeded,              -- [FIX-1.2] antes não era repassado (strike caía no default 4)
             strokesNeeded = pt.strokesNeeded,        -- [FIX-1.3] primitive 'sand' (esfrega a lixa vai-e-vem)
+            visualType = pt.visualType,              -- [VISUAL-01] overlay fotorrealista opcional (ex.: 'exhaust_bolt')
             lockUntilOthers = pt.lockUntilOthers,    -- [FIX-1.2] ponto só destrava quando TODOS os demais estão completos
             unlockAfter = pt.unlockAfter,            -- [FIX-1.3] ponto só destrava após N outros pontos completos (sequência)
             x = sx,

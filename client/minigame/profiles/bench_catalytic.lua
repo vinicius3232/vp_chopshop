@@ -99,6 +99,7 @@ local function generatePoints(ped)
             primitive   = 'rotate',
             neededDeg   = BOLT_NEEDED_DEG,
             unlockAfter = i - 1,
+            visualType  = 'exhaust_bolt',  -- [VISUAL-01] overlay fotorrealista de fixação
             worldPos    = work + pointOffset(id, rightV, up, fwd),
             label       = ('%s %d'):format(L('mg_benchcat_bolt'), i),
         }

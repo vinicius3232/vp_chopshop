@@ -444,6 +444,56 @@ html, body {
   letter-spacing: 0.04em;
 }
 
+/* ─── [VISUAL-01] Overlay fotorrealista de fixação (parafuso do escapamento) ── */
+/* Sem assets carregados → tudo continua no visual genérico (circulo). Quando os
+   4 PNGs carregam, a classe .xbolt-ready troca pro overlay. */
+.hotspot.visual-exhaust-bolt .xbolt { display: none; }
+
+.hotspot.visual-exhaust-bolt.xbolt-ready .hotspot-bg-circle { opacity: 0; }
+.hotspot.visual-exhaust-bolt.xbolt-ready .hotspot-inner { opacity: 0; }
+.hotspot.visual-exhaust-bolt.xbolt-ready .hotspot-progress-circle {
+  stroke-width: 2;                 /* indicador discreto, não um anel grande */
+  opacity: 0.55;
+}
+.hotspot.visual-exhaust-bolt.xbolt-ready .xbolt { display: block; }
+
+.xbolt {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 96px; height: 96px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.xbolt-layer {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  will-change: transform, opacity, clip-path;
+}
+.xbolt-hole   { opacity: 0; }
+.xbolt-thread { opacity: 0.15; clip-path: inset(100% 0 0 0); }
+.xbolt-washer { transition: transform 0.09s linear; }
+.xbolt-head   { transition: transform 0.05s linear; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.45)); }
+
+/* locked: visível mas apagado, sem cadeado/neon */
+.hotspot.visual-exhaust-bolt.locked .xbolt { opacity: 0.4; filter: saturate(0.6) brightness(0.85); }
+
+/* hover discreto (anula o scale 1.08 do .hotspot:hover neste tipo) */
+.hotspot.visual-exhaust-bolt.xbolt-ready:hover { transform: translate(-50%, -50%) scale(1.0); }
+.hotspot.visual-exhaust-bolt.xbolt-ready:hover .xbolt {
+  transform: translate(-50%, -50%) scale(1.03);
+  filter: contrast(1.08) drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+}
+
+/* fly-out ao concluir */
+.xbolt.xbolt-out .xbolt-head   { transform: translate(-50%, -50%) translateY(-42px) rotate(160deg); opacity: 0; transition: transform 0.22s ease-in, opacity 0.22s ease-in; }
+.xbolt.xbolt-out .xbolt-washer { transform: translate(-50%, -50%) translateY(-24px); opacity: 0; transition: transform 0.22s ease-in, opacity 0.22s ease-in; }
+.xbolt.xbolt-out .xbolt-thread { opacity: 0; transition: opacity 0.18s ease-in; }
+.xbolt.xbolt-done .xbolt-hole  { opacity: 1; transition: opacity 0.18s ease-out; }
+
 /* ─── Trace / Structural Polyline Cutting ────────────────────────────────── */
 .hotspot.primitive-trace {
   position: absolute;
