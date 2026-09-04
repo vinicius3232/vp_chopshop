@@ -5,8 +5,8 @@
 ## [1.18.2] — 2026-09-03 — Expansão de minigames físicos: catalisador, série e desmonte na marreta
 
 Leva de 3 PRs sobre o stack `client/minigame/` (`docs/design/MINIGAME_EXPANSION.md`,
-PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1. Nenhuma
-mudança de balanceamento. Harness: **0 fail**.
+PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.1
+(RC parity + seam de teste real). Nenhuma mudança de balanceamento. Harness: **0 fail**.
 
 > **Versão:** `v1.19` está reservada no roadmap para _Workshop Live_ — esta leva é
 > `1.18.2` (linha v1.18.x). Versão definitiva a decidir na integração.
@@ -69,8 +69,8 @@ mudança de balanceamento. Harness: **0 fail**.
   inteiro). O fallback de **câmera** do profile (`exhaust → exhaust_2 → chassis →
   offset geométrico`) é coisa separada e continua. Distância curta preservada.
 - **Distâncias de target centralizadas (`Config.TargetDistances`):** catalytic,
-  advDoor, engine, carcass, jackLower, baseDismantle, discard, wheel — valores
-  refinados da RC v1.15, agora numa fonte única, para não regredir a UX espacial.
+  advDoor, engine, carcass, jackLower, baseDismantle, discard, wheel — numa fonte
+  única, para não regredir a UX espacial. _(Valores ajustados na FIX-1.1 abaixo.)_
 - **i18n dos profiles novos:** `catalytic.lua`, `serial_scratch.lua`,
   `bench_teardown.lua` deixam de ter strings hardcoded — `title` / `helpText` /
   labels dos pontos resolvem via `L(...)`. 15 keys `mg_*` novas em `pt`/`en`/`es`/`fr`/`tr`.
@@ -82,6 +82,213 @@ mudança de balanceamento. Harness: **0 fail**.
   consumido 1× no commit; replay de token não gera 2º processamento; token
   expirado fail-closed; refund em falha de `Consume`; peça isenta não toca hammer).
 
+### Hardening (FIX-1.1) — RC parity + seam de teste real
+
+- **`Config.TargetDistances` = valores RC reais** do HEAD `03838d63` da PR #52:
+  catalytic **1.4**, advDoor **1.5**, engine **1.6**, carcass **2.0**, jackLower **2.2**,
+  baseDismantle **2.0**, discard **2.2**, wheel **1.5**. Os `2.0/2.5/3.0/3.5` do FIX-1
+  eram default pré-RC — não eram "RC parity". Live QA (MG-E) atualizado.
+- **Engine locator (porte da PR #52):** target do motor monta `engineBones` por
+  `GetEntityBoneIndexByName` (`engine` → `bonnet`); sem os dois → target sem bone.
+- **Transação da bancada extraída para `server/logistics/bench_txn.lua`
+  (`VPChopBenchTxn.run`):** a ordem inviolável (validate → mode/policy →
+  token/tempo → outputs → capacidade → consumo do hammer → `Consume` → refund)
+  agora é **um módulo único chamado pelo callback real E pelos testes**. Os
+  `FIX1-TXN-*` deixaram de ser espelho de `server/main.lua`: exercem o helper real
+  contra o `PartEntitlement` real (transição `ISSUED → CONSUMED` observável).
+- **Refund do hammer com retorno checado:** se o `InvAdd` do refund falhar →
+  `err = 'refund_failed'` + `print CRITICAL` + `LogSuspicious('hammer_refund_failed')`.
+  Nunca mascara como refund bem-sucedido. Sem 2ª peça / sem payout.
+- **`serial:scratch` robustez (`server/partserial.lua`):** `pcall` no `SetMetadata`
+  + releitura via `GetSlot` confirmando `state == 'scratched'`. Falha verificável →
+  devolve 1 `sandpaper` (fail-closed, sem double-refund). Releitura inconclusiva →
+  segue + loga (limitação conhecida da API de metadata, sem promessa de atomicidade
+  absoluta).
+- **Camera bone parity (catalytic):** fallback de câmera
+  `exhaust → _2 → _3 → _4 → chassis → offset`. Locator de `ox_target` segue sem
+  `chassis`. Specs `MG-CAT-BONE-1..4` + `MG-E` (E8/E9/E10).
+- **Specs:** `FIX1-TXN-00..10` (real, +`refund_failed`), `MG-CAT-BONE-0..4`.
+  Harness **2102 PASS / 0 FAIL**.
+
+### Rework (FIX-1.2) — minigame do catalisador
+
+- **`client/minigame/profiles/catalytic.lua` reescrito** para o *feel* pedido:
+  **4 pontos `rotate`** (desparafusar as porcas da flange, close-up) + **2 pontos
+  `strike`** (soltar o catalisador na marreta) — antes eram 2 `drill` + 2 `cut`.
+  Câmera mais fechada (`fov` 44 → 38). Implementação autoral; primitives
+  reaproveitadas, sem cópia de script de terceiros.
+- **Sem mudança de servidor / economia / balanço:** `catalytic:start`/`complete`,
+  token temporal, `toolClass = 'cut'` (ainda exige ferramenta de corte no
+  inventário), payout e `BenchMaterials` intactos. O piso de `too_fast` continua
+  tratado no client.
+- Locale: `mg_catalytic_clamp_*`/`pipe_*` (4 keys) → `mg_catalytic_bolt` +
+  `mg_catalytic_knock` (2 keys) em pt/en/es/fr/tr; `mg_catalytic_help` reescrito.
+- **Sequência:** os 2 pontos `strike` (`lockUntilOthers = true`) só destravam
+  depois que as 4 porcas saíram — antes eram clicáveis desde o início e dava pra
+  "soltar na marreta" com o catalisador ainda parafusado. `client/minigame/core.lua`
+  passou a repassar `hitsNeeded` e `lockUntilOthers` ao NUI (`hitsNeeded` antes caía
+  no default 4); `html/app.js` + `style.css` renderizam o ponto travado (dim, sem
+  clique) e liberam quando os pré-requisitos completam.
+- Specs: `MG-CAT-PT-1..7` (+ `-3b` lockUntilOthers), `MG-LOCALE-1` atualizado.
+  Harness **2110 PASS / 0 FAIL**.
+
+### Rework (FIX-1.3) — série interativa + catalisador sequencial
+
+- **Primitive de NUI NOVA `sand`** (`html/app.js` + `style.css`): o jogador segura o
+  clique e **esfrega o mouse pra frente e pra trás** sobre a zona; cada inversão de
+  direção com deslocamento mínimo conta 1 passada. `strokesNeeded` por ponto.
+- **`serial_scratch` reescrito** para 2 zonas `sand` (`serial_grind_1` gravação /
+  `serial_grind_2` resíduo), a 2ª em sequência (`unlockAfter = 1`).
+  Antes eram 2 `rotate` (segurar + girar em círculo).
+- **Interface de "peça na bancada"** (`profile.panel = 'serial'` → `core.lua` repassa
+  → `app.js:buildSerialPanel` + `style.css`): um **painel central** com uma plaqueta
+  de metal escovado, rebites e o **número de série gravado** (formato bloco de motor).
+  O jogador segura o clique numa das 2 faixas (GRAVAÇÃO / RESÍDUO) e esfrega a lixa
+  vai-e-vem — o código **desgasta na tela** (blur + opacidade + hachura) até apagar.
+  Substitui os círculos flutuantes sobre o chão.
+- **`catalytic`: porcas em sequência.** As 4 porcas agora têm `unlockAfter` 0/1/2/3
+  (uma de cada vez), os 2 golpes `unlockAfter = 4`. Novo `focusPoint` — a câmera
+  aproxima porca a porca em close, depois vai pra junta traseira. Fica mais perto
+  do fluxo "desparafusa uma a uma → solta na marreta".
+- **`client/minigame/core.lua`** passou a repassar `strokesNeeded` e `unlockAfter`.
+  `app.js`: `isPointUnlocked` entende `unlockAfter` (int) além de `lockUntilOthers`;
+  `mousedown` de qualquer primitive respeita o gate; `strike` dispara `minigamePointStart`
+  no 1º clique (pra `focusPoint` funcionar nos golpes).
+- Zero mudança de servidor/economia. Specs `MG-CAT-PT-8/9/9b`, `MG-SERIAL-PT-1..6`.
+  Harness **2122 PASS / 0 FAIL**.
+- **Catalytic — anim + tempo:** jogador agora **deitado de costas embaixo do carro**
+  (cenário `WORLD_HUMAN_VEHICLE_MECHANIC`) em vez do ajoelhado genérico —
+  `catalytic.lua:setupPed` devolve `true` e `client/minigame/core.lua` deixa de tocar
+  o `TaskPlayAnim` padrão quando `setupPed` sinaliza que cuidou da pose. Furto mais
+  demorado: `BOLT_NEEDED_DEG` 720 → 900, `KNOCK_HITS` 3 → 4, profile `minUxMs`
+  5000 → 8000, `Config.CatalyticTheft.ProgressMs` 7000 → 10000 (piso server-side).
+- **Câmera dos golpes:** depois da 4ª porca a câmera **panorâmica automaticamente**
+  pra junta traseira (os 2 pontos de marreta ficavam fora de quadro e o minigame
+  travava em 4/6). `app.js:completePoint` dispara `minigamePointStart` do primeiro
+  `strike` recém-destravado; golpes reposicionados perto da flange.
+- **Ao terminar:** o jogador levantava no lugar errado (às vezes dentro do carro) e
+  o catalisador não vinha na mão. Corrigido: `catalytic.lua:setupPed` guarda coords
+  + heading originais e o novo `teardownPed` (chamado por `core.lua` depois do
+  `ClearPedTasks`) tira o jogador do cenário e o devolve de pé onde começou. E a
+  janela de replay de `catalytic:start` subiu de `+8000` para `+30000` ms — com o
+  minigame mais longo o `catalytic:complete` chegava depois de `expiresAt` e voltava
+  `expired` (o anti-abuso real continua sendo `too_fast` + at-most-once).
+
+### Added (FIX-1.3) — desmontar catalisador na bancada
+
+- **Opção nova na bancada: "Desmontar catalisador".** O catalisador roubado deixou
+  de processar direto na barra de 4 s — agora abre um **minigame de desmonte próprio**
+  (profile `bench_catalytic`: 4 porcas `rotate` em sequência + 2 golpes `strike`,
+  peça nas mãos, câmera na bancada) antes de reciclar em matérias-primas.
+- `Config.PhysicalCarry.Teardown`: `catalytic_converter` saiu de `ExemptParts`;
+  novos mapas `PartProfiles` (`catalytic_converter = 'bench_catalytic'`) e
+  `PartMinDurationMs` (`catalytic_converter = 9000`). `runTeardownGate` e
+  `bench:teardownStart` passaram a resolver profile / duração mínima por peça.
+- **Requer e consome 1 `hammer`** por desmonte (igual porta/motor). Sem hammer →
+  `bench_teardown_no_hammer`.
+- Janela de replay do token de teardown `+20000` → `+30000` ms (minigame mais longo).
+- Novo `client/minigame/profiles/bench_catalytic.lua` (fxmanifest + run_spec).
+  Locale `mg_benchcat_*` + `bench_opt/desc_catalytic_dismantle` (5 idiomas).
+  Specs `MG-BENCHCAT-PT-0..6` + `MG-BENCHCAT-CFG-1/2`. Harness **2144 PASS / 0 FAIL**.
+- Fluxo autoral (primitives reaproveitadas), sem cópia de script de terceiros.
+- **Sem mudança de economia:** os outputs seguem `Config.CatalyticTheft.BenchMaterials`.
+
+### Changed (FIX-1.3) — peça posicionada na bancada + menu em 2 níveis
+
+- **A peça agora vai FÍSICA em cima da bancada** antes de processar. Fluxo:
+  carregar nos braços → menu da bancada → **"Colocar peça na bancada"** (prop na
+  superfície) → aparecem as ações (desmanchar / limpar serial / desmontar
+  catalisador). Ao terminar (ou com **ALT** perto da bancada) o jogador **pega a
+  peça de volta**.
+- **Menu da bancada reorganizado:** o `ox_target` tem 1 opção só ("Bancada de
+  Trabalho"). O menu mostra: ações da peça **só quando há peça na bancada**;
+  senão "Colocar peça na bancada" (se carregando) + "Acessar bancada" (submenu:
+  fabricar / séries de inventário / recolher).
+- **Server: ocupação de bancada in-memory** (`_benchParts[benchId]`, 1 peça por
+  bancada). Callbacks `bench:placePart` / `bench:takePart`. `benchProcessPart`
+  exige `benchHoldsPart(benchId, entitlementId)` (`err='not_on_bench'`), gate
+  desligável em `Config.PhysicalCarry.RequireBenchPlacement = false`. Some no
+  restart do resource (persistência durável = Fase 5 / P5.4).
+- **Câmera de bancada:** `bench_teardown` / `bench_catalytic` / `serial_scratch`
+  ancoram no **prop da peça** (câmera de cima, "debruçado na bancada") quando
+  recebem um entity que não é o PED. `serial:scratch` (item de inventário) spawna
+  um prop decorativo temporário só pra ambientar. Anti-regressão: se receber o
+  PED, mantém o comportamento antigo (nas mãos).
+- Locale: `bench_place_part` / `bench_take_part` / `bench_menu_access` /
+  `bench_no_part_placed` / `err_not_on_bench` etc. Harness **2144 PASS / 0 FAIL**.
+
+### Added (VISUAL-01) — overlay fotorrealista da fixação (catalisador)
+
+- **Renderer comum de "parafuso do escapamento" na NUI.** Os pontos `rotate` de
+  `catalytic` e `bench_catalytic` enviam `visualType = 'exhaust_bolt'`; o
+  `html/app.js` (`buildExhaustBolt` / `updateExhaustBoltVisual`) compõe 4 camadas
+  de imagem (furo → rosca → arruela → cabeça). O `pt.progress` / `pt.accumulatedDeg`
+  que o `mousemove` já calcula dirige `rotate()` + `translateY()` na cabeça,
+  `clip-path` revelando a rosca, e no 100% um fly-out curto → mostra o furo.
+  Sem RAF novo. `✓` suprimido só nesse tipo.
+- **Fallback gracioso:** enquanto os PNGs não existirem, `.xbolt-ready` não é
+  setada e o minigame fica **idêntico ao visual genérico atual** (círculo). Zero
+  regressão nos outros primitives/profiles.
+- `client/minigame/core.lua` repassa `visualType`. `html/assets/minigame/catalytic/`
+  criada com `README.txt` especificando os 4 arquivos
+  (`exhaust_bolt_head/thread/washer/hole.png`, alpha, 256², mesma escala/perspectiva).
+  `fxmanifest.lua` já cobre via `files { 'html/**' }` — **sem alteração**.
+- **GAMEPLAY CHANGE: ZERO · ECONOMY CHANGE: ZERO.** `BOLT_COUNT`/`BOLT_NEEDED_DEG`/
+  `unlockAfter`/tokens/`PartEntitlement`/`VPChopBenchTxn`/hammer/payouts/câmera/
+  locator intactos. Specs `MG-CAT-PT-10`, `MG-BENCHCAT-PT-7`. Harness **2146/0**.
+
+### Added (VISUAL-01B) — foto real no painel de série
+
+- **`html/assets/minigame/serial/`** consumida pelo `buildSerialPanel`:
+  `serial_plate.png` (plaqueta oxidada riveted) vira o **fundo do painel**;
+  `serial_sander.png` (almofada de lixa) **segue o cursor** enquanto o jogador
+  esfrega uma faixa (`showSander`/`hideSander`), some no `mouseup`/conclusão.
+- **Fallback gracioso:** sem os PNGs, `.plate-photo-ok` não entra e o painel usa
+  a plaqueta desenhada em CSS — minigame idêntico. Zero gameplay/economia.
+- `README.txt` na pasta com a spec dos 2 arquivos. `fxmanifest` já cobre
+  (`html/**`). Harness **2146/0**.
+
+### Added (VISUAL-02) — painel do desmonte do catalisador na bancada
+
+- **`bench_catalytic` vira painel de NUI** (`profile.panel = 'catalytic'`): fundo com
+  foto do catalisador (`catalytic_body.png` → `catalytic_open.png` ao concluir),
+  4 porcas `rotate` (renderer `exhaust_bolt` da VISUAL-01, sequenciais) num quadrado
+  central + 2 golpes `strike` na costura. Ferramenta (`catalytic_wrench.png` /
+  `catalytic_hammer.png`) **segue o cursor**, troca de chave p/ marreta quando as
+  porcas acabam.
+- **Fallback:** sem os PNGs, o painel desenha um cilindro em CSS e o minigame roda
+  igual (4 rotate + 2 strike). Reusa `buildExhaustBolt`/`strikeLoop`/`strikeAttempt`.
+- `html/assets/minigame/catalytic/README.txt` com a spec dos 4 arquivos novos.
+  Specs `MG-BENCHCAT-PT-8`. Harness **2147/0**. Zero mudança de servidor/economia.
+
+### Rework (FIX-1.3 cont.) — catalisador na bancada vira "maçarico no contorno"
+
+- **`bench_catalytic` deixou de ser 4 porcas + 2 golpes.** As porcas nunca ficaram
+  estáveis sobre a foto no CEF do FiveM (posições calculadas a partir de
+  `aspect-ratio`/`object-fit`, que o CEF não segura). Agora o profile gera **1 ponto
+  `primitive = 'trace'`** (`bcat_cut`): o painel desenha uma linha de corte em SVG
+  colada na silhueta do tambor e um **maçarico que segue o cursor**; o jogador segura
+  o clique no marcador de partida e contorna a peça. `progress = min(percorrido,
+  teto por tempo ~8.5 s)` — casa com `PartMinDurationMs.catalytic_converter`. Volta
+  completa → carcaça abre (`catalytic_open.png`).
+  - Amostras do contorno **analíticas** (`catRoundRectSamples`), não
+    `path.getTotalLength()` (que devolve 0 antes do layout no CEF).
+  - Painel usa a foto FECHADA **em fluxo** (`width:100%; height:auto`) definindo a
+    altura → `%` de posição == `%` da imagem em qualquer CEF.
+  - `_panel: true` na entrada faz os handlers full-screen de `trace`
+    (`window.mousedown` / `updatePointsPosition`) ignorarem-na.
+  - `buildExhaustBolt` perdeu a camada `xbolt-thread` (rosca "em cima" da peça
+    ficava estranha) — `exhaust_bolt_thread.png` fica no repo mas não é mais
+    renderado; a versão de **rua** (`catalytic.lua`) segue com head/washer/hole.
+- **Gate de máquina de solda:** `Config.PhysicalCarry.Teardown.RequireWelderParts =
+  { catalytic_converter = true }`. `bench:teardownStart` (server) valida
+  `isWelderNearBench` → `err = 'no_welder'`; `runTeardownGate` (client) faz um
+  pré-check em `WelderEntities` pro feedback rápido. Mesmo gate da carcaça.
+- Assets: `catalytic_torch.png` (720²). Locale `mg_benchcat_cut` (5 idiomas);
+  `mg_benchcat_help` reescrito. Specs `MG-BENCHCAT-PT-*` reescritos p/ 1 ponto
+  trace + `MG-BENCHCAT-CFG-3`. **Harness `lua tools/run_spec.lua .` → 2159 PASS / 0
+  FAIL** (número final da branch). Zero mudança de servidor/economia.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi
@@ -89,6 +296,8 @@ mudança de balanceamento. Harness: **0 fail**.
 - Locale órfão da v1.16 deixado: `catalytic_cutting_stage_1/2` (não referenciado).
 - Prop `prop_tool_hammer` a confirmar in-game (há fallback `IsModelInCdimage`).
 - QA in-game: `docs/audit/MINIGAME_EXPANSION_LIVE_QA.md`.
+- **Versão não congelada:** `1.18.2` provisório; `v1.19` continua reservada para
+  _Workshop Live_ no roadmap. Definitiva a decidir na integração.
 
 ---
 

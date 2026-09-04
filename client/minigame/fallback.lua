@@ -7,12 +7,10 @@
 
 _G.VPChopMinigameFallback = function(vehicle, partKey, reason)
     local modelHash = (vehicle and DoesEntityExist(vehicle)) and GetEntityModel(vehicle) or 0
+    -- motivo do fallback logado só em debug (evento raro; útil de rastrear).
     if Config.Debug then
         print(('[vp_chopshop][MINIGAME_FALLBACK] modelHash=%s | part=%s | reason=%s'):format(
-            tostring(modelHash),
-            tostring(partKey),
-            tostring(reason or 'unknown')
-        ))
+            tostring(modelHash), tostring(partKey), tostring(reason or 'unknown')))
     end
 
     local jmg   = Config.Jackstand and Config.Jackstand.Minigame

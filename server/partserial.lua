@@ -228,18 +228,49 @@ lib.callback.register('vp_chopshop:serial:scratch', function(src)
     local slot, meta = findCarPartBySlotState(src, { stolen = true })
     if not slot then return { ok = false, err = 'no_part' } end
 
-    -- Consome a lixa DEPOIS de validar tudo, ANTES de mutar a peça (rollback simples:
-    -- se o SetMetadata falhasse, não temos como saber — mas SetMetadata do ox_inventory
-    -- não retorna status; o consumo antecipado evita riscar de graça em corrida).
+    -- Consome a lixa DEPOIS de validar tudo, ANTES de mutar a peça.
     if not InvRemove(src, sandItem, 1) then return { ok = false, err = 'no_sandpaper' } end
 
-    -- Preservar o modelo de origem (continua sendo "de um X") mas apagar a série.
+    -- [FIX-1.1] Rollback da lixa em falha VERIFICÁVEL do SetMetadata.
+    -- `SetMetadata` do ox_inventory não retorna status e sai em silêncio se o slot
+    -- sumiu; por isso: (1) pcall na escrita; (2) releitura do slot via GetSlot e
+    -- confirmação de `state == 'scratched'`. Se a escrita claramente NÃO aplicou →
+    -- devolve 1 lixa e falha fechado. Se a releitura for inconclusiva (GetSlot
+    -- indisponível), seguimos e logamos — NÃO há garantia de atomicidade absoluta
+    -- aqui, é uma limitação conhecida da API de metadata.
+    local refunded = false
+    local function refundSandpaper(reason)
+        if refunded then return end
+        refunded = true
+        if type(InvAdd) == 'function' then InvAdd(src, sandItem, 1) end
+        VPChopDiscordLog('[SERIAL] Rollback da lixa (scratch falhou)',
+            ('src: %s | slot: %s | motivo: %s'):format(tostring(src), tostring(slot), tostring(reason)))
+    end
+
     local newMeta = {
         serial      = nil,  -- série apagada (riscada)
         state       = 'scratched',
         sourceModel = (meta and meta.sourceModel) or nil,
     }
-    exports.ox_inventory:SetMetadata(src, slot, newMeta)
+    local wroteOk = pcall(function()
+        exports.ox_inventory:SetMetadata(src, slot, newMeta)
+    end)
+    if not wroteOk then
+        refundSandpaper('SetMetadata raised')
+        return { ok = false, err = 'scratch_failed' }
+    end
+
+    -- Releitura server-side: confirma que o metadata realmente virou 'scratched'.
+    local okRead, fresh = pcall(function()
+        return exports.ox_inventory:GetSlot(src, slot)
+    end)
+    if okRead and type(fresh) == 'table' and type(fresh.metadata) == 'table' then
+        if fresh.metadata.state ~= 'scratched' then
+            refundSandpaper('reread: state=' .. tostring(fresh.metadata.state))
+            return { ok = false, err = 'scratch_failed' }
+        end
+    end
+    -- (releitura inconclusiva → segue; limitação documentada acima)
 
     ScratchCooldown[src] = now + scratchCdMs()
     VPChopDiscordLog('[SERIAL] Série riscada na bancada',

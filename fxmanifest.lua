@@ -53,6 +53,7 @@ client_scripts {
     'client/minigame/profiles/catalytic.lua',       -- [PR-2] furto de catalisador
     'client/minigame/profiles/serial_scratch.lua',  -- [PR-3] lixar série na bancada
     'client/minigame/profiles/bench_teardown.lua',  -- [PR-4] desmonte na marreta
+    'client/minigame/profiles/bench_catalytic.lua', -- [FIX-1.3] desmontar catalisador na bancada
     'client/minigame/profiles.lua',
     'client/minigame/fallback.lua',
     'client/minigame/core.lua',
@@ -122,6 +123,9 @@ server_scripts {
     -- [v1.16 SEC-1] logística física de peças de carro e catalisador: entitlement autoritativo
     'server/logistics/part_entitlement.lua',
     'server/logistics/part_entitlement_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
+    -- [FIX-1.1] transação da bancada (ordem inviolável hammer/entitlement). Antes de
+    -- server/main.lua; usa PartEntitlement carregado acima.
+    'server/logistics/bench_txn.lua',
     -- [v1.15 PR-F] ActionSession core (autorização temporal + commit). Depois da
     -- ChopSession; usa VPChopHasTool/VPChopChopPartCommit em runtime (main.lua carrega
     -- depois). O executor de domínio (base_tyre) carrega DEPOIS de main.lua.

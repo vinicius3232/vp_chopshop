@@ -157,6 +157,11 @@ function Core.Start(vehicle, profileName, opts)
             primitive = pt.primitive,
             holdTimeMs = pt.holdTimeMs,
             neededDeg = pt.neededDeg or 720.0,
+            hitsNeeded = pt.hitsNeeded,              -- [FIX-1.2] antes não era repassado (strike caía no default 4)
+            strokesNeeded = pt.strokesNeeded,        -- [FIX-1.3] primitive 'sand' (esfrega a lixa vai-e-vem)
+            visualType = pt.visualType,              -- [VISUAL-01] overlay fotorrealista opcional (ex.: 'exhaust_bolt')
+            lockUntilOthers = pt.lockUntilOthers,    -- [FIX-1.2] ponto só destrava quando TODOS os demais estão completos
+            unlockAfter = pt.unlockAfter,            -- [FIX-1.3] ponto só destrava após N outros pontos completos (sequência)
             x = sx,
             y = sy,
             path = path,
@@ -171,20 +176,28 @@ function Core.Start(vehicle, profileName, opts)
 
     -- 3) Animação contextual do jogador no mundo GTA
     local ped = PlayerPedId()
+    local pedHandled = false
     if profile.setupPed then
-        pcall(profile.setupPed, ped, vehicle, currentSession.boneKey)
+        -- setupPed pode devolver `true` para dizer "já cuidei da pose/anim do ped"
+        -- (ex.: catalytic usa um cenário de mecânico deitado). Nesse caso o core
+        -- NÃO toca o TaskPlayAnim padrão.
+        local okPed, ret = pcall(profile.setupPed, ped, vehicle, currentSession.boneKey)
+        pedHandled = (okPed and ret == true)
     end
-    local animDict = (opts.anim and opts.anim.dict) or 'mini@repair'
-    local animClip = (opts.anim and opts.anim.clip) or 'fixing_a_player'
-    local animFlag = (opts.anim and opts.anim.flag) or 49
 
-    RequestAnimDict(animDict)
-    local t0 = GetGameTimer()
-    while not HasAnimDictLoaded(animDict) and (GetGameTimer() - t0 < 1000) do
-        Wait(10)
-    end
-    if HasAnimDictLoaded(animDict) then
-        TaskPlayAnim(ped, animDict, animClip, 8.0, -1.0, -1, animFlag, 0.0, false, false, false)
+    if not pedHandled then
+        local animDict = (opts.anim and opts.anim.dict) or 'mini@repair'
+        local animClip = (opts.anim and opts.anim.clip) or 'fixing_a_player'
+        local animFlag = (opts.anim and opts.anim.flag) or 49
+
+        RequestAnimDict(animDict)
+        local t0 = GetGameTimer()
+        while not HasAnimDictLoaded(animDict) and (GetGameTimer() - t0 < 1000) do
+            Wait(10)
+        end
+        if HasAnimDictLoaded(animDict) then
+            TaskPlayAnim(ped, animDict, animClip, 8.0, -1.0, -1, animFlag, 0.0, false, false, false)
+        end
     end
 
     -- 4) Abrir NUI
@@ -195,6 +208,7 @@ function Core.Start(vehicle, profileName, opts)
             title = opts.title or profile.title,
             helpText = opts.helpText or profile.helpText,
             toolClass = profile.toolClass,
+            panel = profile.panel,   -- [FIX-1.3] 'serial' → NUI renderiza um painel de peça na bancada
             uxSpeed = opts.uxSpeed or (profile.traceSpeed or 1.0),
             traceTolerance = profile.traceTolerance or 55.0,
             points = nuiPoints
@@ -251,6 +265,12 @@ function Core.Start(vehicle, profileName, opts)
     SetNuiFocus(false, false)
     SendNUIMessage({ action = 'minigame:stop' })
     ClearPedTasks(ped)
+    -- [FIX-1.3] Contraparte do setupPed: o profile pode restaurar a pose/posição do
+    -- ped (ex.: catalytic tira o jogador do cenário de mecânico deitado e o devolve
+    -- de pé onde começou, antes do carry do catalisador).
+    if profile and profile.teardownPed then
+        pcall(profile.teardownPed, ped, vehicle)
+    end
     CamCtrl.Destroy(400)
 
     isRunning = false

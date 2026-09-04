@@ -1,11 +1,58 @@
-# Minigame Expansion — LIVE QA (v1.18.2 + FIX-1)
+# Minigame Expansion — LIVE QA (v1.18.2 + FIX-1 + FIX-1.1 + FIX-1.2/1.3 + VISUAL)
 
-**Data:** 2026-09-03
-**Branches:** `feat/minigame-expansion` (leva PR-2→4, merge `71d56e2`) + `fix/minigame-expansion-hardening` (FIX-1)
-**Harness estático:** `lua tools/run_spec.lua .` → **0 FAIL**
+**Plano criado:** 2026-09-03 · **Última revisão:** 2026-09-04
+**Branch final:** `fix/minigame-expansion-hardening-rc11` — PR #55, base
+`docs/post-v118-future-roadmap-prep` (`7023079`), HEAD `42df3ea`.
+**Harness estático (HEAD `42df3ea`):** `lua tools/run_spec.lua .` → **2159 PASS / 0 FAIL**
+(FIX1-TXN-* exercem `server/logistics/bench_txn.lua` real, não mock).
 **Referência de fluxo geral:** `docs/audit/RC_QA_TASKLIST.md` · `docs/audit/V116_INTEGRATION_QA.md`
 
 Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a expansão de minigames.
+
+> **Nota de escopo:** as tabelas MG-A / MG-C abaixo descrevem os fluxos das PRs 2–4 +
+> FIX-1.1. A partir da FIX-1.2/1.3 o **furto de catalisador na rua** virou 4 porcas
+> `rotate` + 2 golpes `strike` (jogador deitado), e o **desmonte na bancada** passou por
+> peça física + `bench_catalytic` e, na revisão final, por **1 traçado com maçarico no
+> contorno** com **gate de máquina de solda**. Ver `## RESULTADO — 2026-09-04`.
+
+---
+
+## RESULTADO — 2026-09-04 (branch `fix/minigame-expansion-hardening-rc11`, HEAD `42df3ea`)
+
+**Estático (reproduzível):**
+
+| Verificação | Resultado |
+|---|---|
+| `lua tools/run_spec.lua .` | **2159 PASS / 0 FAIL** |
+| `luac -p` nos `.lua` alterados (backtick-stripped) | OK |
+| `node -c html/app.js` | OK |
+| GitHub Actions `harness` no HEAD | verde |
+| `Config` economy diff vs base (`7023079`) | **sem drift** (só `TargetDistances` = RC parity + `ProgressMs` timing) |
+| PR #52 (`feat/v1.18-rc-forensics-gate` @ `03838d63`) | intacta, não mergeada |
+
+**In-game (servidor QBox real do owner):** o owner (`vinicius3232`) rodou os fluxos
+abaixo e reportou **"todos os testes OK"** em 2026-09-04. Sign-off por confirmação
+do owner — não há matriz per-caso individualmente logada.
+
+| Fluxo | Owner-testado | Passou | Obs |
+|---|---|---|---|
+| Furto de catalisador na rua (4 porcas + 2 golpes, deitado, cai na mão) | sim | sim | iterado até o feel/anim ficarem certos |
+| Painel de série (`serial_scratch`, lixa livre sobre a plaqueta) | sim | sim | plaqueta = visual; estado/refund seguem server-side |
+| Peça física na bancada (colocar / pegar de volta / menu 2 níveis) | sim | sim | in-memory, some no restart (esperado) |
+| Desmonte do catalisador na bancada — **maçarico no contorno** | sim | sim | traçar → carcaça abre → vira sucata |
+| Gate de máquina de solda (sem solda perto → não abre + notifica) | sim | sim | `err='no_welder'` server + pré-check client |
+| NUI limpa (sem badge/marcador de versão, sem debug visual) | sim | sim | badge de diagnóstico removido em `42df3ea` |
+| Cancel / restart no meio (sem prop/entidade órfão) | sim | sim | — |
+| `hammer` / `sandpaper` só consumidos no commit | sim | sim | coberto também por `FIX1-TXN-*` (estático) |
+| Economia (payout / materiais) idêntica | sim | sim | confirma o diff estático |
+
+**P0:** 0 · **P1:** 0 · **P2:** (1) matriz per-caso não foi logada individualmente —
+o sign-off é do owner "em bloco"; (2) `exhaust_bolt_thread.png` órfão no repo
+(a rua usa head/washer/hole; a bancada não usa mais fixação visual); (3)
+`bench_catalytic` panel bolt/knock builder em `html/app.js` virou caminho morto
+(profile só gera `trace`) — não quebra nada, limpeza futura.
+
+---
 
 ## Pré-requisitos
 
@@ -13,8 +60,10 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
   incluído; `sandpaper` já existia como "Lixa")
 - [ ] Prop `prop_tool_hammer` existe no build (senão o minigame roda sem prop na mão — não bloqueia)
 - [ ] `xsound` opcional (som de martelada usa `xsound`; sem ele, cai em `PlaySoundFrontend`)
-- [ ] Itens de teste no inventário: `saw_pro`, `mechanic_drill`, `sandpaper` ×5, `hammer` ×5,
-  `chopshop_jackstand`, `chopshop_bench`, `chopshop_welder`
+- [ ] Itens de teste no inventário: `/choptest` (ACE `command.chopshop_admin`) entrega o
+  kit completo — `chopshop_bench`, `chopshop_welder`, todas as serras/`mechanic_drill`
+  de `Config.Tools`, `chopshop_jackstand`, **`hammer` ×5** e **`sandpaper` ×5**
+  (FIX-1.2). `/choptest <id>` entrega a outro jogador.
 
 ---
 
@@ -41,8 +90,10 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
 | B4 | Perícia da polícia na peça resultante | "série riscada / adulterada" |
 | B5 | Cancelar no meio | nada consumido, peça intacta |
 | B6 | `Config.PartSerial.ScratchMinigame.Enable = false`, restart | cai na `lib.progressBar` de 5 s (sem stack de minigame) |
+| B7 | (FIX-1.1) Forçar falha do `SetMetadata` (ex.: dropar a peça no exato instante) | callback retorna `scratch_failed`; **1× `sandpaper` devolvido** (log `Rollback da lixa`); sem double-refund |
+| B8 | (FIX-1.1) Completar normal e reperícia | releitura server-side confirma `state == 'scratched'`; peça riscada de verdade |
 
-## MG-C — Bench teardown / marreta (PR-4 + FIX-1)
+## MG-C — Bench teardown / marreta (PR-4 + FIX-1 + FIX-1.1)
 
 | # | Passo | Esperado |
 |---|---|---|
@@ -58,6 +109,8 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
 | C10 | Deixar o token **expirar** (>`MinDurationMs`+20 s parado) e completar | `expired`, fail-closed; `hammer` intacto |
 | C11 | **Motor** (`adv_engine`) e **catalisador** carregados | motor: exige marreta; **catalisador: NÃO exige** (isento — já foi cortado no furto) |
 | C12 | Peça `legal` (via `IssueLegalParts` / vendedor legal) na bancada | processa **sem** minigame (peça legal nunca entra no fluxo de carga física) |
+| C13 | (FIX-1.1) Modo inválido p/ peça (catalisador + `clean_serial` forjado no client) | `invalid_mode_for_part` **antes** do consumo do hammer — `hammer` intacto |
+| C14 | (FIX-1.1) Simular `PartEntitlement.Consume` falhar após o golpe + `InvAdd` do refund falhar | retorno `refund_failed` (não `ok`); log `CRITICAL: hammer refund FAILED` + `LogSuspicious hammer_refund_failed`; **sem 2ª peça / sem payout** |
 
 ## MG-D — Regressão dos minigames antigos (mudança no `app.js`)
 
@@ -70,18 +123,38 @@ Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a exp
 | D5 | Roubo de **placa** (frente e trás) | `lib.skillCheck` (desde a RC-FIX-2) — inalterado |
 | D6 | Rodar tudo isso com resmon aberto | sem regressão de performance na NUI (a `strikeLoop` só roda quando há ponto `strike`) |
 
-## MG-E — Validação espacial dos targets (FIX-1)
+## MG-E — Validação espacial dos targets (FIX-1.1 / RC parity)
 
-Para cada target, aproximar/afastar e confirmar que a distância "sente" igual à v1.16
-(valores em `Config.TargetDistances`): `catalytic` 2.0 · `advDoor` 2.5 · `engine` 3.0 ·
-`carcass` 3.5 · `jackLower` 3.5 · `baseDismantle` 3.0 · `discard` 3.5 · `wheel` 3.0.
+Valores CONGELADOS do HEAD `03838d63` da PR #52 (`Config.TargetDistances`):
+`catalytic` **1.4** · `advDoor` **1.5** · `engine` **1.6** · `carcass` **2.0** ·
+`jackLower` **2.2** · `baseDismantle` **2.0** · `discard` **2.2** · `wheel` **1.5**.
+Para cada target, aproximar/afastar e confirmar que o alcance "sente" igual à RC v1.15.
 
 | # | Target | Esperado |
 |---|---|---|
-| E1 | catalytic (escapamento) | pega perto do escapamento; **não** pega mirando o teto/porta |
-| E2 | adv doors / engine / carcass | mesmo alcance de antes |
-| E3 | jack lower / base dismantle / discard | mesmo alcance de antes |
+| E1 | catalytic (escapamento) | pega colado no escapamento (~1.4 m); **não** pega mirando o teto/porta |
+| E2 | adv doors (1.5) / engine (1.6) / carcass (2.0) | alcance curto de RC; nada de 2.5/3.0/3.5 |
+| E3 | jack lower (2.2) / base dismantle (2.0) / discard (2.2) / wheel (1.5) | idem RC |
 | E4 | Editar `Config.TargetDistances.catalytic = 1.2`, restart | alcance encurta (config funciona) |
+
+### MG-E engine bone locator (FIX-1.1 — porte da PR #52)
+
+| # | Cenário | Esperado |
+|---|---|---|
+| E5 | Veículo com bone `engine` | target do motor ancora no `engine` (opção aparece sobre o motor) |
+| E6 | Veículo sem `engine` mas com `bonnet` | target ancora no `bonnet` (fallback) |
+| E7 | Veículo sem `engine` e sem `bonnet` | target do motor SEM bone (aparece pela proximidade, comportamento antigo) — nunca some nem crasha |
+
+### MG-E catalytic exhaust bone parity (FIX-1.1)
+
+Locator de `ox_target` continua **só** `exhaust`/`exhaust_2`/`exhaust_3`/`exhaust_4`
+(sem `chassis`). A câmera do minigame tem o fallback extra `chassis` → offset.
+
+| # | Cenário | Esperado |
+|---|---|---|
+| E8 | Veículo só com `exhaust_3` (sem `exhaust`/`_2`) | opção aparece no `exhaust_3`; câmera do minigame enquadra o escapamento |
+| E9 | Veículo só com `exhaust_4` | idem no `exhaust_4` |
+| E10 | Veículo sem nenhum bone de escapamento | opção de `ox_target` **não** aparece; (se forçado) a câmera cai no chassis/offset sem crash |
 
 ## MG-F — Comportamento de fallback
 

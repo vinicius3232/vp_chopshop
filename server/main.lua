@@ -521,6 +521,50 @@ AddEventHandler('playerDropped', function()
     _benchTeardowns[src] = nil
 end)
 
+-- ─── [FIX-1.3] Ocupação de bancada — 1 peça física por bancada ────────────────
+-- In-memory (some no restart do resource — igual ao próprio PartEntitlement; a
+-- persistência durável é a Fase 5 / P5.4 do roadmap). Só o dono do entitlement
+-- pode retirar/processar (checado via PartEntitlement.Validate, que é keyed por
+-- license → sobrevive a relog).
+local _benchParts = {} ---@type table<number, { entitlementId:string, partKey:string, ownerSrc:number }>
+
+lib.callback.register('vp_chopshop:bench:placePart', function(source, benchId, entitlementId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    benchId = tonumber(benchId)
+    local bench = benchId and benchById(benchId)
+    if not bench then return { ok = false, err = 'bench' } end
+    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
+    if _benchParts[benchId] then return { ok = false, err = 'bench_occupied' } end
+    if type(entitlementId) ~= 'string' or entitlementId == '' then return { ok = false, err = 'invalid' } end
+    if not (PartEntitlement and PartEntitlement.Validate) then return { ok = false, err = 'internal' } end
+    local okVal, ent = PartEntitlement.Validate(entitlementId, source)
+    if not okVal then return { ok = false, err = ent } end
+    _benchParts[benchId] = { entitlementId = entitlementId, partKey = ent.partKey, ownerSrc = source }
+    return { ok = true, partKey = ent.partKey }
+end)
+
+lib.callback.register('vp_chopshop:bench:takePart', function(source, benchId)
+    if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
+    benchId = tonumber(benchId)
+    local bench = benchId and benchById(benchId)
+    if not bench then return { ok = false, err = 'bench' } end
+    if not ValidatePlayerNearCoords(source, bench.coords) then return { ok = false, err = 'distance' } end
+    local slot = _benchParts[benchId]
+    if not slot then return { ok = false, err = 'bench_empty' } end
+    if not (PartEntitlement and PartEntitlement.Validate) then return { ok = false, err = 'internal' } end
+    local okVal = PartEntitlement.Validate(slot.entitlementId, source)
+    if not okVal then return { ok = false, err = 'not_owner' } end
+    _benchParts[benchId] = nil
+    return { ok = true, partKey = slot.partKey, entitlementId = slot.entitlementId }
+end)
+
+--- Peça está NESTA bancada e pertence a este entitlement? (gate do processamento)
+local function benchHoldsPart(benchId, entitlementId)
+    local slot = _benchParts[tonumber(benchId) or -1]
+    return slot ~= nil and slot.entitlementId == entitlementId
+end
+local function benchPartClear(benchId) _benchParts[tonumber(benchId) or -1] = nil end
+
 local function teardownCfg() return (Config.PhysicalCarry or {}).Teardown or {} end
 local function teardownRequired(partKey)
     local td = teardownCfg()
@@ -546,12 +590,25 @@ lib.callback.register('vp_chopshop:bench:teardownStart', function(source, benchI
     local hammerItem = td.HammerItem or 'hammer'
     if InvCount(source, hammerItem) < 1 then return { ok = false, err = 'no_hammer' } end
 
+    -- [maçarico] catalisador (e afins) exigem máquina de solda perto da bancada
+    local rw = td.RequireWelderParts
+    if rw and rw[ent.partKey] and not isWelderNearBench(bench) then
+        return { ok = false, err = 'no_welder' }
+    end
+
     local now   = GetGameTimer()
-    local minMs = math.floor(tonumber(td.MinDurationMs) or 5000)
+    -- [FIX-1.3] duração mínima por peça (catalisador é mais demorado); fallback: MinDurationMs
+    local minMs = math.floor(
+        (td.PartMinDurationMs and tonumber(td.PartMinDurationMs[ent.partKey]))
+        or tonumber(td.MinDurationMs) or 5000
+    )
     local token = ('bench_td:%d:%d'):format(source, now)
     _benchTeardowns[source] = {
+        -- [FIX-1.3] janela generosa: o minigame é player-paced e pode passar de 25 s
+        -- (catalytic na bancada: 4 porcas + golpes + câmera). Anti-abuso real =
+        -- too_fast (minMs) + at-most-once do PartEntitlement, não esta expiração.
         token = token, entId = entitlementId,
-        startedAt = now, minMs = minMs, expiresAt = now + minMs + 20000,
+        startedAt = now, minMs = minMs, expiresAt = now + minMs + 30000,
     }
     return { ok = true, token = token, minDurationMs = minMs }
 end)
@@ -588,140 +645,102 @@ lib.callback.register('vp_chopshop:benchProcessPart', function(source, benchId, 
         return { ok = false, err = 'invalid_mode' }
     end
 
-    -- [v1.16 SEC-1.1] Validação preliminar do entitlement ANTES de consumir (para policy de partKey e capacidade de inventário)
-    if not (PartEntitlement and PartEntitlement.Validate and PartEntitlement.Consume) then
-        return { ok = false, err = 'internal' }
+    -- [FIX-1.3] A peça precisa estar POSICIONADA nesta bancada (fluxo: colocar peça
+    -- → processar). Desligável em Config.PhysicalCarry.RequireBenchPlacement = false.
+    if ((Config.PhysicalCarry or {}).RequireBenchPlacement ~= false) and not benchHoldsPart(benchId, entitlementId) then
+        return { ok = false, err = 'not_on_bench' }
     end
 
-    local okVal, ent = PartEntitlement.Validate(entitlementId, source)
-    if not okVal then
-        if PartEntitlement.LogSuspicious and (ent == 'owner_mismatch' or ent == 'already_consumed') then
-            PartEntitlement.LogSuspicious(source, ent, ('entitlement: %s | bench: %s'):format(tostring(entitlementId), tostring(benchId)))
-        end
-        return { ok = false, err = ent }
-    end
+    -- [FIX-1.1] Transação da bancada — ORDEM inviolável centralizada em VPChopBenchTxn
+    -- (server/logistics/bench_txn.lua). É o MESMO código exercido pelos testes
+    -- (client/minigame/minigame_spec.lua → FIX1-TXN-*), sem espelho/duplicação.
+    if not (VPChopBenchTxn and VPChopBenchTxn.run) then return { ok = false, err = 'internal' } end
+    local hammerItem = teardownCfg().HammerItem or 'hammer'
 
-    local partKey = ent.partKey
-    local netId   = ent.sourceNetId or 0
-
-    -- [v1.16 SEC-1.1] Política estrita por partKey: catalisador só aceita raw_materials!
-    -- [FIX-1] mode/policy validados ANTES do gate de token do desmonte.
-    if partKey == 'catalytic_converter' and mode ~= 'raw_materials' then
-        if PartEntitlement and PartEntitlement.LogSuspicious then
-            PartEntitlement.LogSuspicious(source, 'disallowed_mode_for_catalytic', tostring(mode))
-        end
-        return { ok = false, err = 'invalid_mode_for_part' }
-    end
-
-    -- [PR-4 / FIX-1] Gate do desmonte na marreta — VALIDAÇÃO apenas (sem consumo).
-    -- Peça não-isenta exige token de bench:teardownStart + duração mínima decorrida.
-    -- O item `hammer` é consumido só na transação TERMINAL (bloco "Consumo terminal"
-    -- mais abaixo), depois de outputs + capacidade de inventário — assim uma falha
-    -- ANTES do commit não perde o hammer.
-    -- O token server-side garante CONTEXTO (jogador/bancada/entitlement) e DURAÇÃO
-    -- MÍNIMA; a UX/NUI é client-side e não é prova de execução do minigame.
-    local needTeardown = teardownRequired(partKey)
-    if needTeardown then
-        local td = _benchTeardowns[source]
-        if type(teardownToken) ~= 'string' or not td or td.token ~= teardownToken or td.entId ~= entitlementId then
-            if PartEntitlement and PartEntitlement.LogSuspicious then
-                PartEntitlement.LogSuspicious(source, 'bench_teardown_missing_token', tostring(teardownToken))
-            end
-            return { ok = false, err = 'teardown_required' }
-        end
-        local now = GetGameTimer()
-        if now < (td.startedAt + td.minMs - 250) then
-            if PartEntitlement and PartEntitlement.LogSuspicious then
-                PartEntitlement.LogSuspicious(source, 'bench_teardown_too_fast',
-                    ('elapsed=%d min=%d'):format(now - td.startedAt, td.minMs))
-            end
-            return { ok = false, err = 'too_fast' }
-        end
-        if now > td.expiresAt then
-            _benchTeardowns[source] = nil  -- expired é terminal, fail-closed
-            return { ok = false, err = 'expired' }
-        end
-    end
-
-    -- [v1.16 SEC-1.1] Pré-cálculo e validação de capacidade de inventário ANTES do consume irreversível
-    local itemsToGrant = {}
-    if partKey == 'catalytic_converter' then
-        local mats = (Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials) or {
-            copper     = { amount = 4, chance = 1.0 },
-            metalscrap = { amount = 6, chance = 1.0 },
-            steel      = { amount = 2, chance = 1.0 },
-            car_parts  = { amount = 1, chance = 1.0 },
-        }
-        for itemName, cfg in pairs(mats) do
-            local chance = tonumber(cfg.chance) or 1.0
-            if math.random() <= chance then
-                local amt = math.random(1, cfg.amount or 1)
-                itemsToGrant[#itemsToGrant + 1] = { item = itemName, amount = amt }
-            end
-        end
-    else
-        local count = (partKey == 'adv_engine' and 5) or 1
-        if mode == 'raw_materials' then
-            if partKey == 'adv_engine' then
-                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 8 }
-                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 6 }
-                itemsToGrant[#itemsToGrant + 1] = { item = 'aluminum', amount = 4 }
-            elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
-                for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
-                    local chance = tonumber(cfg.chance) or 1.0
-                    if math.random() <= chance then
-                        local amt = math.random(1, (cfg.amount or 1) * 2)
-                        itemsToGrant[#itemsToGrant + 1] = { item = itemName, amount = amt }
-                    end
+    --- Build dos outputs (Config-driven). Fechado sobre Config/mode; sem efeito colateral.
+    local function buildBenchOutputs(partKey, _ent, gMode)
+        local out = {}
+        if partKey == 'catalytic_converter' then
+            local mats = (Config.CatalyticTheft and Config.CatalyticTheft.BenchMaterials) or {
+                copper     = { amount = 4, chance = 1.0 },
+                metalscrap = { amount = 6, chance = 1.0 },
+                steel      = { amount = 2, chance = 1.0 },
+                car_parts  = { amount = 1, chance = 1.0 },
+            }
+            for itemName, cfg in pairs(mats) do
+                local chance = tonumber(cfg.chance) or 1.0
+                if math.random() <= chance then
+                    out[#out + 1] = { item = itemName, amount = math.random(1, cfg.amount or 1) }
                 end
-                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 4 }
-                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 2 }
-            else
-                itemsToGrant[#itemsToGrant + 1] = { item = 'metalscrap', amount = 6 }
-                itemsToGrant[#itemsToGrant + 1] = { item = 'steel', amount = 3 }
-                itemsToGrant[#itemsToGrant + 1] = { item = 'aluminum', amount = 2 }
             end
-        elseif mode == 'clean_serial' then
-            local meta = { state = 'scratched', sourceModel = 'CLEAN_PART' }
-            itemsToGrant[#itemsToGrant + 1] = { item = 'car_parts', amount = count, mode = mode, metadata = meta }
-        elseif mode == 'stolen_serial' then
-            itemsToGrant[#itemsToGrant + 1] = { item = 'car_parts', amount = count, mode = mode }
+        else
+            local count = (partKey == 'adv_engine' and 5) or 1
+            if gMode == 'raw_materials' then
+                if partKey == 'adv_engine' then
+                    out[#out + 1] = { item = 'metalscrap', amount = 8 }
+                    out[#out + 1] = { item = 'steel', amount = 6 }
+                    out[#out + 1] = { item = 'aluminum', amount = 4 }
+                elseif Config.CarPartRewards and Config.CarPartRewards[partKey] then
+                    for itemName, cfg in pairs(Config.CarPartRewards[partKey]) do
+                        local chance = tonumber(cfg.chance) or 1.0
+                        if math.random() <= chance then
+                            out[#out + 1] = { item = itemName, amount = math.random(1, (cfg.amount or 1) * 2) }
+                        end
+                    end
+                    out[#out + 1] = { item = 'metalscrap', amount = 4 }
+                    out[#out + 1] = { item = 'steel', amount = 2 }
+                else
+                    out[#out + 1] = { item = 'metalscrap', amount = 6 }
+                    out[#out + 1] = { item = 'steel', amount = 3 }
+                    out[#out + 1] = { item = 'aluminum', amount = 2 }
+                end
+            elseif gMode == 'clean_serial' then
+                out[#out + 1] = { item = 'car_parts', amount = count, mode = gMode,
+                    metadata = { state = 'scratched', sourceModel = 'CLEAN_PART' } }
+            elseif gMode == 'stolen_serial' then
+                out[#out + 1] = { item = 'car_parts', amount = count, mode = gMode }
+            end
         end
+        return out
     end
 
-    -- [v1.16 SEC-1.2] Checa se o inventário suporta receber todos os itens antes de alterar o estado do entitlement
-    for _, reward in ipairs(itemsToGrant) do
-        local can = false
-        if type(InvCanCarry) == 'function' then
-            can = InvCanCarry(source, reward.item, reward.amount, reward.metadata)
-        end
-        if not can then
-            return { ok = false, err = 'inventory_full' }
-        end
+    local txn = VPChopBenchTxn.run({
+        source        = source,
+        entitlementId = entitlementId,
+        mode          = mode,
+        teardownToken = teardownToken,
+        buildOutputs  = buildBenchOutputs,
+    }, {
+        now              = GetGameTimer,
+        PartEntitlement  = PartEntitlement,
+        teardownRequired = teardownRequired,
+        teardownState    = function(s) return _benchTeardowns[s] end,
+        clearTeardown    = function(s) _benchTeardowns[s] = nil end,
+        InvCount         = InvCount,
+        InvRemove        = InvRemove,
+        InvAdd           = InvAdd,
+        InvCanCarry      = function(s, item, n, meta)
+            if type(InvCanCarry) ~= 'function' then return false end
+            return InvCanCarry(s, item, n, meta)
+        end,
+        hammerItem       = hammerItem,
+        onRefundFail     = function(s, entId)
+            print(('[vp_chopshop][bench] CRITICAL: hammer refund FAILED after consume-fail for src %d (entitlement: %s). MANUAL SUPPORT / QUARANTINE.'):format(s, tostring(entId)))
+            if PartEntitlement and PartEntitlement.LogSuspicious then
+                PartEntitlement.LogSuspicious(s, 'hammer_refund_failed', tostring(entId))
+            end
+        end,
+    })
+
+    if not txn.ok then
+        return { ok = false, err = txn.err }
     end
 
-    -- [PR-4 / FIX-1] CONSUMO TERMINAL do hammer — só aqui, depois de TODAS as
-    -- validações (token/tempo, mode, policy, outputs, capacidade de inventário).
-    -- Revalida a posse (o inventário pode ter mudado durante o minigame) e só então
-    -- remove. Falha ANTES deste ponto NÃO perde o hammer.
-    if needTeardown then
-        local hammerItem = teardownCfg().HammerItem or 'hammer'
-        if InvCount(source, hammerItem) < 1 or not InvRemove(source, hammerItem, 1) then
-            return { ok = false, err = 'no_hammer' }
-        end
-        _benchTeardowns[source] = nil  -- token consumido: replay do mesmo token → 'teardown_required'
-    end
+    -- [FIX-1.3] peça consumida → libera a bancada
+    benchPartClear(benchId)
 
-    -- [v1.16 SEC-1] Capacidade e modo validados — consome atomicamente o entitlement
-    -- (at-most-once). Este é o commit terminal.
-    local res = PartEntitlement.Consume(entitlementId, source, 'bench_' .. tostring(mode))
-    if not res.ok then
-        -- Commit não ocorreu → devolve o hammer (falha antes do commit terminal).
-        if needTeardown then
-            InvAdd(source, teardownCfg().HammerItem or 'hammer', 1)
-        end
-        return { ok = false, err = res.err }
-    end
+    local netId        = (txn.ent and txn.ent.sourceNetId) or 0
+    local itemsToGrant = txn.itemsToGrant or {}
 
     -- [v1.16 SEC-1.2] Entrega e verificação rigorosa do resultado real de todas as operações de inventário
     local anyFailed = false
@@ -816,7 +835,12 @@ lib.callback.register('vp_chopshop:catalytic:start', function(source, netId)
         netId         = netId,
         startedAt     = now,
         minDurationMs = minDurationMs,
-        expiresAt     = now + minDurationMs + 8000,
+        -- [FIX-1.3] Janela de replay generosa: o minigame do catalisador é
+        -- player-paced e pode passar de 20 s (4 porcas + golpes + câmera). O
+        -- anti-abuso real é `too_fast` (minDurationMs) + at-most-once do
+        -- PartEntitlement, não esta expiração — ela só coleta sessão abandonada.
+        -- Cobre o timeout client do minigame (minMs + 20000) + folga de rede.
+        expiresAt     = now + minDurationMs + 30000,
     }
 
     return { ok = true, token = token, durationMs = minDurationMs }
@@ -1264,12 +1288,23 @@ RegisterCommand('choptest', function(src, args)
         { item = Config.Items.placeBench,  qty = 1 },
         { item = Config.Items.placeWelder, qty = 1 },
     }
-    -- [M2 FIX] Config.ChopTool never existed; iterate Config.Tools (the real tool registry).
+    -- [M2 FIX] Config.ChopTool never existed; iterate Config.Tools (a fonte real das ferramentas).
     for toolName, _ in pairs(Config.Tools or {}) do
         kit[#kit + 1] = { item = toolName, qty = 1 }
     end
     if Config.Jackstand and Config.Jackstand.Enable and Config.Jackstand.Item then
         kit[#kit + 1] = { item = Config.Jackstand.Item, qty = 1 }
+    end
+
+    -- [FIX-1.2] Consumíveis de gate dos minigames novos (marreta do desmonte na
+    -- bancada + lixa do riscar-série). Não estão em Config.Tools — são itens de
+    -- gate, resolvidos aqui direto da config, com fallback pro nome padrão.
+    local teardown = (Config.PhysicalCarry or {}).Teardown or {}
+    if teardown.Enable ~= false then
+        kit[#kit + 1] = { item = teardown.HammerItem or 'hammer', qty = 5 }
+    end
+    if Config.PartSerial and Config.PartSerial.Enable then
+        kit[#kit + 1] = { item = Config.PartSerial.SandpaperItem or 'sandpaper', qty = 5 }
     end
 
     local given, failed = {}, {}

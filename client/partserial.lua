@@ -30,9 +30,53 @@ local function doScratch()
     local mg = PS.ScratchMinigame or { Enable = true, Profile = 'serial_scratch' }
     local ok
     if mg.Enable ~= false and VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
-        ok = VPChopDismantleMinigame.Start(cache.ped, mg.Profile or 'serial_scratch', {
+        -- [FIX-1.3] prop decorativo da peça na bancada só pra ambientar a câmera
+        -- (é um item de inventário, não carry físico) — removido logo após.
+        local benchProp
+        local model = (mg.BenchProp) or 'prop_car_engine_01'
+        local hash = GetHashKey(model)
+        RequestModel(hash)
+        local t0 = GetGameTimer()
+        while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 1500) do Wait(20) end
+        if HasModelLoaded(hash) then
+            local pc = GetEntityCoords(cache.ped)
+            -- acha a bancada mais próxima e assenta o prop sobre a superfície dela
+            local benchEnt, best
+            for _, ent in pairs(_G.BenchEntities or {}) do
+                if ent and DoesEntityExist(ent) then
+                    local d = #(GetEntityCoords(ent) - pc)
+                    if d < 3.5 and (not best or d < best) then best, benchEnt = d, ent end
+                end
+            end
+            local px, py, pz, heading
+            if benchEnt then
+                local _, maxDim = GetModelDimensions(GetEntityModel(benchEnt))
+                local bc  = GetEntityCoords(benchEnt)
+                local bf  = GetEntityForwardVector(benchEnt)
+                px, py, pz = bc.x - bf.x * 0.10, bc.y - bf.y * 0.10, bc.z + ((maxDim and maxDim.z) or 0.9) + 0.04
+                heading = GetEntityHeading(benchEnt)
+            else
+                local fwd = GetEntityForwardVector(cache.ped)
+                px, py, pz = pc.x + fwd.x * 0.6, pc.y + fwd.y * 0.6, pc.z + 0.5
+                heading = GetEntityHeading(cache.ped)
+            end
+            benchProp = CreateObject(hash, px, py, pz, true, false, false)
+            SetModelAsNoLongerNeeded(hash)
+            if benchProp and benchProp ~= 0 then
+                SetEntityHeading(benchProp, heading)
+                SetEntityCoordsNoOffset(benchProp, px, py, pz, false, false, false)
+                FreezeEntityPosition(benchProp, true)
+                SetEntityCollision(benchProp, false, false)
+            else
+                benchProp = nil
+            end
+        end
+
+        ok = VPChopDismantleMinigame.Start(benchProp or cache.ped, mg.Profile or 'serial_scratch', {
             timeout = 25000,
         })
+
+        if benchProp and DoesEntityExist(benchProp) then DeleteEntity(benchProp) end
     else
         ok = lib.progressBar({
             duration     = 5000,

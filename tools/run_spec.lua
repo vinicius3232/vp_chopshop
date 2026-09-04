@@ -467,6 +467,16 @@ _G.Config = {
             catalytic_converter = { model = 'prop_car_exhaust_01', offset = { 0.10, 0.20, 0.12 }, rotation = { 0.0, 0.0, 90.0 } },
         },
         CarryAnim = { dict = 'anim@heists@box_carry@', clip = 'idle', flag = 49 },
+        Teardown = {
+            Enable = true,
+            Profile = 'bench_teardown',
+            MinDurationMs = 5000,
+            ExemptParts = {},
+            PartProfiles = { catalytic_converter = 'bench_catalytic' },
+            PartMinDurationMs = { catalytic_converter = 9000 },
+            RequireWelderParts = { catalytic_converter = true },
+            HammerItem = 'hammer',
+        },
     },
     Jackstand = {
         Enable = true,
@@ -484,7 +494,7 @@ _G.Config = {
         SparksVfx = true,
         PoliceAlertChance = 30,
         PoliceAlertOnFail = 100,
-        ProgressMs = 7000,
+        ProgressMs = 10000,
         Payout = { min = 1200, max = 2200 },
         BenchMaterials = {
             copper     = { amount = 4, chance = 1.0 },
@@ -711,7 +721,7 @@ _G.Config = {
         SparksVfx = true,
         PoliceAlertChance = 30,
         PoliceAlertOnFail = 100,
-        ProgressMs = 7000,
+        ProgressMs = 10000,
         Anim = {
             dict = 'anim@scripted@heist@ig16_glass_cut@male@',
             clip = 'cutting_loop',
@@ -798,6 +808,7 @@ dofile(base .. '/client/minigame/profiles/carcass.lua')-- [UX-E] Carcass Profile
 dofile(base .. '/client/minigame/profiles/catalytic.lua')-- [PR-2] Catalytic Profile
 dofile(base .. '/client/minigame/profiles/serial_scratch.lua')-- [PR-3] Serial Scratch Profile
 dofile(base .. '/client/minigame/profiles/bench_teardown.lua')-- [PR-4] Bench Teardown Profile
+dofile(base .. '/client/minigame/profiles/bench_catalytic.lua')-- [FIX-1.3] Bench Catalytic Profile
 dofile(base .. '/client/minigame/profiles.lua')      -- [UX-A] Profiles Registry
 dofile(base .. '/client/minigame/fallback.lua')      -- [UX-A] Minigame Fallback
 dofile(base .. '/client/minigame/core.lua')          -- [UX-A] VPChopDismantleMinigame Core
@@ -811,6 +822,7 @@ dofile(base .. '/bridge/server_vehicle.lua')          -- [PR-D] provê BridgeRes
 dofile(base .. '/server/logistics/tyre_entitlement.lua')  -- [PR-E] provê TyreEntitlement
 dofile(base .. '/server/logistics/truck_storage.lua')     -- [PR-E] provê TruckStorage
 dofile(base .. '/server/logistics/part_entitlement.lua')  -- [v1.16 SEC-1] provê PartEntitlement
+dofile(base .. '/server/logistics/bench_txn.lua')        -- [FIX-1.1] provê VPChopBenchTxn (transação real da bancada)
 dofile(base .. '/server/session/action_session.lua')     -- [PR-F] provê ActionSession
 dofile(base .. '/server/session/deliver_car_util.lua')   -- [PR-H] provê VPChopDeliverCar (marker + retry)
 dofile(base .. '/server/session/carcass_ledger.lua')     -- [P0.4] provê VPChopCarcassLedger (DB seam nil no harness)

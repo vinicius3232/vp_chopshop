@@ -22,6 +22,112 @@ local function clearBench(id)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- [FIX-1.3] PEÇA POSICIONADA NA BANCADA — 1 por bancada, prop na superfície.
+-- Fluxo: carregar peça nos braços → "Colocar peça na bancada" → prop fica na
+-- bancada e as ações (desmanchar / limpar serial / desmontar catalisador)
+-- passam a aparecer. Ao terminar (ou com ALT) o jogador pega a peça de volta.
+-- Estado só client-side espelhando o server (_benchParts). Some no restart.
+-- ─────────────────────────────────────────────────────────────────────────────
+BenchPartProps = BenchPartProps or {}  ---@type table<number, { prop:integer, partKey:string, entitlementId:string }>
+
+--- Coloca o prop da peça em cima da bancada (superfície ~= topo do prop da bancada).
+local function spawnBenchSurfaceProp(benchId, partKey)
+    local benchEnt = BenchEntities[benchId]
+    if not benchEnt or not DoesEntityExist(benchEnt) then return nil end
+    local pCfg = (Config.PhysicalCarry and Config.PhysicalCarry.Props and Config.PhysicalCarry.Props[partKey])
+    local model = pCfg and pCfg.model
+    if not model then return nil end
+    local hash = type(model) == 'number' and model or GetHashKey(model)
+    RequestModel(hash)
+    local t0 = GetGameTimer()
+    while not HasModelLoaded(hash) and (GetGameTimer() - t0 < 3000) do Wait(20) end
+    if not HasModelLoaded(hash) then return nil end
+
+    -- topo da bancada = coords + max.z do bounding box do modelo (robusto a origem
+    -- no centro ou na base do prop). Pequeno recuo p/ trás p/ sentar sobre a mesa.
+    local _, maxDim = GetModelDimensions(GetEntityModel(benchEnt))
+    local topZ = (maxDim and maxDim.z) or 0.9
+    local bc  = GetEntityCoords(benchEnt)
+    local fwd = GetEntityForwardVector(benchEnt)
+    local pos = vector3(bc.x - fwd.x * 0.10, bc.y - fwd.y * 0.10, bc.z + topZ + 0.04)
+
+    local prop = CreateObject(hash, pos.x, pos.y, pos.z, false, false, false)
+    SetModelAsNoLongerNeeded(hash)
+    if not prop or prop == 0 then return nil end
+    SetEntityHeading(prop, GetEntityHeading(benchEnt))
+    SetEntityCoordsNoOffset(prop, pos.x, pos.y, pos.z, false, false, false)
+    FreezeEntityPosition(prop, true)
+    SetEntityCollision(prop, false, false)
+    SetEntityAsMissionEntity(prop, true, true)
+    return prop
+end
+
+local takePartFromBench  -- fwd decl (usado no ox_target do prop)
+
+local function clearBenchPart(benchId)
+    local slot = BenchPartProps[benchId]
+    if slot and slot.prop and DoesEntityExist(slot.prop) then
+        exports.ox_target:removeLocalEntity(slot.prop)
+        DeleteEntity(slot.prop)
+    end
+    BenchPartProps[benchId] = nil
+end
+
+--- ox_target no prop da peça na bancada → "Pegar peça" (a peça FICA na bancada até
+--- o jogador escolher isto; nada automático).
+local function registerBenchPartTarget(benchId, prop)
+    if not prop or not DoesEntityExist(prop) then return end
+    exports.ox_target:addLocalEntity(prop, {
+        {
+            name = ('vp_chop_bench_take_part_%s'):format(benchId),
+            label = L('bench_take_part') or 'Pegar peça',
+            icon = 'fa-solid fa-hand-holding',
+            distance = 2.2,
+            canInteract = function()
+                return GetVehiclePedIsIn(cache.ped, false) == 0
+                    and not (VPChopCarryingPart and VPChopCarryingPart.isPart)
+            end,
+            onSelect = function() takePartFromBench(benchId) end,
+        },
+    })
+end
+
+--- "Colocar peça na bancada": tira dos braços e posiciona o prop na bancada.
+local function placePartOnBench(benchId)
+    if not (VPChopCarryingPart and VPChopCarryingPart.isPart and VPChopCarryingPart.entitlementId) then
+        VPChopNotify(L('notify_generic_error'), 'error'); return
+    end
+    if BenchPartProps[benchId] then
+        VPChopNotify(L('bench_occupied'), 'error'); return
+    end
+    local partKey = VPChopCarryingPart.partKey
+    local entId   = VPChopCarryingPart.entitlementId
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:bench:placePart', false, benchId, entId)
+    if not cbOk or not res or not res.ok then
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error'); return
+    end
+    VPChopDropCarryPart()  -- limpa braços + prop da mão
+    local prop = spawnBenchSurfaceProp(benchId, partKey)
+    BenchPartProps[benchId] = { prop = prop, partKey = partKey, entitlementId = entId }
+    registerBenchPartTarget(benchId, prop)
+    VPChopNotify(L('bench_part_placed'), 'inform')
+end
+
+--- "Pegar peça da bancada" (menu ou ox_target no prop): volta pros braços.
+function takePartFromBench(benchId)
+    local slot = BenchPartProps[benchId]
+    if not slot then return end
+    local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:bench:takePart', false, benchId)
+    if not cbOk or not res or not res.ok then
+        VPChopNotify(VPChopLocaleErr(res and res.err) or L('notify_generic_error'), 'error'); return
+    end
+    clearBenchPart(benchId)
+    if _G.VPChopSpawnCarriedPartInHands then
+        _G.VPChopSpawnCarriedPartInHands(res.partKey, nil, res.entitlementId)
+    end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- 1. FORJA DE PLACA FALSA
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -218,7 +324,7 @@ end
 --- bench_teardown, primitive 'strike'). Retorna true se pode seguir para o
 --- benchProcessPart, + o token server-side (nil no fluxo legacy/isento).
 ---@return boolean ok, string|nil token
-local function runTeardownGate(benchId, partKey, entId)
+local function runTeardownGate(benchId, partKey, entId, benchProp)
     local td = (Config.PhysicalCarry or {}).Teardown
     if not td or td.Enable == false then return true, nil end
     if td.ExemptParts and td.ExemptParts[partKey] then return true, nil end
@@ -227,6 +333,25 @@ local function runTeardownGate(benchId, partKey, entId)
     if (exports.ox_inventory:Search('count', hammerItem) or 0) < 1 then
         VPChopNotify(L('bench_teardown_no_hammer'), 'error')
         return false, nil
+    end
+
+    -- [maçarico] catalisador (e afins) exigem máquina de solda perto da bancada.
+    -- Pré-check client só pra feedback rápido; a autoridade é o server (teardownStart).
+    local rw = td.RequireWelderParts
+    if rw and rw[partKey] then
+        local radius = tonumber(Config.WelderBenchRadius) or 8.0
+        local ref = (benchProp and DoesEntityExist(benchProp)) and benchProp or cache.ped
+        local rpos, near = GetEntityCoords(ref), false
+        for _, wEnt in pairs(WelderEntities or {}) do
+            if wEnt and DoesEntityExist(wEnt) and #(GetEntityCoords(wEnt) - rpos) <= radius then
+                near = true
+                break
+            end
+        end
+        if not near then
+            VPChopNotify(L('err_no_welder'), 'error')
+            return false, nil
+        end
     end
 
     local sOk, st = pcall(lib.callback.await, 'vp_chopshop:bench:teardownStart', false, benchId, entId)
@@ -239,9 +364,16 @@ local function runTeardownGate(benchId, partKey, entId)
     local startMs = GetGameTimer()
     local prop = spawnHammerProp()
 
+    -- [FIX-1.3] profile por peça (catalisador usa 'bench_catalytic'); fallback: td.Profile
+    local profileName = (td.PartProfiles and td.PartProfiles[partKey]) or td.Profile or 'bench_teardown'
+
+    -- [FIX-1.3] âncora do minigame = prop da peça NA BANCADA (câmera de trabalho na
+    -- superfície), com fallback pro ped se o prop não existir.
+    local anchor = (benchProp and DoesEntityExist(benchProp)) and benchProp or cache.ped
+
     local done
     if VPChopDismantleMinigame and VPChopDismantleMinigame.Start then
-        done = VPChopDismantleMinigame.Start(cache.ped, td.Profile or 'bench_teardown', {
+        done = VPChopDismantleMinigame.Start(anchor, profileName, {
             timeout = minMs + 20000,
             anim    = { dict = 'mini@repair', clip = 'fixing_a_player', flag = 1 },
         })
@@ -267,15 +399,16 @@ local function runTeardownGate(benchId, partKey, entId)
 end
 
 local function executeBenchPartMode(benchId, mode)
-    if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
-    local entId   = VPChopCarryingPart.entitlementId
-    local partKey = VPChopCarryingPart.partKey
-    if not entId then
-        VPChopNotify(L('notify_generic_error'), 'error')
+    -- [FIX-1.3] opera sobre a peça POSICIONADA na bancada (não mais nos braços).
+    local slot = BenchPartProps[benchId]
+    if not slot or not slot.entitlementId then
+        VPChopNotify(L('bench_no_part_placed'), 'error')
         return
     end
+    local entId   = slot.entitlementId
+    local partKey = slot.partKey
 
-    local gateOk, teardownToken = runTeardownGate(benchId, partKey, entId)
+    local gateOk, teardownToken = runTeardownGate(benchId, partKey, entId, slot.prop)
     if not gateOk then return end
 
     local labels = {
@@ -299,73 +432,54 @@ local function executeBenchPartMode(benchId, mode)
         return
     end
 
-    VPChopDropCarryPart()
+    clearBenchPart(benchId)  -- peça consumida → some da bancada
     VPChopNotify(L('bench_part_processed'), 'success')
 end
 
-local function doProcessCarriedPartOnBench(benchId)
-    if not VPChopCarryingPart or not VPChopCarryingPart.isPart then return end
-    local partKey = VPChopCarryingPart.partKey
-
-    -- Catalisador tem fluxo direto de reciclagem em matérias-primas
+--- [FIX-1.3] Ações da peça que está na bancada — INLINE no menu principal (não
+--- mais um sub-menu). Catalisador tem só "Desmontar catalisador"; lataria/motor
+--- têm matéria-prima / limpar série / serial roubado.
+local function benchPartActionOptions(benchId, partKey)
     if partKey == 'catalytic_converter' then
-        executeBenchPartMode(benchId, 'raw_materials')
-        return
-    end
-
-    -- Menu unificado com as 3 opções claras para peças de lataria e motor
-    lib.registerContext({
-        id = 'vp_chop_bench_part_action_menu',
-        title = L('bench_process_part'),
-        options = {
+        return {
             {
-                title = L('bench_opt_raw_materials'),
-                description = L('bench_desc_raw_materials'),
-                icon = 'fa-solid fa-recycle',
-                onSelect = function()
-                    executeBenchPartMode(benchId, 'raw_materials')
-                end,
-            },
-            {
-                title = L('bench_opt_clean_serial'),
-                description = L('bench_desc_clean_serial'),
-                icon = 'fa-solid fa-spray-can-sparkles',
-                onSelect = function()
-                    executeBenchPartMode(benchId, 'clean_serial')
-                end,
-            },
-            {
-                title = L('bench_opt_stolen_serial'),
-                description = L('bench_desc_stolen_serial'),
-                icon = 'fa-solid fa-skull-crossbones',
-                onSelect = function()
-                    executeBenchPartMode(benchId, 'stolen_serial')
-                end,
+                title = L('bench_opt_catalytic_dismantle'),
+                description = L('bench_desc_catalytic_dismantle'),
+                icon = 'fa-solid fa-fire-flame-curved',
+                iconColor = '#f59e0b',
+                onSelect = function() executeBenchPartMode(benchId, 'raw_materials') end,
             },
         }
-    })
-    lib.showContext('vp_chop_bench_part_action_menu')
+    end
+    return {
+        {
+            title = L('bench_opt_raw_materials'),
+            description = L('bench_desc_raw_materials'),
+            icon = 'fa-solid fa-recycle',
+            onSelect = function() executeBenchPartMode(benchId, 'raw_materials') end,
+        },
+        {
+            title = L('bench_opt_clean_serial'),
+            description = L('bench_desc_clean_serial'),
+            icon = 'fa-solid fa-spray-can-sparkles',
+            onSelect = function() executeBenchPartMode(benchId, 'clean_serial') end,
+        },
+        {
+            title = L('bench_opt_stolen_serial'),
+            description = L('bench_desc_stolen_serial'),
+            icon = 'fa-solid fa-skull-crossbones',
+            onSelect = function() executeBenchPartMode(benchId, 'stolen_serial') end,
+        },
+    }
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 5. MENU PRINCIPAL UNIFICADO DA BANCADA
 -- ─────────────────────────────────────────────────────────────────────────────
 
-local function openBenchMainMenu(benchId)
+--- [FIX-1.3] "Acessar bancada" — utilidades que NÃO dependem de peça na bancada.
+local function openBenchAccessMenu(benchId)
     local options = {}
-
-    -- Destaque se estiver carregando peça física
-    if VPChopCarryingPart and VPChopCarryingPart.isPart then
-        options[#options + 1] = {
-            title = L('bench_process_part'),
-            description = 'Desmanchar, limpar serial ou guardar a peça física que você está carregando',
-            icon = 'fa-solid fa-recycle',
-            iconColor = '#48bb78',
-            onSelect = function()
-                doProcessCarriedPartOnBench(benchId)
-            end,
-        }
-    end
 
     -- Fabricação / Crafting
     if Config.BenchRecipes and #Config.BenchRecipes > 0 then
@@ -430,6 +544,47 @@ local function openBenchMainMenu(benchId)
     }
 
     lib.registerContext({
+        id = 'vp_chop_bench_access_' .. tostring(benchId),
+        title = L('bench_menu_access') or 'Acessar Bancada',
+        options = options,
+    })
+    lib.showContext('vp_chop_bench_access_' .. tostring(benchId))
+end
+
+--- [FIX-1.3] Menu topo: ações da peça (só com peça na bancada) + colocar + acessar.
+local function openBenchMainMenu(benchId)
+    local options = {}
+    local slot = BenchPartProps[benchId]
+
+    if slot then
+        -- ações da peça direto no menu (catalisador → "Desmontar catalisador")
+        for _, opt in ipairs(benchPartActionOptions(benchId, slot.partKey)) do
+            options[#options + 1] = opt
+        end
+        options[#options + 1] = {
+            title = L('bench_take_part'),
+            description = L('bench_take_part_desc') or 'Pegar a peça de volta para os braços',
+            icon = 'fa-solid fa-hand-holding',
+            onSelect = function() takePartFromBench(benchId) end,
+        }
+    elseif VPChopCarryingPart and VPChopCarryingPart.isPart then
+        options[#options + 1] = {
+            title = L('bench_place_part'),
+            description = L('bench_place_part_desc') or 'Pôr a peça que você carrega em cima da bancada',
+            icon = 'fa-solid fa-download',
+            iconColor = '#48bb78',
+            onSelect = function() placePartOnBench(benchId) end,
+        }
+    end
+
+    options[#options + 1] = {
+        title = L('bench_menu_access') or 'Acessar Bancada',
+        description = L('bench_menu_access_desc') or 'Fabricar, gerenciar séries de inventário, recolher',
+        icon = 'fa-solid fa-toolbox',
+        onSelect = function() openBenchAccessMenu(benchId) end,
+    }
+
+    lib.registerContext({
         id = 'vp_chop_bench_main_' .. tostring(benchId),
         title = L('bench_menu_title') or 'Bancada de Trabalho',
         options = options,
@@ -461,63 +616,33 @@ function VPChopUpsertBench(bench)
     BenchEntities[bench.id] = ent
     SetModelAsNoLongerNeeded(model)
 
-    local options = {}
-
-    -- 1. [PHYSICAL CARRY] Desmanchar peça que o jogador está carregando nos braços
-    options[#options + 1] = {
-        name = ('vp_chop_bench_process_part_%s'):format(bench.id),
-        label = L('bench_process_part'),
-        icon = 'fa-solid fa-recycle',
-        distance = Config.InteractDistance,
-        canInteract = function()
-            if GetVehiclePedIsIn(cache.ped, false) ~= 0 then return false end
-            return VPChopCarryingPart and VPChopCarryingPart.isPart == true
-        end,
-        onSelect = function()
-            doProcessCarriedPartOnBench(bench.id)
-        end,
-    }
-
-    -- 2. Menu Principal Unificado da Bancada
-    options[#options + 1] = {
-        name = ('vp_chop_bench_menu_%s'):format(bench.id),
-        label = L('bench_menu_title') or 'Acessar Bancada',
-        icon = 'fa-solid fa-toolbox',
-        distance = Config.InteractDistance,
-        canInteract = function()
-            return GetVehiclePedIsIn(cache.ped, false) == 0
-        end,
-        onSelect = function()
-            openBenchMainMenu(bench.id)
-        end,
-    }
-
-    -- 3. Recolher Bancada (Acesso direto no target)
-    options[#options + 1] = {
-        name = ('vp_chop_bench_pickup_%s'):format(bench.id),
-        label = L('target_pickup_bench'),
-        icon = 'fa-solid fa-hand',
-        distance = Config.InteractDistance,
-        canInteract = function()
-            return GetVehiclePedIsIn(cache.ped, false) == 0
-        end,
-        onSelect = function()
-            local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:pickupBench', false, bench.id)
-            if not cbOk then res = nil end
-            if res and res.ok then
-                VPChopNotify(L('notify_installed'), 'success')
-            else
-                local errKey = ({
-                    not_owner = 'err_pickup_not_owner',
-                    has_parts = 'err_pickup_has_parts',
-                })[(res and res.err) or ''] or 'notify_generic_error'
-                VPChopNotify(L(errKey), 'error')
-            end
-        end,
-    }
-
-    exports.ox_target:addLocalEntity(ent, options)
+    -- [FIX-1.3] Uma opção só: a bancada. O menu decide o que mostrar (colocar peça /
+    -- ações da peça / acessar). "Pegar peça" também via ALT (thread abaixo).
+    exports.ox_target:addLocalEntity(ent, {
+        {
+            name = ('vp_chop_bench_menu_%s'):format(bench.id),
+            label = L('bench_menu_title') or 'Bancada de Trabalho',
+            icon = 'fa-solid fa-toolbox',
+            distance = Config.InteractDistance,
+            canInteract = function()
+                return GetVehiclePedIsIn(cache.ped, false) == 0
+            end,
+            onSelect = function()
+                openBenchMainMenu(bench.id)
+            end,
+        },
+    })
 end
+
+-- [FIX-1.3] A peça FICA na bancada. Pra pegar de volta: mirar o prop com o
+-- ox_target ("Pegar peça", registrado em registerBenchPartTarget) ou pelo menu
+-- da bancada. Nada de tecla crua — control 19 (LALT) é a hotkey do ox_target e
+-- estava pegando a peça sozinho ao abrir/fechar o menu.
+
+AddEventHandler('onResourceStop', function(res)
+    if res ~= GetCurrentResourceName() then return end
+    for id in pairs(BenchPartProps) do clearBenchPart(id) end
+end)
 
 function VPChopRemoveBench(id)
     clearBench(id)

@@ -63,19 +63,20 @@ Config.VehicleNearLiftRadius = 4.2  -- raio de proximidade jogador↔veículo/ma
 --- Distância mínima entre bancadas (0 = desligado)
 Config.MinBenchSpacing = 4.0
 
---- [FIX-1 / RC parity] Distância de interação (`ox_target.distance`, metros) de cada
---- target do desmanche. Valores refinados na RC v1.15 — a fonte da verdade fica aqui,
---- para não regredir a UX espacial ao editar os call sites em client/main.lua.
---- `catalytic` é um bone target no escapamento → distância curta.
+--- [FIX-1.1 / RC parity] Distância de interação (`ox_target.distance`, metros) de cada
+--- target do desmanche. Valores CONGELADOS do HEAD 03838d63 da PR #52 (RC forensics gate) —
+--- a fonte da verdade fica aqui para não regredir a UX espacial ao editar os call sites
+--- em client/main.lua. NÃO relaxar para 2.0/2.5/3.0/3.5 (aqueles eram os defaults soltos
+--- pré-RC, não são RC parity).
 Config.TargetDistances = {
-    catalytic     = 2.0,   -- furto de catalisador na rua (bones exhaust*)
-    advDoor       = 2.5,   -- Fase 2: portas / capô / porta-malas (bone)
-    engine        = 3.0,   -- Fase 3: motor
-    carcass       = 3.5,   -- Fase 4: carcaça
-    jackLower     = 3.5,   -- baixar o macaco
-    baseDismantle = 3.0,   -- Fase 1: menu de desmanche básico
-    discard       = 3.5,   -- descartar veículo
-    wheel         = 3.0,   -- roubo de roda individual (bone)
+    catalytic     = 1.4,   -- furto de catalisador na rua (bones exhaust*)
+    advDoor       = 1.5,   -- Fase 2: portas / capô / porta-malas (bone)
+    engine        = 1.6,   -- Fase 3: motor (bones engine/bonnet)
+    carcass       = 2.0,   -- Fase 4: carcaça
+    jackLower     = 2.2,   -- baixar o macaco
+    baseDismantle = 2.0,   -- Fase 1: menu de desmanche básico
+    discard       = 2.2,   -- descartar veículo
+    wheel         = 1.5,   -- roubo de roda individual (bone)
 }
 
 --- Modelos de objetos colocáveis
@@ -595,10 +596,13 @@ Config.PartSerial = {
     SandpaperItem = 'sandpaper',
 
     --- [PR-3] Minigame físico de lixar (profile do stack client/minigame/, primitive
-    --- 'rotate'). Enable=false → cai na barra de progresso simples de 5 s.
+    --- 'sand'). Enable=false → cai na barra de progresso simples de 5 s.
     ScratchMinigame = {
         Enable  = true,
         Profile = 'serial_scratch',
+        --- [FIX-1.3] Prop decorativo posto na bancada durante o minigame (é item de
+        --- inventário, não carry físico). Deve LER como "peça de carro na bancada".
+        BenchProp = 'prop_car_engine_01',
     },
 
     --- Tier mínimo para FORJAR uma série falsa nova ('stolen'/'scratched' → 'forged').
@@ -896,9 +900,17 @@ Config.PhysicalCarry = {
         --- Duração MÍNIMA server-side (ms). O client espera o restante antes de
         --- chamar benchProcessPart (o server rejeita 'too_fast' abaixo disto).
         MinDurationMs = 5000,
-        --- Peças isentas do desmonte (já vêm "abertas"). O catalisador foi cortado
-        --- durante o furto (PR-2) → processa direto.
-        ExemptParts   = { catalytic_converter = true },
+        --- Peças isentas do desmonte (processam direto na barra de progresso).
+        ExemptParts   = {},
+        --- [FIX-1.3] Profile / duração mínima POR PEÇA (fallback: Profile / MinDurationMs).
+        --- O catalisador saiu da isenção: na bancada agora abre o minigame de
+        --- desmonte próprio (desparafusa a flange + solta na marreta) antes de
+        --- reciclar em matérias-primas.
+        PartProfiles      = { catalytic_converter = 'bench_catalytic' },
+        PartMinDurationMs = { catalytic_converter = 9000 },
+        --- [maçarico] Peças que exigem uma MÁQUINA DE SOLDA física por perto da
+        --- bancada pra desmontar (mesmo gate da carcaça). Raio = Config.WelderBenchRadius.
+        RequireWelderParts = { catalytic_converter = true },
         --- Item consumível gasto por desmonte (1x). Registrar no ox_inventory.
         HammerItem    = 'hammer',
         --- Prop na mão durante o minigame.
@@ -936,7 +948,7 @@ Config.CatalyticTheft = {
     --- Duração MÍNIMA server-side do furto (ms) — o token de catalytic:start rejeita
     --- 'too_fast' abaixo disto (× speedMult da ferramenta). O minigame é player-paced;
     --- o client espera o restante antes de chamar catalytic:complete.
-    ProgressMs = 7000,
+    ProgressMs = 10000,
 
     --- Animação de corte com serra
     Anim = {

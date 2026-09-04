@@ -1,11 +1,12 @@
 -- client/minigame/profiles/catalytic.lua
 -- ═══════════════════════════════════════════════════════════════════════════════
---  [PR-2] Catalytic Profile — Furto de Catalisador em veículo parado
---  Mistura de primitives num só minigame (inspirado no fluxo "chapa com parafusos
---  + corte" de scripts do gênero — implementação autoral):
---    2 pontos 'drill' — braçadeiras de fixação do catalisador
---    2 pontos 'cut'   — seccionamento dos tubos dianteiro e traseiro
---  Câmera por baixo/atrás no bone `exhaust` (fallback exhaust_2 → chassis → offset).
+--  [PR-2 / FIX-1.2] Catalytic Profile — Furto de Catalisador em veículo parado
+--  Fluxo autoral em close-up no escapamento (implementação própria; primitives
+--  reaproveitadas, sem cópia de script de terceiros):
+--    4 pontos 'rotate' — desparafusar as porcas da flange (gira o mouse em círculo)
+--    2 pontos 'strike' — soltar o catalisador batendo na junta (clique no ritmo)
+--  Câmera fechada, atrás/abaixo do escapamento (fallback de bone exhaust → _2 →
+--  _3 → _4 → chassis → offset; só a câmera usa chassis, o locator de ox_target não).
 --  Usado por doStealCatalytic (client/main.lua). O gate de tempo mínimo continua
 --  sendo o token temporal de `vp_chopshop:catalytic:start` (server).
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -18,16 +19,23 @@ local Proj = _G.VPChopProjection
 local CatalyticProfile = {}
 
 --- Resolve o centro do escapamento + vetores locais do veículo.
---- Ordem de fallback do bone: exhaust → exhaust_2 → chassis → offset geométrico traseiro.
+--- [FIX-1.1] Fallback de CÂMERA (só do profile — NÃO é o locator de interação, que
+--- continua sem `chassis`): exhaust → exhaust_2 → exhaust_3 → exhaust_4 → chassis →
+--- offset geométrico traseiro. O `chassis` aqui é aceitável porque só posiciona a
+--- câmera; a opção de ox_target nunca ancora nele.
+local EXHAUST_BONES = { 'exhaust', 'exhaust_2', 'exhaust_3', 'exhaust_4' }
+
 local function resolveExhaustData(vehicle)
     if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
         return -1, vector3(0, 0, 0), 1.0, vector3(0, 1, 0), vector3(1, 0, 0), vector3(0, 0, 1)
     end
 
-    local boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, 'exhaust')
-    if boneId == -1 then
-        boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, 'exhaust_2')
+    local boneId, bonePos, sideSign, fwd, rightV, up = -1, nil, nil, nil, nil, nil
+    for _, boneName in ipairs(EXHAUST_BONES) do
+        boneId, bonePos, sideSign, fwd, rightV, up = Proj.GetBoneData(vehicle, boneName)
+        if boneId ~= -1 then break end
     end
+
     if boneId == -1 then
         -- 'chassis' existe em praticamente todo veículo, mas fica no centro — puxa
         -- para a traseira-baixa onde o escapamento realmente está.
@@ -44,62 +52,146 @@ local function resolveExhaustData(vehicle)
     return boneId, bonePos, sideSign, fwd, rightV, up
 end
 
+-- [FIX-1.2/1.3] Config do fluxo: 4 porcas + 2 golpes. Ajuste fino aqui.
+local BOLT_COUNT     = 4
+local BOLT_NEEDED_DEG = 900.0   -- giro por porca (subiu de 720 — furto mais demorado)
+local KNOCK_COUNT    = 2
+local KNOCK_HITS     = 4        -- golpes de marreta por ponto (subiu de 3)
+
+--- [FIX-1.3] Jogador DEITADO de costas trabalhando embaixo do carro (creeper de
+--- mecânico) em vez do ajoelhado genérico. Devolve `true` → o core não toca o
+--- TaskPlayAnim padrão. A pose/posição original é guardada e restaurada no
+--- `teardownPed` (senão o jogador levanta no lugar errado / dentro do carro).
+local _savedPed = nil
+
+local function setupCatalyticPed(ped, vehicle)
+    if type(TaskStartScenarioInPlace) ~= 'function' then
+        return false  -- sem o native → deixa o core tocar o anim de fallback
+    end
+    _savedPed = {
+        coords  = GetEntityCoords(ped),
+        heading = GetEntityHeading(ped),
+    }
+    if ClearPedTasksImmediately then ClearPedTasksImmediately(ped) end
+    -- posiciona os pés do jogador para o carro, na traseira, e desliza pra baixo
+    if vehicle and vehicle ~= 0 and DoesEntityExist(vehicle) and GetOffsetFromEntityInWorldCoords then
+        local ok, back = pcall(GetOffsetFromEntityInWorldCoords, vehicle, 0.0, -2.1, 0.0)
+        if ok and back and SetEntityCoordsNoOffset then
+            SetEntityCoordsNoOffset(ped, back.x, back.y, back.z, false, false, false)
+        end
+        if SetEntityHeading and GetEntityHeading then
+            SetEntityHeading(ped, GetEntityHeading(vehicle))
+        end
+    end
+    TaskStartScenarioInPlace(ped, 'WORLD_HUMAN_VEHICLE_MECHANIC', 0, true)
+    return true
+end
+
+--- Sai do cenário e devolve o jogador de pé, onde começou o furto.
+local function teardownCatalyticPed(ped)
+    if ClearPedTasksImmediately then ClearPedTasksImmediately(ped) end
+    if _savedPed then
+        local s = _savedPed
+        _savedPed = nil
+        if SetEntityCoordsNoOffset then
+            SetEntityCoordsNoOffset(ped, s.coords.x, s.coords.y, s.coords.z, false, false, false)
+        elseif SetEntityCoords then
+            SetEntityCoords(ped, s.coords.x, s.coords.y, s.coords.z, false, false, false, false)
+        end
+        if SetEntityHeading then SetEntityHeading(ped, s.heading) end
+    end
+    if ClearPedSecondaryTask then ClearPedSecondaryTask(ped) end
+end
+
 local function calculateCatalyticCamera(vehicle, boneKey)
     local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
-    -- Câmera atrás e um pouco abaixo do plano do escapamento, olhando de baixo para
-    -- cima (o jogador está agachado na traseira do carro).
-    local camPos = exPos - (fwd * 1.15) - (up * 0.10) + (rightV * (0.25))
-    local lookAt = exPos + (up * 0.10)
+    -- Close-up: câmera logo atrás/abaixo da flange do catalisador, olhando o
+    -- jogador agachado na traseira desparafusar as porcas.
+    local camPos = exPos - (fwd * 0.78) - (up * 0.06) + (rightV * 0.16)
+    local lookAt = exPos + (up * 0.04)
     return camPos, lookAt
+end
+
+--- Offset local de cada ponto em relação ao escapamento (usado pelos pontos E pela câmera).
+local function pointOffset(id, fwd, rightV, up)
+    local boltN = id:match('^cat_bolt_(%d)$')
+    if boltN then
+        boltN = tonumber(boltN)
+        local ang = (math.pi * 2.0) * ((boltN - 1) / BOLT_COUNT) + (math.pi / 4.0)
+        return (fwd * 0.16)
+            + (rightV * (math.cos(ang) * 0.055))
+            + (up * (math.sin(ang) * 0.055))
+    end
+    local knockN = id:match('^cat_knock_(%d)$')
+    if knockN then
+        -- junta traseira do corpo do catalisador, logo atrás da flange (fica no quadro).
+        return -(fwd * 0.10) + (up * ((tonumber(knockN) == 1) and 0.04 or -0.04))
+    end
+    return vector3(0, 0, 0)
 end
 
 local function generateCatalyticPoints(vehicle, boneKey)
     local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
+    local pts = {}
 
-    -- Eixo longitudinal do escapamento = forward do veículo. As braçadeiras ficam
-    -- perto do corpo do catalisador; os cortes de tubo, um pouco mais afastados.
-    return {
-        {
-            id        = 'cat_clamp_f',
-            primitive = 'drill',
-            worldPos  = exPos + (fwd * 0.14) + (up * 0.02),
-            label     = L('mg_catalytic_clamp_f'),
-            holdTimeMs = 1800.0,
-        },
-        {
-            id        = 'cat_clamp_r',
-            primitive = 'drill',
-            worldPos  = exPos - (fwd * 0.14) + (up * 0.02),
-            label     = L('mg_catalytic_clamp_r'),
-            holdTimeMs = 1800.0,
-        },
-        {
-            id        = 'cat_pipe_f',
-            primitive = 'cut',
-            worldPos  = exPos + (fwd * 0.32) - (up * 0.01),
-            label     = L('mg_catalytic_pipe_f'),
-            holdTimeMs = 1900.0,
-        },
-        {
-            id        = 'cat_pipe_r',
-            primitive = 'cut',
-            worldPos  = exPos - (fwd * 0.32) - (up * 0.01),
-            label     = L('mg_catalytic_pipe_r'),
-            holdTimeMs = 1900.0,
-        },
-    }
+    -- 4 porcas da flange, EM SEQUÊNCIA (porca N só libera após N-1 saírem).
+    for i = 1, BOLT_COUNT do
+        local id = ('cat_bolt_%d'):format(i)
+        pts[#pts + 1] = {
+            id          = id,
+            primitive   = 'rotate',
+            neededDeg   = BOLT_NEEDED_DEG,
+            unlockAfter = i - 1,
+            visualType  = 'exhaust_bolt',  -- [VISUAL-01] overlay fotorrealista de fixação
+            worldPos    = exPos + pointOffset(id, fwd, rightV, up),
+            label       = ('%s %d'):format(L('mg_catalytic_bolt'), i),
+        }
+    end
+
+    -- Golpes de marreta — só depois de tirar as 4 porcas.
+    for i = 1, KNOCK_COUNT do
+        local id = ('cat_knock_%d'):format(i)
+        pts[#pts + 1] = {
+            id          = id,
+            primitive   = 'strike',
+            hitsNeeded  = KNOCK_HITS,
+            unlockAfter = BOLT_COUNT,
+            worldPos    = exPos + pointOffset(id, fwd, rightV, up),
+            label       = ('%s %d'):format(L('mg_catalytic_knock'), i),
+        }
+    end
+
+    return pts
+end
+
+--- Câmera empurra pra cada ponto ativo (porca a porca em close, depois a junta).
+local function focusCatalyticPoint(vehicle, pointId)
+    local _, exPos, _, fwd, rightV, up = resolveExhaustData(vehicle)
+    local target = exPos + pointOffset(pointId, fwd, rightV, up)
+    if pointId:find('^cat_knock_') then
+        -- enquadra a junta inteira (os 2 golpes de uma vez), câmera mais afastada.
+        local mid = exPos + pointOffset('cat_knock_1', fwd, rightV, up) * 0.5
+        return mid - (fwd * 0.60) - (up * 0.05) + (rightV * 0.10), mid, 34.0
+    end
+    local camPos = target - (fwd * 0.44) - (up * 0.04) + (rightV * 0.08)
+    return camPos, target, 27.0
 end
 
 Profiles.list.catalytic = {
     title    = L('mg_catalytic_title'),
     helpText = L('mg_catalytic_help'),
-    toolClass = 'cut',
-    fov = 44.0,
-    minUxMs = 4500,
+    toolClass = 'cut',   -- [FIX-1.2] mantém o gate de ferramenta de corte no inventário (sem mudança de balanço)
+    fov = 38.0,          -- close-up mais fechado na flange
+    minUxMs = 8000,
     reserveMs = 3000,
     calculateCamera = calculateCatalyticCamera,
+    focusPoint      = focusCatalyticPoint,
     generatePoints  = generateCatalyticPoints,
+    setupPed        = setupCatalyticPed,
+    teardownPed     = teardownCatalyticPed,
 }
 
 CatalyticProfile.resolveExhaustData = resolveExhaustData
+CatalyticProfile.EXHAUST_BONES = EXHAUST_BONES
+_G.VPChopCatalyticProfile = CatalyticProfile  -- [FIX-1.1] acesso p/ specs de bone parity
 return CatalyticProfile
