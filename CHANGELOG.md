@@ -138,9 +138,14 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
   clique e **esfrega o mouse pra frente e pra trás** sobre a zona; cada inversão de
   direção com deslocamento mínimo conta 1 passada. `strokesNeeded` por ponto.
 - **`serial_scratch` reescrito** para 2 zonas `sand` (`serial_grind_1` gravação /
-  `serial_grind_2` resíduo), a 2ª em sequência (`unlockAfter = 1`). Câmera mais
-  fechada + `focusPoint` que empurra a câmera pra cada zona ao começar a lixar.
+  `serial_grind_2` resíduo), a 2ª em sequência (`unlockAfter = 1`).
   Antes eram 2 `rotate` (segurar + girar em círculo).
+- **Interface de "peça na bancada"** (`profile.panel = 'serial'` → `core.lua` repassa
+  → `app.js:buildSerialPanel` + `style.css`): um **painel central** com uma plaqueta
+  de metal escovado, rebites e o **número de série gravado** (formato bloco de motor).
+  O jogador segura o clique numa das 2 faixas (GRAVAÇÃO / RESÍDUO) e esfrega a lixa
+  vai-e-vem — o código **desgasta na tela** (blur + opacidade + hachura) até apagar.
+  Substitui os círculos flutuantes sobre o chão.
 - **`catalytic`: porcas em sequência.** As 4 porcas agora têm `unlockAfter` 0/1/2/3
   (uma de cada vez), os 2 golpes `unlockAfter = 4`. Novo `focusPoint` — a câmera
   aproxima porca a porca em close, depois vai pra junta traseira. Fica mais perto

@@ -83,6 +83,7 @@ Profiles.list.serial_scratch = {
     title    = L('mg_serial_title'),
     helpText = L('mg_serial_help'),
     toolClass = nil,  -- gate é bancada + item sandpaper (server), não uma tool do registry
+    panel = 'serial', -- [FIX-1.3] NUI renderiza uma "peça na bancada" com o nº de série
     fov = 34.0,
     minUxMs = 4000,
     reserveMs = 2000,

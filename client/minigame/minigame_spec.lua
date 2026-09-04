@@ -1377,6 +1377,7 @@ local function run()
         end
         check('MG-SERIAL-PT-5 2ª zona em sequência (unlockAfter == 1)', ssPts[2].unlockAfter == 1)
         check('MG-SERIAL-PT-6 serial_scratch tem focusPoint', type(ssProf.focusPoint) == 'function')
+        check('MG-SERIAL-PT-7 serial_scratch usa painel de peça (panel == serial)', ssProf.panel == 'serial')
     end
 
     -- ─── [FIX-1.1] Catalytic — paridade de bone da CÂMERA (exhaust_3/_4-only) ──────

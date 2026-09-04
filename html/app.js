@@ -64,6 +64,7 @@
       if (pt.progressCircle) {
         pt.progressCircle.style.strokeDashoffset = 0;
       }
+      if (typeof pt.onProgress === 'function') pt.onProgress(100);
       if (pt.icon) {
         pt.icon.innerHTML = '&#10003;';
       }
@@ -256,6 +257,100 @@
     }
   }
 
+  // [FIX-1.3] Número de série de peça (formato bloco de motor / plaqueta VIN).
+  function genSerial() {
+    const A = 'ABCDEFGHJKLMNPRSTUVWXYZ';
+    const D = '0123456789';
+    const pick = (s, n) => Array.from({ length: n }, () => s[Math.floor(Math.random() * s.length)]).join('');
+    return `${pick(A, 1)}${pick(D, 1)}${pick(A, 1)}-${pick(D, 3)}-${pick(A, 2)}${pick(D, 4)}`;
+  }
+
+  // [FIX-1.3] Painel "peça na bancada": plaqueta de metal escovado com o nº de série
+  // gravado; o jogador esfrega a lixa (gesto 'sand') sobre cada faixa até apagar.
+  function buildSerialPanel(root, points) {
+    const serial = genSerial();
+    root.hidden = false;
+    root.innerHTML = `
+      <div class="serial-part">
+        <div class="serial-part-head">
+          <span class="serial-part-tag">PEÇA APREENDIDA</span>
+          <span class="serial-part-kind">CAR PARTS</span>
+        </div>
+        <div class="serial-plate">
+          <span class="serial-rivet r1"></span><span class="serial-rivet r2"></span>
+          <span class="serial-rivet r3"></span><span class="serial-rivet r4"></span>
+          <div class="serial-plate-label">N&ordm; DE S&Eacute;RIE</div>
+          <div class="serial-code" id="serial-code">${serial}</div>
+          <div class="serial-zones" id="serial-zones"></div>
+        </div>
+        <div class="serial-hint">Segure o clique numa faixa e esfregue a lixa &#8644; at&eacute; apagar</div>
+      </div>`;
+
+    const zonesWrap = root.querySelector('#serial-zones');
+    const codeEl = root.querySelector('#serial-code');
+
+    points.forEach((pt, i) => {
+      const ptId = pt.id || `serial_zone_${i}`;
+      const strokesNeeded = Math.max(3, pt.strokesNeeded || 8);
+      const zone = document.createElement('button');
+      zone.type = 'button';
+      zone.className = 'serial-zone';
+      zone.dataset.id = ptId;
+      zone.innerHTML = `
+        <span class="serial-zone-hatch"></span>
+        <span class="serial-zone-mark"></span>
+        <span class="serial-zone-label">${pt.label || (i === 0 ? 'GRAVA&Ccedil;&Atilde;O' : 'RES&Iacute;DUO')}</span>`;
+      if (pt.lockUntilOthers === true || (typeof pt.unlockAfter === 'number' && pt.unlockAfter > 0)) {
+        zone.classList.add('locked');
+      }
+      zonesWrap.appendChild(zone);
+
+      const entry = {
+        id: ptId,
+        primitive: 'sand',
+        element: zone,
+        icon: zone.querySelector('.serial-zone-mark'),
+        strokesNeeded: strokesNeeded,
+        strokes: 0,
+        _sandDir: 0,
+        _sandLastX: 0,
+        progress: 0,
+        completed: false,
+        visible: true,
+        lockUntilOthers: pt.lockUntilOthers === true,
+        unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null,
+        onProgress: (p) => {
+          zone.style.setProperty('--wear', (p / 100).toFixed(3));
+          // desgasta a fatia correspondente do código
+          const frac = points.length > 1 ? (i + 1) / points.length : 1;
+          codeEl.style.setProperty('--wear' + (i + 1), (p / 100).toFixed(3));
+          if (i === points.length - 1) {
+            codeEl.classList.toggle('scrubbed', p >= 100);
+          }
+        }
+      };
+      pointsMap[ptId] = entry;
+
+      zone.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 || entry.completed) return;
+        if (!isPointUnlocked(entry)) {
+          zone.classList.add('serial-zone-nope');
+          setTimeout(() => zone.classList.remove('serial-zone-nope'), 180);
+          e.preventDefault();
+          return;
+        }
+        activeHotspotId = ptId;
+        zone.classList.add('sanding');
+        entry._sandLastX = e.clientX;
+        entry._sandDir = 0;
+        if (!entry._focused) { entry._focused = true; postNui('minigamePointStart', { id: ptId }); }
+        e.preventDefault();
+      });
+    });
+
+    stopStrikeLoop();
+  }
+
   function startMinigame(data) {
     activeMinigame = true;
     hudTitle.textContent = data.title || 'OPERAÇÃO FÍSICA';
@@ -268,6 +363,18 @@
     stopCuttingLoop();
 
     const points = data.points || [];
+
+    const surfacePanel = document.getElementById('surface-panel');
+    if (surfacePanel) { surfacePanel.hidden = true; surfacePanel.innerHTML = ''; }
+
+    // [FIX-1.3] Modo painel: "peça na bancada" com o número de série (serial scratch).
+    if (data.panel === 'serial' && surfacePanel) {
+      buildSerialPanel(surfacePanel, points);
+      updateOverallProgress();
+      app.classList.remove('hidden');
+      return;
+    }
+
     points.forEach((pt, index) => {
       const ptId = pt.id || `point_${index}`;
       const primitive = pt.primitive || (data.toolClass === 'cut' ? 'cut' : 'rotate');
@@ -551,6 +658,8 @@
     stopStrikeLoop();
     app.classList.add('hidden');
     hotspotContainer.innerHTML = '';
+    const sp = document.getElementById('surface-panel');
+    if (sp) { sp.hidden = true; sp.innerHTML = ''; }
     pointsMap = {};
   }
 
@@ -647,6 +756,7 @@
           if (pt.progressCircle) {
             pt.progressCircle.style.strokeDashoffset = CIRCLE_CIRCUMFERENCE * (1 - pt.progress / 100);
           }
+          if (typeof pt.onProgress === 'function') pt.onProgress(pt.progress);
           pt.element.classList.remove('sand-tick');
           void pt.element.offsetWidth;
           pt.element.classList.add('sand-tick');

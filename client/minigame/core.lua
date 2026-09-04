@@ -207,6 +207,7 @@ function Core.Start(vehicle, profileName, opts)
             title = opts.title or profile.title,
             helpText = opts.helpText or profile.helpText,
             toolClass = profile.toolClass,
+            panel = profile.panel,   -- [FIX-1.3] 'serial' → NUI renderiza um painel de peça na bancada
             uxSpeed = opts.uxSpeed or (profile.traceSpeed or 1.0),
             traceTolerance = profile.traceTolerance or 55.0,
             points = nuiPoints
