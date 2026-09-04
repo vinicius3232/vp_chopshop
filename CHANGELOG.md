@@ -248,6 +248,19 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
 - `README.txt` na pasta com a spec dos 2 arquivos. `fxmanifest` já cobre
   (`html/**`). Harness **2146/0**.
 
+### Added (VISUAL-02) — painel do desmonte do catalisador na bancada
+
+- **`bench_catalytic` vira painel de NUI** (`profile.panel = 'catalytic'`): fundo com
+  foto do catalisador (`catalytic_body.png` → `catalytic_open.png` ao concluir),
+  4 porcas `rotate` (renderer `exhaust_bolt` da VISUAL-01, sequenciais) num quadrado
+  central + 2 golpes `strike` na costura. Ferramenta (`catalytic_wrench.png` /
+  `catalytic_hammer.png`) **segue o cursor**, troca de chave p/ marreta quando as
+  porcas acabam.
+- **Fallback:** sem os PNGs, o painel desenha um cilindro em CSS e o minigame roda
+  igual (4 rotate + 2 strike). Reusa `buildExhaustBolt`/`strikeLoop`/`strikeAttempt`.
+- `html/assets/minigame/catalytic/README.txt` com a spec dos 4 arquivos novos.
+  Specs `MG-BENCHCAT-PT-8`. Harness **2147/0**. Zero mudança de servidor/economia.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi

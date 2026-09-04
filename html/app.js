@@ -81,6 +81,7 @@
         pt.icon.innerHTML = '&#10003;';
       }
       if (pt.primitive === 'sand') hideSander();
+      if (_catPanelActive) { catUpdateTool(); catCheckOpen(); }
     }
 
     if (pt.element && pt.primitive !== 'trace') {
@@ -461,6 +462,131 @@
     stopStrikeLoop();
   }
 
+  // ─── [VISUAL-02] Painel "catalisador na bancada" ────────────────────────────
+  const CAT_BASE = 'assets/minigame/catalytic/';
+  let _catPanelActive = false;
+  let _catTool = null;      // <img> chave/marreta que segue o cursor
+  let _catPartEl = null;
+
+  function catUpdateTool() {
+    if (!_catTool) return;
+    const anyBoltPending = Object.keys(pointsMap).some(
+      (k) => pointsMap[k].primitive === 'rotate' && !pointsMap[k].completed);
+    _catTool.dataset.mode = anyBoltPending ? 'wrench' : 'hammer';
+  }
+  function catCheckOpen() {
+    if (!_catPartEl) return;
+    const done = Object.keys(pointsMap).every((k) => pointsMap[k].completed);
+    if (done) _catPartEl.classList.add('opened');
+  }
+
+  function buildCatalyticPanel(root, points) {
+    root.hidden = false;
+    root.innerHTML = `
+      <div class="cat-part" id="cat-part">
+        <img class="cat-photo cat-photo-body" alt="" src="${CAT_BASE}catalytic_body.png">
+        <img class="cat-photo cat-photo-open" alt="" src="${CAT_BASE}catalytic_open.png">
+        <div class="cat-part-head">
+          <span class="serial-part-tag">PE&Ccedil;A APREENDIDA</span>
+          <span class="serial-part-kind">CATALISADOR</span>
+        </div>
+        <div class="cat-stage" id="cat-stage"></div>
+        <div class="serial-hint">Desparafuse a flange (segure o clique e gire) e abra na marreta</div>
+      </div>
+      <img class="cat-tool" alt="" src="${CAT_BASE}catalytic_wrench.png" data-mode="wrench" hidden>`;
+
+    _catPartEl = root.querySelector('#cat-part');
+    const stage = root.querySelector('#cat-stage');
+    const bodyImg = root.querySelector('.cat-photo-body');
+    _catTool = root.querySelector('.cat-tool');
+    bodyImg.addEventListener('load', () => _catPartEl.classList.add('cat-photo-ok'));
+    bodyImg.addEventListener('error', () => _catPartEl.classList.remove('cat-photo-ok'));
+    _catTool.addEventListener('load', () => { _catTool.dataset.ok = '1'; });
+
+    // posições: 4 porcas num quadrado central; 2 golpes na costura
+    const boltPos = [ [34, 34], [66, 34], [34, 66], [66, 66] ];
+    const knockPos = [ [24, 50], [78, 50] ];
+    let bi = 0, ki = 0;
+
+    points.forEach((pt) => {
+      const ptId = pt.id;
+      const el = document.createElement('div');
+      el.style.position = 'absolute';
+
+      if (pt.primitive === 'rotate') {
+        const [lx, ly] = boltPos[bi++] || [50, 50];
+        el.className = 'hotspot primitive-rotate visual-exhaust-bolt cat-node';
+        el.style.left = lx + '%'; el.style.top = ly + '%';
+        el.innerHTML = `<svg class="hotspot-svg" viewBox="0 0 64 64">
+          <circle class="hotspot-bg-circle" cx="32" cy="32" r="26"/>
+          <circle class="hotspot-progress-circle" cx="32" cy="32" r="26"/></svg>`;
+        const entry = {
+          id: ptId, primitive: 'rotate', element: el,
+          progressCircle: el.querySelector('.hotspot-progress-circle'),
+          neededDeg: pt.neededDeg || 720, visualType: 'exhaust_bolt',
+          unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null,
+          lockUntilOthers: false, accumulatedDeg: 0, progress: 0, completed: false, visible: true,
+        };
+        pointsMap[ptId] = entry;
+        buildExhaustBolt(el, entry);
+        if (entry.unlockAfter && entry.unlockAfter > 0) el.classList.add('locked');
+        el.addEventListener('mousedown', (e) => {
+          if (e.button !== 0 || entry.completed) return;
+          if (!isPointUnlocked(entry)) {
+            el.classList.add('strike-miss');
+            setTimeout(() => el.classList.remove('strike-miss'), 170);
+            e.preventDefault(); return;
+          }
+          activeHotspotId = ptId;
+          el.classList.add('active');
+          if (!entry._focused) { entry._focused = true; postNui('minigamePointStart', { id: ptId }); }
+          const r = el.getBoundingClientRect();
+          prevMouseAngle = Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
+          e.preventDefault();
+        });
+      } else if (pt.primitive === 'strike') {
+        const [lx, ly] = knockPos[ki++] || [50, 78];
+        el.className = 'hotspot primitive-strike cat-node';
+        el.style.left = lx + '%'; el.style.top = ly + '%';
+        el.innerHTML = `<svg class="hotspot-svg" viewBox="0 0 64 64">
+          <circle class="hotspot-bg-circle" cx="32" cy="32" r="26"/>
+          <circle class="hotspot-progress-circle" cx="32" cy="32" r="26"/>
+          <circle class="strike-closer" cx="32" cy="32" r="${STRIKE_R_MAX}"/></svg>
+          <div class="hotspot-inner"><span class="hotspot-icon">&#128296;</span></div>`;
+        const entry = {
+          id: ptId, primitive: 'strike', element: el,
+          progressCircle: el.querySelector('.hotspot-progress-circle'),
+          closerCircle: el.querySelector('.strike-closer'),
+          icon: el.querySelector('.hotspot-icon'),
+          hitsNeeded: Math.max(1, pt.hitsNeeded || 4), hits: 0,
+          unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null,
+          lockUntilOthers: false, progress: 0, completed: false, visible: true,
+        };
+        pointsMap[ptId] = entry;
+        if (entry.unlockAfter && entry.unlockAfter > 0) el.classList.add('locked');
+        el.addEventListener('mousedown', (e) => {
+          if (e.button !== 0 || entry.completed) return;
+          if (!isPointUnlocked(entry)) {
+            el.classList.add('strike-miss');
+            setTimeout(() => el.classList.remove('strike-miss'), 170);
+            e.preventDefault(); return;
+          }
+          if (!entry._focused) { entry._focused = true; postNui('minigamePointStart', { id: ptId }); }
+          strikeAttempt(entry);
+          e.preventDefault();
+        });
+      }
+      stage.appendChild(el);
+    });
+
+    _catPanelActive = true;
+    catUpdateTool();
+    stopStrikeLoop();
+    if (points.some((p) => p.primitive === 'strike')) {
+      strikeRaf = requestAnimationFrame(strikeLoop);
+    }
+  }
+
   function startMinigame(data) {
     activeMinigame = true;
     hudTitle.textContent = data.title || 'OPERAÇÃO FÍSICA';
@@ -480,6 +606,13 @@
     // [FIX-1.3] Modo painel: "peça na bancada" com o número de série (serial scratch).
     if (data.panel === 'serial' && surfacePanel) {
       buildSerialPanel(surfacePanel, points);
+      updateOverallProgress();
+      app.classList.remove('hidden');
+      return;
+    }
+    // [VISUAL-02] Modo painel: catalisador na bancada (desparafusar + abrir na marreta).
+    if (data.panel === 'catalytic' && surfacePanel) {
+      buildCatalyticPanel(surfacePanel, points);
       updateOverallProgress();
       app.classList.remove('hidden');
       return;
@@ -781,6 +914,9 @@
     _serialCells = [];
     _serialPoints = {};
     _serialSander = null;
+    _catPanelActive = false;
+    _catTool = null;
+    _catPartEl = null;
     pointsMap = {};
   }
 
@@ -998,9 +1134,15 @@
   // [VISUAL-01C] Lixamento livre no painel de série: a lixa segue o cursor;
   // segurando LMB e passando sobre o número, desgasta as células.
   document.addEventListener('mousemove', (e) => {
-    if (!_serialPanelActive) return;
-    showSander(e.clientX, e.clientY);
-    serialSandAt(e.clientX, e.clientY);
+    if (_serialPanelActive) {
+      showSander(e.clientX, e.clientY);
+      serialSandAt(e.clientX, e.clientY);
+    }
+    if (_catPanelActive && _catTool && _catTool.dataset.ok === '1') {
+      _catTool.hidden = false;
+      _catTool.style.left = e.clientX + 'px';
+      _catTool.style.top = e.clientY + 'px';
+    }
   });
   document.addEventListener('mousedown', (e) => {
     if (!_serialPanelActive || e.button !== 0) return;

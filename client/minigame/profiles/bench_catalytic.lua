@@ -124,6 +124,7 @@ Profiles.list.bench_catalytic = {
     title    = L('mg_benchcat_title'),
     helpText = L('mg_benchcat_help'),
     toolClass = nil,  -- gate = bancada + hammer + token (server)
+    panel = 'catalytic', -- [VISUAL-02] NUI renderiza um painel de "catalisador na bancada"
     fov = 40.0,
     minUxMs = 6000,
     reserveMs = 3000,

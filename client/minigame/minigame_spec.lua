@@ -1405,6 +1405,8 @@ local function run()
             check('MG-BENCHCAT-PT-5 golpes só após as 4 porcas (unlockAfter == 4)',
                 pts[5].unlockAfter == 4 and pts[6].unlockAfter == 4)
             check('MG-BENCHCAT-PT-6 tem focusPoint', type(bcProf.focusPoint) == 'function')
+            check('MG-BENCHCAT-PT-8 [VISUAL-02] bench_catalytic usa painel (panel == catalytic)',
+                bcProf.panel == 'catalytic')
         end
 
         -- catalisador saiu da isenção do teardown e ganhou profile próprio

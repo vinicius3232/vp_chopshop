@@ -32,3 +32,18 @@ Progresso (pt.progress 0..100, dirigido pelo mousemove 'rotate' já existente):
 
 Fonte de referência: sprite sheet gerada (parafusos/porcas/arruelas/flange
 oxidados). Recortar SEM os elementos azuis (eram só marcação de referência).
+
+──────────────────────────────────────────────────────────────────────────────
+[VISUAL-02] Painel "catalisador na bancada" (profile bench_catalytic → panel='catalytic')
+
+  catalytic_body.png    -- catalisador fechado, vista de cima (fundo do painel).
+                           proporção ~16:10, ~1400x875, plaqueta centrada.
+  catalytic_open.png     -- o mesmo catalisador ABERTO (colmeia/miolo visível).
+                           mesmo enquadramento; trocado ao concluir.
+  catalytic_wrench.png   -- chave/catraca, alpha, ~600x600. Segue o cursor
+                           enquanto há porca pendente.
+  catalytic_hammer.png   -- marreta, alpha, ~600x600. Segue o cursor na fase
+                           dos golpes.
+
+Sem esses PNGs: o painel usa um cilindro desenhado em CSS (fallback) e o
+minigame continua funcional (4 porcas 'rotate' + 2 golpes 'strike').
