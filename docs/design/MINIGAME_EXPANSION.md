@@ -1,6 +1,15 @@
 # MINIGAME_EXPANSION — vp_chopshop
 
-**Status:** DESIGN CONGELADO — pronto para implementação em PRs pequenos
+**Status:** ✅ **CONCLUÍDO** — mergeado em `2026-09-04` via PR #53 → #54 → **#55**
+(merge commit `0f366274b0299720741f000ccd5e79da468db7a9` em
+`docs/post-v118-future-roadmap-prep`). Closing audit = GO · harness `2159 / 0` ·
+economia sem drift · v1.18-RC freeze impact ZERO. Resultado de QA:
+[`docs/audit/MINIGAME_EXPANSION_LIVE_QA.md`](../audit/MINIGAME_EXPANSION_LIVE_QA.md)
+(`RESULTADO — 2026-09-04`). CHANGELOG: `[1.18.2]`.
+_O design abaixo é o registro histórico; a implementação final divergiu em pontos
+documentados no CHANGELOG (FIX-1.2/1.3 + rework do catalisador de bancada para
+"maçarico no contorno")._
+
 **Base:** branch atual pós-v1.18 · **Harness alvo:** manter 1983 PASS / 0 FAIL
 **Referência de inspiração:** RareTeam *"[ESX/QB] Exhaust/Catalytic Robbery"* (script pago — **estudo clean-room, nada de código/asset copiado**; absorvemos só o fluxo e o *feel*: close-up → desparafusar → martelar).
 

@@ -25,6 +25,26 @@
 
 ---
 
+## Trilhas Paralelas Já Entregues (pré-Fase 5)
+
+Frentes fora da numeração P5–P9, executadas em paralelo à homologação da v1.18-RC e já mergeadas em `docs/post-v118-future-roadmap-prep`.
+
+### ✅ Expansão de Minigames Físicos — CONCLUÍDA
+
+- **Status:** mergeada em `2026-09-04` (PR #53 → #54 → **#55**, merge commit `0f366274b0299720741f000ccd5e79da468db7a9`). Closing audit = GO · harness `2159 PASS / 0 FAIL` · **economia sem drift** · **v1.18-RC freeze impact ZERO** (PR #52 intocada).
+- **Design:** [`docs/design/MINIGAME_EXPANSION.md`](../design/MINIGAME_EXPANSION.md) · **Live QA:** [`docs/audit/MINIGAME_EXPANSION_LIVE_QA.md`](../audit/MINIGAME_EXPANSION_LIVE_QA.md) (`RESULTADO — 2026-09-04`).
+- **Entregue:**
+  - Furto de catalisador na rua → minigame físico (4 porcas `rotate` + 2 golpes `strike`, jogador deitado sob o carro).
+  - "Riscar série" na bancada → painel de peça com plaqueta fotorrealista + lixa livre (primitive `sand`).
+  - Peça roubada **física em cima da bancada** antes de processar (`_benchParts` in-memory, menu em 2 níveis) — precursor de **P5.4** (persistência durável).
+  - Desmonte do catalisador na bancada → traçado com **maçarico no contorno** (`primitive 'trace'`), com **gate de máquina de solda** (`RequireWelderParts`).
+  - `VPChopBenchTxn.run` (`server/logistics/bench_txn.lua`) — autoridade transacional única da bancada, exercida pelo callback real **e** pela suíte (`FIX1-TXN-*`, contra o `PartEntitlement` real).
+  - NUI fotorrealista (VISUAL-01/01B/02): overlays de fixação, painéis do catalisador e da plaqueta de série.
+- **P2 diferidos (cleanup isolado, não bloqueante):** `html/assets/minigame/catalytic/exhaust_bolt_thread.png` órfão; builder bolt/knock do painel `bench_catalytic` virou caminho morto (o profile só gera `trace`).
+- **Alimenta:** **P5.4** (peça física durável — o modelo in-memory `_benchParts` vira persistência), **P8.7** (áudio/VFX de serra/maçarico já parcialmente implementado).
+
+---
+
 ## FASE 5 — v1.19: WORKSHOP LIVE & DURABLE PARTS FOUNDATION
 
 Esta fase conecta a infraestrutura transacional do `WorkshopBridge` (congelada na v1.17) a ecossistemas mecânicos reais e estabelece a camada de **Peça Física Durável e Persistente** com recuperação seletiva pós-restart.
