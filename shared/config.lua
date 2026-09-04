@@ -908,6 +908,9 @@ Config.PhysicalCarry = {
         --- reciclar em matérias-primas.
         PartProfiles      = { catalytic_converter = 'bench_catalytic' },
         PartMinDurationMs = { catalytic_converter = 9000 },
+        --- [maçarico] Peças que exigem uma MÁQUINA DE SOLDA física por perto da
+        --- bancada pra desmontar (mesmo gate da carcaça). Raio = Config.WelderBenchRadius.
+        RequireWelderParts = { catalytic_converter = true },
         --- Item consumível gasto por desmonte (1x). Registrar no ox_inventory.
         HammerItem    = 'hammer',
         --- Prop na mão durante o minigame.

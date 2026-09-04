@@ -335,6 +335,25 @@ local function runTeardownGate(benchId, partKey, entId, benchProp)
         return false, nil
     end
 
+    -- [maçarico] catalisador (e afins) exigem máquina de solda perto da bancada.
+    -- Pré-check client só pra feedback rápido; a autoridade é o server (teardownStart).
+    local rw = td.RequireWelderParts
+    if rw and rw[partKey] then
+        local radius = tonumber(Config.WelderBenchRadius) or 8.0
+        local ref = (benchProp and DoesEntityExist(benchProp)) and benchProp or cache.ped
+        local rpos, near = GetEntityCoords(ref), false
+        for _, wEnt in pairs(WelderEntities or {}) do
+            if wEnt and DoesEntityExist(wEnt) and #(GetEntityCoords(wEnt) - rpos) <= radius then
+                near = true
+                break
+            end
+        end
+        if not near then
+            VPChopNotify(L('err_no_welder'), 'error')
+            return false, nil
+        end
+    end
+
     local sOk, st = pcall(lib.callback.await, 'vp_chopshop:bench:teardownStart', false, benchId, entId)
     if not sOk or not st or not st.ok then
         VPChopNotify(VPChopLocaleErr(st and st.err) or L('notify_generic_error'), 'error')

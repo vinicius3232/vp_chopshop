@@ -1409,6 +1409,8 @@ local function run()
             not (td.ExemptParts and td.ExemptParts.catalytic_converter))
         check('MG-BENCHCAT-CFG-2 PartProfiles.catalytic_converter == bench_catalytic',
             td.PartProfiles and td.PartProfiles.catalytic_converter == 'bench_catalytic')
+        check('MG-BENCHCAT-CFG-3 [maçarico] catalisador exige máquina de solda na bancada',
+            td.RequireWelderParts and td.RequireWelderParts.catalytic_converter == true)
     end
 
     -- ─── [FIX-1.1] Catalytic — paridade de bone da CÂMERA (exhaust_3/_4-only) ──────

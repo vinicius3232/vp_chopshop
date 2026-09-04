@@ -590,6 +590,12 @@ lib.callback.register('vp_chopshop:bench:teardownStart', function(source, benchI
     local hammerItem = td.HammerItem or 'hammer'
     if InvCount(source, hammerItem) < 1 then return { ok = false, err = 'no_hammer' } end
 
+    -- [maçarico] catalisador (e afins) exigem máquina de solda perto da bancada
+    local rw = td.RequireWelderParts
+    if rw and rw[ent.partKey] and not isWelderNearBench(bench) then
+        return { ok = false, err = 'no_welder' }
+    end
+
     local now   = GetGameTimer()
     -- [FIX-1.3] duração mínima por peça (catalisador é mais demorado); fallback: MinDurationMs
     local minMs = math.floor(

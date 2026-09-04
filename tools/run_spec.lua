@@ -474,6 +474,7 @@ _G.Config = {
             ExemptParts = {},
             PartProfiles = { catalytic_converter = 'bench_catalytic' },
             PartMinDurationMs = { catalytic_converter = 9000 },
+            RequireWelderParts = { catalytic_converter = true },
             HammerItem = 'hammer',
         },
     },
