@@ -417,66 +417,41 @@ local function executeBenchPartMode(benchId, mode)
     VPChopNotify(L('bench_part_processed'), 'success')
 end
 
-local function doProcessCarriedPartOnBench(benchId)
-    local slot = BenchPartProps[benchId]
-    if not slot then
-        VPChopNotify(L('bench_no_part_placed'), 'error'); return
-    end
-    local partKey = slot.partKey
-
-    -- [FIX-1.3] Catalisador: opção própria de desmonte na bancada (minigame de
-    -- flange + marreta via runTeardownGate) antes de reciclar em matérias-primas.
+--- [FIX-1.3] Ações da peça que está na bancada — INLINE no menu principal (não
+--- mais um sub-menu). Catalisador tem só "Desmontar catalisador"; lataria/motor
+--- têm matéria-prima / limpar série / serial roubado.
+local function benchPartActionOptions(benchId, partKey)
     if partKey == 'catalytic_converter' then
-        lib.registerContext({
-            id = 'vp_chop_bench_catalytic_menu',
-            title = L('bench_process_part'),
-            options = {
-                {
-                    title = L('bench_opt_catalytic_dismantle'),
-                    description = L('bench_desc_catalytic_dismantle'),
-                    icon = 'fa-solid fa-fire-flame-curved',
-                    onSelect = function()
-                        executeBenchPartMode(benchId, 'raw_materials')
-                    end,
-                },
-            },
-        })
-        lib.showContext('vp_chop_bench_catalytic_menu')
-        return
-    end
-
-    -- Menu unificado com as 3 opções claras para peças de lataria e motor
-    lib.registerContext({
-        id = 'vp_chop_bench_part_action_menu',
-        title = L('bench_process_part'),
-        options = {
+        return {
             {
-                title = L('bench_opt_raw_materials'),
-                description = L('bench_desc_raw_materials'),
-                icon = 'fa-solid fa-recycle',
-                onSelect = function()
-                    executeBenchPartMode(benchId, 'raw_materials')
-                end,
-            },
-            {
-                title = L('bench_opt_clean_serial'),
-                description = L('bench_desc_clean_serial'),
-                icon = 'fa-solid fa-spray-can-sparkles',
-                onSelect = function()
-                    executeBenchPartMode(benchId, 'clean_serial')
-                end,
-            },
-            {
-                title = L('bench_opt_stolen_serial'),
-                description = L('bench_desc_stolen_serial'),
-                icon = 'fa-solid fa-skull-crossbones',
-                onSelect = function()
-                    executeBenchPartMode(benchId, 'stolen_serial')
-                end,
+                title = L('bench_opt_catalytic_dismantle'),
+                description = L('bench_desc_catalytic_dismantle'),
+                icon = 'fa-solid fa-fire-flame-curved',
+                iconColor = '#f59e0b',
+                onSelect = function() executeBenchPartMode(benchId, 'raw_materials') end,
             },
         }
-    })
-    lib.showContext('vp_chop_bench_part_action_menu')
+    end
+    return {
+        {
+            title = L('bench_opt_raw_materials'),
+            description = L('bench_desc_raw_materials'),
+            icon = 'fa-solid fa-recycle',
+            onSelect = function() executeBenchPartMode(benchId, 'raw_materials') end,
+        },
+        {
+            title = L('bench_opt_clean_serial'),
+            description = L('bench_desc_clean_serial'),
+            icon = 'fa-solid fa-spray-can-sparkles',
+            onSelect = function() executeBenchPartMode(benchId, 'clean_serial') end,
+        },
+        {
+            title = L('bench_opt_stolen_serial'),
+            description = L('bench_desc_stolen_serial'),
+            icon = 'fa-solid fa-skull-crossbones',
+            onSelect = function() executeBenchPartMode(benchId, 'stolen_serial') end,
+        },
+    }
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -563,13 +538,10 @@ local function openBenchMainMenu(benchId)
     local slot = BenchPartProps[benchId]
 
     if slot then
-        options[#options + 1] = {
-            title = L('bench_process_part'),
-            description = L('bench_process_part_desc') or 'Desmanchar / limpar serial / desmontar a peça na bancada',
-            icon = 'fa-solid fa-recycle',
-            iconColor = '#48bb78',
-            onSelect = function() doProcessCarriedPartOnBench(benchId) end,
-        }
+        -- ações da peça direto no menu (catalisador → "Desmontar catalisador")
+        for _, opt in ipairs(benchPartActionOptions(benchId, slot.partKey)) do
+            options[#options + 1] = opt
+        end
         options[#options + 1] = {
             title = L('bench_take_part'),
             description = L('bench_take_part_desc') or 'Pegar a peça de volta para os braços',
