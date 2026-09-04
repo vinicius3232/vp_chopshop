@@ -1747,6 +1747,34 @@ CreateThread(function()
     })
 end)
 
+-- [FIX-1.3] "Colocar macaco": opção no ox_target do veículo quando o jogador tem
+-- o item no inventário. Mais dinâmico que usar o item pelo menu do inventário.
+CreateThread(function()
+    if not (Config.Jackstand and Config.Jackstand.Enable) then return end
+    local jackItem = Config.Jackstand.Item or 'chopshop_jackstand'
+    exports.ox_target:addGlobalVehicle({
+        {
+            name = 'vp_chop_place_jackstand',
+            label = L('jackstand_target_place'),
+            icon = 'fa-solid fa-car-on',
+            distance = (Config.TargetDistances and Config.TargetDistances.jackLower) or 2.2,
+            canInteract = function(entity)
+                if not entity or entity == 0 or not DoesEntityExist(entity) then return false end
+                if GetVehiclePedIsIn(PlayerPedId(), false) ~= 0 then return false end
+                if JackstandBusy or JackstandData[entity] ~= nil then return false end
+                if GetEntitySpeed(entity) > 0.5 then return false end
+                local vc = GetVehicleClass(entity)
+                local isCar = (vc >= 0 and vc <= 7) or (vc >= 9 and vc <= 12) or (vc >= 17 and vc <= 20)
+                if not isCar then return false end
+                return (exports.ox_inventory:Search('count', jackItem) or 0) >= 1
+            end,
+            onSelect = function(data)
+                VPChopJackstandRaiseCar(data.entity)
+            end,
+        },
+    })
+end)
+
 -- ─────────────────────────────────────────────────────────────────────────────
 
 local function addRaisedCarTargets(veh)
@@ -1957,20 +1985,26 @@ function VPChopSessionErr(err)
     return (err and ('Erro: ' .. tostring(err))) or L('notify_generic_error')
 end
 
-function VPChopJackstandRaiseCar()
+--- [FIX-1.3] `targetVeh` opcional: o ox_target passa o veículo exato que o jogador
+--- está mirando. Sem ele (uso do item pelo inventário) faz a busca do carro mais perto.
+function VPChopJackstandRaiseCar(targetVeh)
     local jcfg = Config.Jackstand
     if not jcfg or not jcfg.Enable then return end
     if JackstandBusy then VPChopNotify(L('jackstand_busy'), 'error'); return end
     local pCoords = GetEntityCoords(PlayerPedId())
     local maxDist = jcfg.MaxCarDistance or 5.0
     local best, bestDist
-    for _, veh in ipairs(GetGamePool('CVehicle')) do
-        local vc    = GetVehicleClass(veh)
-        local isCar = (vc >= 0 and vc <= 7) or (vc >= 9 and vc <= 12) or (vc >= 17 and vc <= 20)
-        if isCar then
-            local d = #(GetEntityCoords(veh) - pCoords)
-            if d <= maxDist and (not bestDist or d < bestDist) then
-                best = veh; bestDist = d
+    if targetVeh and targetVeh ~= 0 and DoesEntityExist(targetVeh) then
+        best = targetVeh
+    else
+        for _, veh in ipairs(GetGamePool('CVehicle')) do
+            local vc    = GetVehicleClass(veh)
+            local isCar = (vc >= 0 and vc <= 7) or (vc >= 9 and vc <= 12) or (vc >= 17 and vc <= 20)
+            if isCar then
+                local d = #(GetEntityCoords(veh) - pCoords)
+                if d <= maxDist and (not bestDist or d < bestDist) then
+                    best = veh; bestDist = d
+                end
             end
         end
     end

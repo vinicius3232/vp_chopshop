@@ -273,6 +273,7 @@ local Locales = {
         jackstand_raised                = 'Vehicle raised. Steal the tyres!',
         jackstand_lowered               = 'Vehicle lowered. Jackstand retrieved.',
         jackstand_target_lower          = 'Lower vehicle',
+        jackstand_target_place          = 'Set up jackstand',
         jackstand_no_tool               = 'You need the required tool',
         tyremission_jackstand_hint      = 'Use your jackstand near the target vehicle to access the tyres.',
         -- Advanced chop (Phases 2-4, jackstand)
@@ -819,6 +820,7 @@ local Locales = {
         jackstand_raised                = 'Veículo levantado. Roube os pneus!',
         jackstand_lowered               = 'Veículo abaixado. Macaco recolhido.',
         jackstand_target_lower          = 'Baixar veículo',
+        jackstand_target_place          = 'Colocar macaco',
         jackstand_no_tool               = 'Você precisa da ferramenta obrigatória',
         tyremission_jackstand_hint      = 'Use seu macaco perto do veículo alvo para acessar os pneus.',
         -- Desmanche avançado (Fases 2-4, macaco)
