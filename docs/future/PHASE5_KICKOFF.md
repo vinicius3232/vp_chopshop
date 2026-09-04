@@ -112,6 +112,7 @@ A Fase 5 estabelece a integração definitiva entre o **mercado de desmanche** e
 ### P5.4 — Persistent Physical Part / Provenance V2
 
 - **Objetivo:** Criar o schema e a camada de domínio para **Peças Físicas Duráveis** (`vp_chop_physical_parts`), permitindo que motores, portas e catalisadores mantenham sua identidade, procedência, desgaste e serial cross-restart.
+- **Precursor já entregue (Expansão de Minigames, PR #55):** a peça roubada já vai **física em cima da bancada** antes de processar via `_benchParts[benchId]` (server, **in-memory**, some no restart). P5.4 = trocar esse mapa in-memory pela tabela persistente + recuperação seletiva. Ver `POST_V118_ROADMAP.md` → "Trilhas Paralelas Já Entregues".
 - **Não-Objetivos:** Não substituir o `PartEntitlement` (que continua como árbitro de autorização/transporte temporal).
 - **Campos Canônicos da Tabela `vp_chop_physical_parts`:**
   - `part_id` VARCHAR(64) PRIMARY KEY (UUIDv4)
