@@ -485,8 +485,8 @@
     root.hidden = false;
     root.innerHTML = `
       <div class="cat-part" id="cat-part">
-        <img class="cat-photo cat-photo-body" alt="" src="${CAT_BASE}catalytic_body.png">
-        <img class="cat-photo cat-photo-open" alt="" src="${CAT_BASE}catalytic_open.png">
+        <img class="cat-photo-body" alt="" src="${CAT_BASE}catalytic_body.png">
+        <img class="cat-photo-open" alt="" src="${CAT_BASE}catalytic_open.png">
         <div class="cat-part-head">
           <span class="serial-part-tag">PE&Ccedil;A APREENDIDA</span>
           <span class="serial-part-kind">CATALISADOR</span>
@@ -507,8 +507,8 @@
     // [VISUAL-02] Posições % (left,top) sobre catalytic_body.png (o painel usa a
     // proporção exata da foto, então % do painel == % da imagem). Ajuste aqui.
     //   corpo do catalisador ~ x 13-55% / y 33-71% ; costura soldada ~ y 51%
-    const boltPos  = [ [18, 41], [47, 41], [18, 63], [47, 63] ];  // 4 cantos da face do corpo
-    const knockPos = [ [25, 51], [40, 51] ];                       // EM CIMA da costura (entre os parafusos)
+    const boltPos  = [ [23, 40], [43, 40], [23, 56], [43, 56] ];  // em cima das marcas reais da foto
+    const knockPos = [ [28, 48], [39, 48] ];                       // na costura, entre os parafusos
     let bi = 0, ki = 0;
 
     points.forEach((pt) => {
