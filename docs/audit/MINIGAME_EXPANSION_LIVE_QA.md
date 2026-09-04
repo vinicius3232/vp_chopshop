@@ -1,13 +1,58 @@
-# Minigame Expansion — LIVE QA (v1.18.2 + FIX-1 + FIX-1.1)
+# Minigame Expansion — LIVE QA (v1.18.2 + FIX-1 + FIX-1.1 + FIX-1.2/1.3 + VISUAL)
 
-**Data:** 2026-09-03
-**Branches:** `feat/minigame-expansion` (PR-2→4) → `fix/minigame-expansion-hardening` (FIX-1, PR #54)
-→ `fix/minigame-expansion-hardening-rc11` (FIX-1.1: RC parity + txn real)
-**Harness estático:** `lua tools/run_spec.lua .` → **2102 PASS / 0 FAIL**
-(FIX1-TXN-* agora exercem `server/logistics/bench_txn.lua` real, não mock)
+**Plano criado:** 2026-09-03 · **Última revisão:** 2026-09-04
+**Branch final:** `fix/minigame-expansion-hardening-rc11` — PR #55, base
+`docs/post-v118-future-roadmap-prep` (`7023079`), HEAD `42df3ea`.
+**Harness estático (HEAD `42df3ea`):** `lua tools/run_spec.lua .` → **2159 PASS / 0 FAIL**
+(FIX1-TXN-* exercem `server/logistics/bench_txn.lua` real, não mock).
 **Referência de fluxo geral:** `docs/audit/RC_QA_TASKLIST.md` · `docs/audit/V116_INTEGRATION_QA.md`
 
 Deploy num servidor QBox real. Este doc é o **subconjunto que mudou** com a expansão de minigames.
+
+> **Nota de escopo:** as tabelas MG-A / MG-C abaixo descrevem os fluxos das PRs 2–4 +
+> FIX-1.1. A partir da FIX-1.2/1.3 o **furto de catalisador na rua** virou 4 porcas
+> `rotate` + 2 golpes `strike` (jogador deitado), e o **desmonte na bancada** passou por
+> peça física + `bench_catalytic` e, na revisão final, por **1 traçado com maçarico no
+> contorno** com **gate de máquina de solda**. Ver `## RESULTADO — 2026-09-04`.
+
+---
+
+## RESULTADO — 2026-09-04 (branch `fix/minigame-expansion-hardening-rc11`, HEAD `42df3ea`)
+
+**Estático (reproduzível):**
+
+| Verificação | Resultado |
+|---|---|
+| `lua tools/run_spec.lua .` | **2159 PASS / 0 FAIL** |
+| `luac -p` nos `.lua` alterados (backtick-stripped) | OK |
+| `node -c html/app.js` | OK |
+| GitHub Actions `harness` no HEAD | verde |
+| `Config` economy diff vs base (`7023079`) | **sem drift** (só `TargetDistances` = RC parity + `ProgressMs` timing) |
+| PR #52 (`feat/v1.18-rc-forensics-gate` @ `03838d63`) | intacta, não mergeada |
+
+**In-game (servidor QBox real do owner):** o owner (`vinicius3232`) rodou os fluxos
+abaixo e reportou **"todos os testes OK"** em 2026-09-04. Sign-off por confirmação
+do owner — não há matriz per-caso individualmente logada.
+
+| Fluxo | Owner-testado | Passou | Obs |
+|---|---|---|---|
+| Furto de catalisador na rua (4 porcas + 2 golpes, deitado, cai na mão) | sim | sim | iterado até o feel/anim ficarem certos |
+| Painel de série (`serial_scratch`, lixa livre sobre a plaqueta) | sim | sim | plaqueta = visual; estado/refund seguem server-side |
+| Peça física na bancada (colocar / pegar de volta / menu 2 níveis) | sim | sim | in-memory, some no restart (esperado) |
+| Desmonte do catalisador na bancada — **maçarico no contorno** | sim | sim | traçar → carcaça abre → vira sucata |
+| Gate de máquina de solda (sem solda perto → não abre + notifica) | sim | sim | `err='no_welder'` server + pré-check client |
+| NUI limpa (sem badge/marcador de versão, sem debug visual) | sim | sim | badge de diagnóstico removido em `42df3ea` |
+| Cancel / restart no meio (sem prop/entidade órfão) | sim | sim | — |
+| `hammer` / `sandpaper` só consumidos no commit | sim | sim | coberto também por `FIX1-TXN-*` (estático) |
+| Economia (payout / materiais) idêntica | sim | sim | confirma o diff estático |
+
+**P0:** 0 · **P1:** 0 · **P2:** (1) matriz per-caso não foi logada individualmente —
+o sign-off é do owner "em bloco"; (2) `exhaust_bolt_thread.png` órfão no repo
+(a rua usa head/washer/hole; a bancada não usa mais fixação visual); (3)
+`bench_catalytic` panel bolt/knock builder em `html/app.js` virou caminho morto
+(profile só gera `trace`) — não quebra nada, limpeza futura.
+
+---
 
 ## Pré-requisitos
 

@@ -261,6 +261,34 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
 - `html/assets/minigame/catalytic/README.txt` com a spec dos 4 arquivos novos.
   Specs `MG-BENCHCAT-PT-8`. Harness **2147/0**. Zero mudança de servidor/economia.
 
+### Rework (FIX-1.3 cont.) — catalisador na bancada vira "maçarico no contorno"
+
+- **`bench_catalytic` deixou de ser 4 porcas + 2 golpes.** As porcas nunca ficaram
+  estáveis sobre a foto no CEF do FiveM (posições calculadas a partir de
+  `aspect-ratio`/`object-fit`, que o CEF não segura). Agora o profile gera **1 ponto
+  `primitive = 'trace'`** (`bcat_cut`): o painel desenha uma linha de corte em SVG
+  colada na silhueta do tambor e um **maçarico que segue o cursor**; o jogador segura
+  o clique no marcador de partida e contorna a peça. `progress = min(percorrido,
+  teto por tempo ~8.5 s)` — casa com `PartMinDurationMs.catalytic_converter`. Volta
+  completa → carcaça abre (`catalytic_open.png`).
+  - Amostras do contorno **analíticas** (`catRoundRectSamples`), não
+    `path.getTotalLength()` (que devolve 0 antes do layout no CEF).
+  - Painel usa a foto FECHADA **em fluxo** (`width:100%; height:auto`) definindo a
+    altura → `%` de posição == `%` da imagem em qualquer CEF.
+  - `_panel: true` na entrada faz os handlers full-screen de `trace`
+    (`window.mousedown` / `updatePointsPosition`) ignorarem-na.
+  - `buildExhaustBolt` perdeu a camada `xbolt-thread` (rosca "em cima" da peça
+    ficava estranha) — `exhaust_bolt_thread.png` fica no repo mas não é mais
+    renderado; a versão de **rua** (`catalytic.lua`) segue com head/washer/hole.
+- **Gate de máquina de solda:** `Config.PhysicalCarry.Teardown.RequireWelderParts =
+  { catalytic_converter = true }`. `bench:teardownStart` (server) valida
+  `isWelderNearBench` → `err = 'no_welder'`; `runTeardownGate` (client) faz um
+  pré-check em `WelderEntities` pro feedback rápido. Mesmo gate da carcaça.
+- Assets: `catalytic_torch.png` (720²). Locale `mg_benchcat_cut` (5 idiomas);
+  `mg_benchcat_help` reescrito. Specs `MG-BENCHCAT-PT-*` reescritos p/ 1 ponto
+  trace + `MG-BENCHCAT-CFG-3`. **Harness `lua tools/run_spec.lua .` → 2159 PASS / 0
+  FAIL** (número final da branch). Zero mudança de servidor/economia.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi
