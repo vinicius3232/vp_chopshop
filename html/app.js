@@ -18,6 +18,15 @@
   const STRIKE_BAND = [8.5, 14.5];
   const STRIKE_CYCLE_MS = 850;
   let strikeRaf = null;
+  let _serialSander = null;  // [VISUAL-01B] <img> da lixa que segue o cursor
+
+  function showSander(x, y) {
+    if (!_serialSander || _serialSander.dataset.ok !== '1') return;
+    _serialSander.hidden = false;
+    _serialSander.style.left = x + 'px';
+    _serialSander.style.top = y + 'px';
+  }
+  function hideSander() { if (_serialSander) _serialSander.hidden = true; }
 
   let activeMinigame = false;
   let pointsMap = {};
@@ -71,6 +80,7 @@
       } else if (pt.icon) {
         pt.icon.innerHTML = '&#10003;';
       }
+      if (pt.primitive === 'sand') hideSander();
     }
 
     if (pt.element && pt.primitive !== 'trace') {
@@ -333,11 +343,14 @@
 
   // [FIX-1.3] Painel "peça na bancada": plaqueta de metal escovado com o nº de série
   // gravado; o jogador esfrega a lixa (gesto 'sand') sobre cada faixa até apagar.
+  const SERIAL_BASE = 'assets/minigame/serial/';
+
   function buildSerialPanel(root, points) {
     const serial = genSerial();
     root.hidden = false;
     root.innerHTML = `
       <div class="serial-part">
+        <img class="serial-plate-photo" alt="" src="${SERIAL_BASE}serial_plate.png">
         <div class="serial-part-head">
           <span class="serial-part-tag">PEÇA APREENDIDA</span>
           <span class="serial-part-kind">CAR PARTS</span>
@@ -350,7 +363,17 @@
           <div class="serial-zones" id="serial-zones"></div>
         </div>
         <div class="serial-hint">Segure o clique numa faixa e esfregue a lixa &#8644; at&eacute; apagar</div>
-      </div>`;
+      </div>
+      <img class="serial-sander" alt="" src="${SERIAL_BASE}serial_sander.png" hidden>`;
+
+    const partEl = root.querySelector('.serial-part');
+    const plateImg = root.querySelector('.serial-plate-photo');
+    const sanderImg = root.querySelector('.serial-sander');
+    // fallback gracioso: sem a foto, mantém a plaqueta desenhada em CSS
+    plateImg.addEventListener('load', () => partEl.classList.add('plate-photo-ok'));
+    plateImg.addEventListener('error', () => partEl.classList.remove('plate-photo-ok'));
+    sanderImg.addEventListener('load', () => { sanderImg.dataset.ok = '1'; });
+    _serialSander = sanderImg;
 
     const zonesWrap = root.querySelector('#serial-zones');
     const codeEl = root.querySelector('#serial-code');
@@ -409,6 +432,7 @@
         zone.classList.add('sanding');
         entry._sandLastX = e.clientX;
         entry._sandDir = 0;
+        showSander(e.clientX, e.clientY);
         if (!entry._focused) { entry._focused = true; postNui('minigamePointStart', { id: ptId }); }
         e.preventDefault();
       });
@@ -732,6 +756,7 @@
     hotspotContainer.innerHTML = '';
     const sp = document.getElementById('surface-panel');
     if (sp) { sp.hidden = true; sp.innerHTML = ''; }
+    _serialSander = null;
     pointsMap = {};
   }
 
@@ -821,6 +846,7 @@
     } else if (pt.primitive === 'sand') {
       // [FIX-1.3] Lixar: esfregar o mouse pra frente e pra trás sobre o número.
       // Cada inversão de direção com deslocamento mínimo conta 1 passada.
+      showSander(e.clientX, e.clientY);  // [VISUAL-01B] a lixa segue o cursor
       const dx = e.clientX - (pt._sandLastX || e.clientX);
       if (Math.abs(dx) >= 6) {
         const dir = dx > 0 ? 1 : -1;
@@ -939,6 +965,7 @@
       pt.element.classList.remove('active', 'cutting', 'drilling', 'tracing', 'sanding');
       if (pt.torchTip) pt.torchTip.classList.add('hidden');
     }
+    hideSander();
     stopCuttingLoop();
     activeHotspotId = null;
   });

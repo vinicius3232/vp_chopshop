@@ -444,6 +444,42 @@ html, body {
   letter-spacing: 0.04em;
 }
 
+/* [VISUAL-01B] foto real da plaqueta como fundo (fallback: plaqueta CSS) */
+.serial-part { position: relative; }
+.serial-plate-photo {
+  display: none;
+  position: absolute;
+  inset: -6px;
+  width: calc(100% + 12px);
+  height: calc(100% + 12px);
+  object-fit: fill;
+  border-radius: 14px;
+  z-index: 0;
+  pointer-events: none;
+}
+.serial-part.plate-photo-ok .serial-plate-photo { display: block; }
+.serial-part.plate-photo-ok .serial-plate {
+  background: transparent;
+  box-shadow: none;
+}
+.serial-part.plate-photo-ok .serial-rivet { opacity: 0; }
+.serial-part > .serial-part-head,
+.serial-part > .serial-plate,
+.serial-part > .serial-hint { position: relative; z-index: 1; }
+
+/* almofada de lixa que segue o cursor durante o esfrega */
+.serial-sander {
+  position: fixed;
+  width: 108px;
+  height: auto;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  pointer-events: none;
+  z-index: 20;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.5));
+  transition: transform 0.04s linear;
+}
+.serial-sander[hidden] { display: none; }
+
 /* ─── [VISUAL-01] Overlay fotorrealista de fixação (parafuso do escapamento) ── */
 /* Sem assets carregados → tudo continua no visual genérico (circulo). Quando os
    4 PNGs carregam, a classe .xbolt-ready troca pro overlay. */

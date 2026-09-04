@@ -237,6 +237,17 @@ PR-2 → PR-4; a limpeza do bolt legado foi a 1.18.1) + hardening FIX-1 + FIX-1.
   `unlockAfter`/tokens/`PartEntitlement`/`VPChopBenchTxn`/hammer/payouts/câmera/
   locator intactos. Specs `MG-CAT-PT-10`, `MG-BENCHCAT-PT-7`. Harness **2146/0**.
 
+### Added (VISUAL-01B) — foto real no painel de série
+
+- **`html/assets/minigame/serial/`** consumida pelo `buildSerialPanel`:
+  `serial_plate.png` (plaqueta oxidada riveted) vira o **fundo do painel**;
+  `serial_sander.png` (almofada de lixa) **segue o cursor** enquanto o jogador
+  esfrega uma faixa (`showSander`/`hideSander`), some no `mouseup`/conclusão.
+- **Fallback gracioso:** sem os PNGs, `.plate-photo-ok` não entra e o painel usa
+  a plaqueta desenhada em CSS — minigame idêntico. Zero gameplay/economia.
+- `README.txt` na pasta com a spec dos 2 arquivos. `fxmanifest` já cobre
+  (`html/**`). Harness **2146/0**.
+
 ### Notes
 
 - Nenhuma tabela de DB nova. `sandpaper` já existe no `ox_inventory`; `hammer` foi
