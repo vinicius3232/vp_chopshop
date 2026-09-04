@@ -506,8 +506,8 @@
     // [VISUAL-02] Posições % (left,top) sobre catalytic_body.png (o painel usa a
     // proporção exata da foto, então % do painel == % da imagem). Ajuste aqui.
     //   corpo do catalisador ~ x 13-55% / y 33-71% ; costura soldada ~ y 51%
-    const boltPos  = [ [23, 39], [42, 39], [23, 58], [41, 58] ];  // face do corpo
-    const knockPos = [ [22, 51], [43, 51] ];                       // EM CIMA da costura
+    const boltPos  = [ [18, 41], [47, 41], [18, 63], [47, 63] ];  // 4 cantos da face do corpo
+    const knockPos = [ [25, 51], [40, 51] ];                       // EM CIMA da costura (entre os parafusos)
     let bi = 0, ki = 0;
 
     points.forEach((pt) => {
