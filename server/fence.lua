@@ -522,6 +522,18 @@ function VPChopFenceSellCarriedPart(src, entitlementId, expectedPartKey)
 
     local payout = quote.total
 
+    -- [v1.20 P6.1 / P6.2] Ajuste territorial de payout no fence
+    if Config.Gangs and Config.Gangs.Enable ~= false and rawget(_G, 'VPChopGangs') and VPChopGangs.CalculateTerritoryAdjustment then
+        local pPed = GetPlayerPed(src)
+        local pCoords = (pPed and pPed ~= 0) and GetEntityCoords(pPed) or nil
+        if pCoords then
+            local adj = VPChopGangs.CalculateTerritoryAdjustment(src, pCoords, payout)
+            if adj and adj.adjustedPayout then
+                payout = adj.adjustedPayout
+            end
+        end
+    end
+
     -- Consume At-Most-Once
     local resConsume = PartEntitlement.Consume(entitlementId, src, 'fence_part_sale', partKey)
     if not resConsume.ok then
@@ -1066,6 +1078,17 @@ lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
     local payout    = math.floor(base * trustM * tierMult * heatMult * nightM)
     local maxCarPayout = math.floor(base * 5)
     payout = math.min(payout, maxCarPayout)
+
+    -- [v1.20 P6.1 / P6.2] Ajuste territorial de payout (bônus p/ membros dominantes, pedágio p/ terceiros)
+    if Config.Gangs and Config.Gangs.Enable ~= false and rawget(_G, 'VPChopGangs') and VPChopGangs.CalculateTerritoryAdjustment then
+        local vehCoords = (veh and veh ~= 0 and DoesEntityExist(veh)) and GetEntityCoords(veh)
+        if vehCoords then
+            local adj = VPChopGangs.CalculateTerritoryAdjustment(src, vehCoords, payout)
+            if adj and adj.adjustedPayout then
+                payout = adj.adjustedPayout
+            end
+        end
+    end
 
     -- [PR-H] 1) RESERVA DE COOLDOWN CONDICIONAL — autoridade terminal, ANTES do dinheiro.
     -- UPDATE atômico: só grava se o cooldown continua liberado. affectedRows==1

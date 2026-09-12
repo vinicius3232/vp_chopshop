@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-12
-**Branch de trabalho:** `feat/v1.19-p5.4-p5.5-durable-parts` (base: `docs/post-v118-future-roadmap-prep`)
+**Branch de trabalho:** `feat/v1.20-p6-gangs-network` (base: `docs/post-v118-future-roadmap-prep`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **2271 PASS / 0 FAIL / 2271 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **2311 PASS / 0 FAIL / 2311 asserts**
 
 ---
 
@@ -34,7 +34,7 @@ P4.1.1     — EvidenceBridge Provider Hardening      ✅ HOMOLOGADO & MERGED (P
 P4.2       — GPS Tracker / LoJack & Catalytic Theft ✅ HOMOLOGADO & MERGED (PR #49, merge SHA 9c52c52)
 P4.3       — DispatchBridge & Police Alert System   ✅ HOMOLOGADO & MERGED (PR #50, merge SHA 3fd6f54)
 P4.4.1     — Forensic Domain Integration            ✅ HOMOLOGADO & MERGED (PR #51, merge SHA 7ba2080)
-v1.18-RC   — Forensics Gate & Release Candidate 2   ✅ HOMOLOGADO & PR #52 ABERTO (HEAD 7a57ecb)
+v1.18-RC   — Forensics Gate & Release Candidate 2   ✅ HOMOLOGADO & PR #52 MERGED (HEAD 7a57ecb)
 ─────────────────────────────────────────────────────────────────────────
 v1.18.2 Expansão de Minigames Físicos & Polimento Auditado:
 MINIGAME-1 — Painel SVG Furto de Catalisador de Rua ✅ HOMOLOGADO & MERGED (PR #53)
@@ -47,9 +47,16 @@ FASE 5 (v1.19) Adaptadores de Oficina Mecânica (Workshop Live):
 P5.1       — Adapter QBox Mechanics (qbx_mechanics/customs) ✅ HOMOLOGADO (PR #57)
 P5.2       — Adapter Multi-API (qs-mechanics / renzu_customs)✅ HOMOLOGADO (PR #57)
 P5.3       — Catálogo de Encomendas B2B & Escrow Terminal  ✅ HOMOLOGADO (PR #57)
-P5.4       — Peças Físicas Duráveis & Proveniência V2      ✅ IMPLEMENTADO & 14 ASSERTS (PR #58)
-P5.5       — Recuperação Seletiva de Boot (RestartRecovery)✅ IMPLEMENTADO & RECONCILER ATÔMICO (PR #58)
-P5-RC      — Workshop Live Release Gate (10 Invariantes)   ✅ 10/10 PASS & PR #58 ABERTO
+P5.4       — Peças Físicas Duráveis & Proveniência V2      ✅ HOMOLOGADO & MERGED (PR #58)
+P5.5       — Recuperação Seletiva de Boot (RestartRecovery)✅ HOMOLOGADO & MERGED (PR #58)
+P5-RC      — Workshop Live Release Gate (10 Invariantes)   ✅ HOMOLOGADO & MERGED (PR #58)
+─────────────────────────────────────────────────────────────────────────
+FASE 6 (v1.20) Criminal Network & Gangs (vp_gangs):
+P6.1       — Territory Tax / Chop Zones (15% retida cofre) ✅ IMPLEMENTADO
+P6.2       — Economic Bonus (+10%) & Heat Reduction (50%)  ✅ IMPLEMENTADO
+P6.3       — Informant & Multi-Smartphone Alert (lb/qs/etc)✅ IMPLEMENTADO (REQUISITO CANÔNICO)
+P6.4       — Cooperative Gang Contracts & Server Payout    ✅ IMPLEMENTADO & 14 ASSERTS
+P6-RC      — Gangs & Territory Gate (8 Invariantes)        ✅ 19/19 PASS & PR ABERTO
 ─────────────────────────────────────────────────────────────────────────
 ```
 
