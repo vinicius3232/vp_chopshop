@@ -191,6 +191,26 @@ function VPChopDbInit()
                     INDEX `idx_workshop_player` (`player_key`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [v1.19 P5.3] Workshop B2B Orders Catalog & Escrow Terminal.
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_workshop_b2b_orders` (
+                    `order_id`        VARCHAR(64)       NOT NULL,
+                    `workshop_id`     VARCHAR(40)       NOT NULL,
+                    `creator_key`     VARCHAR(60)       NOT NULL,
+                    `part_key`        VARCHAR(50)       NOT NULL,
+                    `target_model`    VARCHAR(32)       NULL DEFAULT NULL,
+                    `quantity`        SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    `remaining`       SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    `price_per_unit`  INT UNSIGNED      NOT NULL,
+                    `escrow_total`    INT UNSIGNED      NOT NULL,
+                    `expires_at`      TIMESTAMP         NOT NULL,
+                    `state`           VARCHAR(20)       NOT NULL DEFAULT 'OPEN',
+                    `created_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`order_id`),
+                    INDEX `idx_b2b_state` (`state`, `expires_at`),
+                    INDEX `idx_b2b_workshop` (`workshop_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
             -- Migração idempotente e não-destrutiva para tabelas criadas em rascunhos anteriores
             pcall(function()
                 local cols = MySQL.query.await([[

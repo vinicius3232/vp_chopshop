@@ -463,6 +463,9 @@ function WorkshopBridge.HandoffPart(src, entitlementId, opts, externalCaller)
         metadata           = snapshot,
         trustLevel         = trust,
         progressionTier    = tier,
+        workshopId         = opts and opts.workshopId,
+        price              = opts and opts.price,
+        b2bOrderId         = opts and opts.b2bOrderId,
     }
 
     -- 3. Provider PreparePurchase

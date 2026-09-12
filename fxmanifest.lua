@@ -139,7 +139,12 @@ server_scripts {
     'server/broker/contracts_spec.lua',   -- self-gated (vp_chopshop_selftest 1)
     -- [v1.17 BROKER-4] Workshop Bridge & Persistent SAGA Journal
     'bridge/workshop.lua',
+    'bridge/workshop_qbx.lua',            -- [v1.19 P5.1] QBox Mechanics SAGA Adapter
+    'bridge/workshop_community.lua',      -- [v1.19 P5.2] Multi-API QS/Renzu/Custom Adapters
+    'server/broker/b2b_orders.lua',       -- [v1.19 P5.3] B2B Workshop Orders & Escrow
     'server/broker/workshop_spec.lua',    -- self-gated (vp_chopshop_selftest 1)
+    'server/broker/workshop_adapters_spec.lua', -- [v1.19 P5.1/P5.2] self-gated
+    'server/broker/b2b_orders_spec.lua',  -- [v1.19 P5.3] self-gated
     -- [SPIKE PR-I] self-test dos registries (shared/registry/*.lua). Self-gated.
     'shared/registry/registry_spec.lua',
     'server/cooldown.lua',

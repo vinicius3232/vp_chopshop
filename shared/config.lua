@@ -1463,6 +1463,7 @@ Config.Broker = {
     },
     Workshop = {
         Enable = true,
+        --- Provedores suportados: 'qbx_mechanics' | 'qs-mechanics' | 'renzu_customs' | 'none'
         Provider = 'none',
         ProviderResource = nil,
         MaxPrice = 50000,
@@ -1470,5 +1471,36 @@ Config.Broker = {
         ReconcileIntervalSec = 15,
         MaxReconcileAttempts = 4,
         Debug = false,
+
+        --- Contas e cofres padrão de sociedade (QBox / ox_inventory)
+        DefaultAccount = 'society_mechanic',
+        DefaultStash = 'workshop_mechanic',
+
+        --- Oficinas registradas (ID da oficina -> conta de sociedade e stash no ox_inventory)
+        Shops = {
+            bennys = {
+                label = "Benny's Original Motor Works",
+                account = 'society_mechanic',
+                stash = 'workshop_bennys',
+            },
+            hayes = {
+                label = "Hayes Auto Body Shop",
+                account = 'society_hayes',
+                stash = 'workshop_hayes',
+            },
+            harmony = {
+                label = "Harmony Repairs",
+                account = 'society_harmony',
+                stash = 'workshop_harmony',
+            },
+        },
+
+        --- Catálogo de Encomendas B2B (P5.3)
+        B2B = {
+            Enable = true,
+            MinPriceMult = 1.10,    -- Preço mínimo B2B deve ser >= 110% do mercado
+            DefaultTtlSec = 3600,   -- Validade padrão de uma ordem em segundos (1h)
+            MaxOrdersPerShop = 5,   -- Máximo de ordens ativas por oficina
+        },
     },
 }

@@ -566,6 +566,33 @@ function BrokerContracts.GetAvailable(playerKey, trustLevel, now)
         }
     end
 
+    -- [v1.19 P5.3] Mesclar ordens B2B abertas de oficinas mecânicas no catálogo do Broker
+    if B2BOrders and type(B2BOrders.GetOpenOrders) == 'function' then
+        local b2bOrders = B2BOrders.GetOpenOrders()
+        if b2bOrders and type(b2bOrders) == 'table' then
+            for _, b in ipairs(b2bOrders) do
+                out[#out + 1] = {
+                    id           = b.order_id,
+                    isGlobal     = true,
+                    isB2B        = true,
+                    workshopId   = b.workshop_id,
+                    contractType = 'b2b_order',
+                    targetKey    = b.part_key,
+                    targetModel  = b.target_model,
+                    quantity     = tonumber(b.quantity) or 1,
+                    remaining    = tonumber(b.remaining) or 1,
+                    pricePerUnit = tonumber(b.price_per_unit) or 0,
+                    rewardMult   = 1.20,
+                    bonusCash    = 0,
+                    minTrust     = 1,
+                    expiresAt    = tonumber(b.expires_at) or (curTime + 3600),
+                    createdAt    = curTime,
+                    state        = 'AVAILABLE',
+                }
+            end
+        end
+    end
+
     return out
 end
 
