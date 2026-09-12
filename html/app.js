@@ -255,7 +255,6 @@
   const XBOLT_BASE = 'assets/minigame/catalytic/';
   const XBOLT_IMG = {
     hole:   'exhaust_bolt_hole.png',
-    thread: 'exhaust_bolt_thread.png',
     washer: 'exhaust_washer.png',
     head:   'exhaust_bolt_head.png',
   };
@@ -516,98 +515,13 @@
     _catTool.addEventListener('load', () => { _catTool.dataset.ok = '1'; });
 
     // [maçarico] modo contorno: 1 ponto 'trace' → desenha a linha de corte sobre a
-    // foto e a tocha segue o cursor. Sem parafusos.
-    if (points.some((p) => p.primitive === 'trace')) {
+    // foto e a tocha segue o cursor.
+    const tracePoint = points.find((p) => p.primitive === 'trace') || points[0];
+    if (tracePoint) {
       _catTool.hidden = true;
-      buildCatalyticContour(stage, points.find((p) => p.primitive === 'trace'));
+      buildCatalyticContour(stage, tracePoint);
       _catPanelActive = true;
       updateOverallProgress();
-      return;
-    }
-
-    // [VISUAL-02] Posições % (left,top) sobre catalytic_body.png (o painel usa a
-    // proporção exata da foto, então % do painel == % da imagem). Ajuste aqui.
-    //   corpo do catalisador ~ x 13-55% / y 33-71% ; costura soldada ~ y 51%
-    const boltPos  = [ [23, 40], [43, 40], [23, 56], [43, 56] ];  // em cima das marcas reais da foto
-    const knockPos = [ [28, 48], [39, 48] ];                       // na costura, entre os parafusos
-    let bi = 0, ki = 0;
-
-    points.forEach((pt) => {
-      const ptId = pt.id;
-      const el = document.createElement('div');
-      el.style.position = 'absolute';
-
-      if (pt.primitive === 'rotate') {
-        const [lx, ly] = boltPos[bi++] || [50, 50];
-        el.className = 'hotspot primitive-rotate visual-exhaust-bolt cat-node';
-        el.style.left = lx + '%'; el.style.top = ly + '%';
-        el.innerHTML = `<svg class="hotspot-svg" viewBox="0 0 64 64">
-          <circle class="hotspot-bg-circle" cx="32" cy="32" r="26"/>
-          <circle class="hotspot-progress-circle" cx="32" cy="32" r="26"/></svg>`;
-        const entry = {
-          id: ptId, primitive: 'rotate', element: el,
-          progressCircle: el.querySelector('.hotspot-progress-circle'),
-          neededDeg: pt.neededDeg || 720, visualType: 'exhaust_bolt',
-          unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null,
-          lockUntilOthers: false, accumulatedDeg: 0, progress: 0, completed: false, visible: true,
-        };
-        pointsMap[ptId] = entry;
-        buildExhaustBolt(el, entry);
-        if (entry.unlockAfter && entry.unlockAfter > 0) el.classList.add('locked');
-        el.addEventListener('mousedown', (e) => {
-          if (e.button !== 0 || entry.completed) return;
-          if (!isPointUnlocked(entry)) {
-            el.classList.add('strike-miss');
-            setTimeout(() => el.classList.remove('strike-miss'), 170);
-            e.preventDefault(); return;
-          }
-          activeHotspotId = ptId;
-          el.classList.add('active');
-          if (!entry._focused) { entry._focused = true; postNui('minigamePointStart', { id: ptId }); }
-          const r = el.getBoundingClientRect();
-          prevMouseAngle = Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
-          e.preventDefault();
-        });
-      } else if (pt.primitive === 'strike') {
-        const [lx, ly] = knockPos[ki++] || [50, 78];
-        el.className = 'hotspot primitive-strike cat-node';
-        el.style.left = lx + '%'; el.style.top = ly + '%';
-        el.innerHTML = `<svg class="hotspot-svg" viewBox="0 0 64 64">
-          <circle class="hotspot-bg-circle" cx="32" cy="32" r="26"/>
-          <circle class="hotspot-progress-circle" cx="32" cy="32" r="26"/>
-          <circle class="strike-closer" cx="32" cy="32" r="${STRIKE_R_MAX}"/></svg>
-          <div class="hotspot-inner"><span class="hotspot-icon">&#128296;</span></div>`;
-        const entry = {
-          id: ptId, primitive: 'strike', element: el,
-          progressCircle: el.querySelector('.hotspot-progress-circle'),
-          closerCircle: el.querySelector('.strike-closer'),
-          icon: el.querySelector('.hotspot-icon'),
-          hitsNeeded: Math.max(1, pt.hitsNeeded || 4), hits: 0,
-          unlockAfter: (typeof pt.unlockAfter === 'number') ? pt.unlockAfter : null,
-          lockUntilOthers: false, progress: 0, completed: false, visible: true,
-        };
-        pointsMap[ptId] = entry;
-        if (entry.unlockAfter && entry.unlockAfter > 0) el.classList.add('locked');
-        el.addEventListener('mousedown', (e) => {
-          if (e.button !== 0 || entry.completed) return;
-          if (!isPointUnlocked(entry)) {
-            el.classList.add('strike-miss');
-            setTimeout(() => el.classList.remove('strike-miss'), 170);
-            e.preventDefault(); return;
-          }
-          if (!entry._focused) { entry._focused = true; postNui('minigamePointStart', { id: ptId }); }
-          strikeAttempt(entry);
-          e.preventDefault();
-        });
-      }
-      stage.appendChild(el);
-    });
-
-    _catPanelActive = true;
-    catUpdateTool();
-    stopStrikeLoop();
-    if (points.some((p) => p.primitive === 'strike')) {
-      strikeRaf = requestAnimationFrame(strikeLoop);
     }
   }
 

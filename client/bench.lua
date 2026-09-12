@@ -12,7 +12,10 @@ local function benchRecipeLabel(recipe)
     return recipe.label or L('notify_generic_error')
 end
 
+local clearBenchPart -- fwd decl
+
 local function clearBench(id)
+    if clearBenchPart then clearBenchPart(id) end
     local ent = BenchEntities[id]
     if ent and DoesEntityExist(ent) then
         exports.ox_target:removeLocalEntity(ent)
@@ -64,7 +67,7 @@ end
 
 local takePartFromBench  -- fwd decl (usado no ox_target do prop)
 
-local function clearBenchPart(benchId)
+clearBenchPart = function(benchId)
     local slot = BenchPartProps[benchId]
     if slot and slot.prop and DoesEntityExist(slot.prop) then
         exports.ox_target:removeLocalEntity(slot.prop)

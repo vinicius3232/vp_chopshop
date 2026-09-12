@@ -1911,6 +1911,15 @@ local function addRaisedCarTargets(veh)
                 local cbOk, res = pcall(lib.callback.await, 'vp_chopshop:discardVehicle', false, netId)
                 if not cbOk then res = nil end
                 if res and res.ok then
+                    local data = JackstandData[veh]
+                    if data and data.props then
+                        for i = 1, #data.props do
+                            local prop = data.props[i]
+                            if DoesEntityExist(prop) then DeleteEntity(prop) end
+                        end
+                    end
+                    exports.ox_target:removeLocalEntity(veh)
+                    JackstandData[veh] = nil
                     local msg = L('notify_discard_success_fmt', res.payout)
                     if res.bonus then msg = msg .. ' ' .. L('notify_discard_bonus') end
                     VPChopNotify(msg, 'success')
@@ -2098,6 +2107,21 @@ function VPChopJackstandLowerCar(veh)
     JackstandBusy = false
     VPChopNotify(L('jackstand_lowered'), 'success')
 end
+
+-- Limpeza defensiva de props de macaco se o veículo for removido da cena (despawn / delete externo)
+AddEventHandler('entityRemoved', function(entity)
+    if not entity or entity == 0 then return end
+    local data = JackstandData[entity]
+    if data then
+        if data.props then
+            for i = 1, #data.props do
+                local prop = data.props[i]
+                if prop and DoesEntityExist(prop) then DeleteEntity(prop) end
+            end
+        end
+        JackstandData[entity] = nil
+    end
+end)
 
 exports('useBenchItem', function(_, _)
     VPChopStartBenchPlacement()

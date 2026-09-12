@@ -1,6 +1,6 @@
 # MASTER_IMPLEMENTATION_PLAN — vp_chopshop
 
-**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 1545 PASS / 0 FAIL / 1545 asserts  
+**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 2159 PASS / 0 FAIL / 2159 asserts  
 **Progresso:** ver [`STATUS.md`](../../STATUS.md) na raiz. Este documento é o roadmap e plano mestre de implementação.
 
 ---
@@ -36,29 +36,35 @@
 - **BROKER-5 / 5.1:** Persona unificada do Intermediário com interface contextual `ox_lib` e paridade integral em 5 idiomas (`pt`, `en`, `es`, `fr`, `tr`).
 - **BROKER-6 / 6.2:** Release Candidate gate, checklist de Live QA ([`docs/BROKER-6_LIVE_QA.md`](../BROKER-6_LIVE_QA.md)) e 12 invariantes canônicos congelados ([`docs/BROKER-6_RELEASE_INVARIANTS.md`](../BROKER-6_RELEASE_INVARIANTS.md)).
 
+### ✅ FASE 4 — Camada de Crime & Perícia Policial Profunda (v1.18)
+- **P4.1 — `EvidenceBridge` Unificado:** Bridge multi-framework com detecção dinâmica de `qbx_policejob`, `ox_evidence`, `evidences` (CFX) ou standalone inerte.
+- **P4.2 — Sistema de Rastreadores GPS / LoJack:** Veículos de alto valor com chance de rastreador ativo emitindo pings periódicos à polícia; minigame com alicate de corte para desativação física (`ActionSession(kind='tracker_removal')`).
+- **P4.3 — Alertas Dispatch & Polícia Integrada:** Sistema de despacho e alertas de furto de catalisador/corte estrutural via `DispatchBridge`.
+- **P4.4 — Scanner Policial & Séries Adulteradas:** Item policial `parts_scanner` e `forensic_kit` para perícia veicular (estado do motor, catalisador, VIN raspado, placa falsa e GPS).
+- **v1.18-RC — Release Gate:** Homologado com 55 checks de release gate e 2038+ asserts (PR #52).
+
+### ✅ FASE 4.5 — Expansão de Minigames Físicos & Polimento (v1.18.2)
+- **Minigame SVG de Catalisador:** Painel interativo de corte de escapamento e fixadores em veículos de rua.
+- **Minigame de Raspagem de Serial:** Lixamento abrasivo de números de série na bancada via painel interativo.
+- **Desmonte com Martelo Pneumático:** Desmonte sonoro/vibratório de peças pesadas na bancada.
+- **Auditoria v1.18:** Resolução de leaks de jackstands e props de bancada, otimização de IPC NUI por frame e harness com 2159 asserts.
+
 ---
 
-## 3. Roadmap de Implementação Futura (v1.18+)
+## 3. Roadmap de Implementação Futura (v1.19+ / Fases 5 a 9)
+> Especificações completas disponíveis na suíte de RFCs canônicas em [`docs/future/`](../future/).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       ROADMAP PÓS-v1.17 (FASES FUTURAS)                     │
+│                       ROADMAP PÓS-v1.18 (FASES FUTURAS)                     │
 ├───────────────────┬─────────────────────────────────────────────────────────┤
-│ FASE 4 (v1.18)    │ Camada de Crime & Perícia Policial Profunda (Forense V2) │
 │ FASE 5 (v1.19)    │ Adaptadores Reais de Oficina Mecânica (Workshop Live)   │
 │ FASE 6 (v1.20)    │ Territórios de Gangue & Chop Zones (Gangs Integration)  │
 │ FASE 7 (v1.21)    │ Reconstrução Veicular & VIN Rebirth (Veículo Limpo)     │
 │ FASE 8 (v1.22)    │ Emboscadas V2, Sindicato Rival & Polish de Áudio/VFX    │
+│ FASE 9 (v1.23)    │ Logística Clandestina, Desmanche Náutico & Exportação   │
 └───────────────────┴─────────────────────────────────────────────────────────┘
 ```
-
----
-
-### 🎯 FASE 4 (v1.18) — Camada de Crime & Perícia Policial Profunda
-- **P4.1 — `EvidenceBridge` Unificado:** Bridge multi-framework com detecção dinâmica de `qbx_policejob`, `ox_evidence`, `evidences` (CFX) ou standalone inerte.
-- **P4.2 — Sistema de Rastreadores GPS / LoJack:** Veículos de alto valor com chance de rastreador ativo emitindo pings periódicos à polícia; minigame com ferramenta de corte para desativação física (`ActionSession(kind='tracker_removal')`).
-- **P4.3 — Scanner Policial & Séries Adulteradas:** Item policial `parts_scanner` para perícia forense de números de série gravados e forjados em inventários e veículos.
-- **P4.4 — Release Gate v1.18:** Specs de integração policial e checklist de Live QA forense.
 
 ---
 
@@ -87,6 +93,13 @@
 - **P8.1 — Emboscadas Táticas por Heat:** NPCs de sindicatos rivais interceptam transportes de peças e veículos valiosos.
 - **P8.2 — Retaliação de Contrato:** Cobradores armados enviados contra jogadores que descumprem contratos de alta confiança.
 - **P8.3 — Polish Audiovisual:** Efeitos sonoros espaciais dedicados e partículas de corte/solda aprimoradas.
+
+---
+
+### 🎯 FASE 9 (v1.23) — Logística Clandestina, Desmanche Náutico & Exportação
+- **P9.1 — Cargas em Containers Marítimos:** Empacotamento de lotes de peças e veículos inteiros em docas portuárias.
+- **P9.2 — Desmanche de Embarcações:** Desmanche aquático de lanchas e jet-skis com ferramentas estanques.
+- **P9.3 — Exportação Internacional:** Rotas de entrega por cargueiros com janelas temporais dinâmicas e patrulha costeira.
 
 ---
 

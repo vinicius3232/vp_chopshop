@@ -247,16 +247,18 @@ function Core.Start(vehicle, profileName, opts)
             break
         end
 
-        -- Atualizar coordenadas dos pontos projetados na tela
-        local updatedPoints = {}
-        for _, pt in ipairs(points) do
-            updatedPoints[#updatedPoints + 1] = buildNuiPoint(pt)
-        end
+        -- Atualizar coordenadas dos pontos projetados na tela (ignora em painéis estáticos)
+        if not profile.panel then
+            local updatedPoints = {}
+            for _, pt in ipairs(points) do
+                updatedPoints[#updatedPoints + 1] = buildNuiPoint(pt)
+            end
 
-        SendNUIMessage({
-            action = 'minigame:updatePoints',
-            data = { points = updatedPoints }
-        })
+            SendNUIMessage({
+                action = 'minigame:updatePoints',
+                data = { points = updatedPoints }
+            })
+        end
     end
 
     -- 6) Teardown garantido

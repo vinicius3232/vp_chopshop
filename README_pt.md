@@ -63,20 +63,27 @@ Sistema de desmanche (chop shop) para FiveM: macaco hidráulico → desmonte em 
 
 ---
 
-Sistema de **desmanche** (chop shop) para FiveM: o jogador usa um **macaco hidráulico** (`chopshop_jackstand`) para levantar qualquer veículo e desmontar peças em 4 fases progressivas, com recompensas em materiais, venda de pneus a NPC e emboscadas opcionais. Pensado para stacks com **ox_lib**, **ox_target**, **ox_inventory** e **oxmysql**.
+Sistema completo de **desmanche** (chop shop) para FiveM: macaco hidráulico → minigames 3D físicos (rodas, painéis, motor com parafusadeira, carcaça com maçarico) → furto de catalisador de rua → raspagem de número de série / desmonte com martelo pneumático na bancada → logística de pneus → mercado dinâmico e contratos pessoais com o Intermediário (Chop Broker) → barramento SAGA para abastecimento de oficinas mecânicas → sistema policial forense (scanner veicular, detecção de VIN raspado, catalisador furtado, rastreadores GPS LoJack).
 
 ---
 
-## Requisitos obrigatórios
+## Compatibilidade de Framework & Dependências
+
+### Frameworks Suportados (Auto-detectados via Bridge)
+- **QBox (`qbx_core`)** — Suporte nativo / Primeira classe (QBox-first).
+- **QBCore (`qb-core`)** — Suporte integral via camada Bridge.
+- **ESX Legacy (`es_extended`)** — Suporte integral via camada Bridge.
+
+### Dependências Obrigatórias (Stack OX)
 
 | Recurso | Uso |
 |---------|-----|
-| `ox_lib` | Menus, progress bars, skillcheck, callbacks |
-| `ox_target` | Interação no veículo levantado, bancada, soldadora e NPC |
-| `ox_inventory` | Itens, add/remove de materiais |
-| `oxmysql` | Persistência de bancadas e soldadoras |
+| `ox_lib` | Menus de contexto, interfaces, progress bars, skillcheck, callbacks server-authoritative |
+| `ox_target` | Interação física no veículo levantado, bancada, soldadora e NPC Intermediário |
+| `ox_inventory` | Gestão e metadados de itens, peças seriadas, ferramentas e durabilidade |
+| `oxmysql` | Persistência de sessões, mercado elástico, contratos duráveis e ledger de carcaças |
 
-Ordem sugerida no `server.cfg`: dependências ox primeiro, depois `ensure vp_chopshop`.
+Ordem sugerida no `server.cfg`: dependências ox e framework primeiro, depois `ensure vp_chopshop`.
 
 ---
 

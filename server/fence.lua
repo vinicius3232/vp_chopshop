@@ -345,13 +345,6 @@ lib.callback.register('vp_chopshop:tyre:getPendingEntitlements', function(src)
     return TyreEntitlement.GetPendingForPlayer(src, 12)
 end)
 
-AddEventHandler('playerDropped', function()
-    local src = source
-    TruckLoadBusy[src]     = nil
-    TruckLoadCooldown[src] = nil
-    -- Entitlements REMOVED do jogador → LOST: TyreEntitlement.CleanupPlayer (próprio hook).
-end)
-
 -- [PR-E] O estado econômico do truck (entitlements STORED → LOST) é tratado pelo
 -- hook entityRemoved de server/logistics/truck_storage.lua (TruckStorage.OnTruckRemoved).
 -- `TruckStorageBusy` (por storageId) é sempre liberado pelo próprio handler.
@@ -1641,6 +1634,7 @@ end)
 AddEventHandler('playerDropped', function()
     local src = source  -- [FIX L-1] localizar antes de qualquer yield potencial
     TrustCache[src] = nil
+    TruckLoadBusy[src] = nil
     TruckLoadCooldown[src] = nil
     SellTyresBusy[src] = nil  -- [H1 FIX] evitar mutex stuck se jogador desconectar mid-sale
     _sellItemsRateLimit[src] = nil
