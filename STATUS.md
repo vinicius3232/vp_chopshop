@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-12
-**Branch de trabalho:** `feat/v1.19-p5-workshop-live` (base: `docs/post-v118-future-roadmap-prep`)
+**Branch de trabalho:** `feat/v1.19-p5.4-p5.5-durable-parts` (base: `docs/post-v118-future-roadmap-prep`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **2214 PASS / 0 FAIL / 2214 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **2271 PASS / 0 FAIL / 2271 asserts**
 
 ---
 
@@ -44,9 +44,12 @@ POST-v1.18 — Future Roadmap Reconciliation (RFC 5-9)✅ CONCLUÍDO (Docs / RFC
 AUDIT-v1.18— Limpeza de Leaks/Props, NUI & Docs      ✅ APLICADO & HARNESS 2159 PASS
 ─────────────────────────────────────────────────────────────────────────
 FASE 5 (v1.19) Adaptadores de Oficina Mecânica (Workshop Live):
-P5.1       — Adapter QBox Mechanics (qbx_mechanics/customs) ✅ IMPLEMENTADO & 33 ASSERTS PASS
-P5.2       — Adapter Multi-API (qs-mechanics / renzu_customs)✅ IMPLEMENTADO & MULTI-API PASS
-P5.3       — Catálogo de Encomendas B2B & Escrow Terminal  ✅ IMPLEMENTADO & 22 ASSERTS PASS
+P5.1       — Adapter QBox Mechanics (qbx_mechanics/customs) ✅ HOMOLOGADO (PR #57)
+P5.2       — Adapter Multi-API (qs-mechanics / renzu_customs)✅ HOMOLOGADO (PR #57)
+P5.3       — Catálogo de Encomendas B2B & Escrow Terminal  ✅ HOMOLOGADO (PR #57)
+P5.4       — Peças Físicas Duráveis & Proveniência V2      ✅ IMPLEMENTADO & 14 ASSERTS (PR #58)
+P5.5       — Recuperação Seletiva de Boot (RestartRecovery)✅ IMPLEMENTADO & RECONCILER ATÔMICO (PR #58)
+P5-RC      — Workshop Live Release Gate (10 Invariantes)   ✅ 10/10 PASS & PR #58 ABERTO
 ─────────────────────────────────────────────────────────────────────────
 ```
 
