@@ -47,6 +47,12 @@ Frentes fora da numeração P5–P9, executadas em paralelo à homologação da 
 
 ## FASE 5 — v1.19: WORKSHOP LIVE & DURABLE PARTS FOUNDATION
 
+> **RFCs Detalhados:**
+> - [RFC P5.1: Workshop SAGA Protocol & QBox Mechanics Adapter](rfc/RFC_P51_WORKSHOP_SAGA_ADAPTERS.md)
+> - [RFC P5.4: Persistent Physical Part & Provenance V2](rfc/RFC_P54_PERSISTENT_PHYSICAL_PART.md)
+> - [RFC P5.5: Selective Restart Recovery & Boot Reconciliation](rfc/RFC_P55_SELECTIVE_RESTART_RECOVERY.md)
+> - [Guia Tático: Phase 5 Kickoff Blueprint](PHASE5_KICKOFF.md)
+
 Esta fase conecta a infraestrutura transacional do `WorkshopBridge` (congelada na v1.17) a ecossistemas mecânicos reais e estabelece a camada de **Peça Física Durável e Persistente** com recuperação seletiva pós-restart.
 
 ### P5.0 — Upstream Workshop Contract Audit
@@ -58,6 +64,7 @@ Esta fase conecta a infraestrutura transacional do `WorkshopBridge` (congelada n
 - **Objetivo:** Implementar o adaptador oficial para o ecossistema QBox Mechanics dentro de `bridge/workshop.lua`.
 - **Invariante:** Zero lógica de oficina dentro do core de desmanche. O `WorkshopBridge` mantém a autoridade estrita da SAGA em 2 fases (`PREPARED → COMMITTED / ABORTED`) com persistência na tabela `vp_chop_workshop_journal`.
 - **Isolamento:** Falhas na oficina resultam em abort automático e quarentena segura da peça física.
+- **RFC:** [RFC P5.1: Workshop SAGA Protocol & QBox Mechanics Adapter](rfc/RFC_P51_WORKSHOP_SAGA_ADAPTERS.md).
 
 ### P5.2 — Additional Workshop Adapters
 - **Objetivo:** Adicionar adaptadores adicionais auditados (ex.: Renzu / QS) baseados na demanda real do servidor.
@@ -82,12 +89,14 @@ Esta fase conecta a infraestrutura transacional do `WorkshopBridge` (congelada n
   - `legalState` (`stolen` | `scratched` | `forged` | `legal` | `refurbished`)
   - `installedVehicle` (destino terminal se acoplada a um veículo)
 - **Invariante:** `PartEntitlement` continua como autoridade de transporte/posse; a peça durável armazena o histórico e ciclo de vida.
+- **RFC:** [RFC P5.4: Persistent Physical Part & Provenance V2](rfc/RFC_P54_PERSISTENT_PHYSICAL_PART.md).
 
 ### P5.5 — Selective Restart Recovery
 - **Objetivo:** Implementar recuperação seletiva pós-restart baseada no estudo `RESTART_RECOVERY_STUDY.md`.
 - **Classificação de Estado:**
   - **Efêmero (Limpo no Boot):** `ChopSession`, `ActionSession`, `ProcessSession`, cooldowns temporários em memória.
   - **Durável (Reconciliado no Boot):** `vp_chop_carcass` (tombstones), `vp_chop_workshop_journal` (SAGA em andamento), `vp_chop_physical_parts` (peças duráveis no mundo/inventário), `vp_chop_tyre_entitlement`.
+- **RFC:** [RFC P5.5: Selective Restart Recovery & Boot Reconciliation](rfc/RFC_P55_SELECTIVE_RESTART_RECOVERY.md).
 
 ### P5-RC — Workshop Live Release Gate
 - Release gate estático (100% de asserts novos cobrindo SAGA + durabilidade).
@@ -96,6 +105,8 @@ Esta fase conecta a infraestrutura transacional do `WorkshopBridge` (congelada n
 ---
 
 ## FASE 6 — v1.20: CRIMINAL NETWORK & GANGS
+
+> **RFC Detalhado:** [RFC Fase 6: Criminal Networks, Territories & Gangs Integration](rfc/RFC_PHASE6_GANGS_TERRITORIES.md)
 
 Integração com o ecossistema social e territorial do `vp_gangs`, preservando rigorosamente o boundary de domínio.
 
@@ -126,6 +137,8 @@ Integração com o ecossistema social e territorial do `vp_gangs`, preservando r
 ---
 
 ## FASE 7 — v1.21: PARTS LIFECYCLE & VEHICLE REBUILDING
+
+> **RFC Detalhado:** [RFC Fase 7: Parts Lifecycle, Vehicle Compatibility & VIN Rebirth](rfc/RFC_PHASE7_REBUILDING_VIN_REBIRTH.md)
 
 Evolução da cadeia mecânica: descaracterização, restauração, compatibilidade e montagem de veículos completos.
 
@@ -164,6 +177,8 @@ Evolução da cadeia mecânica: descaracterização, restauração, compatibilid
 
 ## FASE 8 — v1.22: ADVANCED ECONOMY & LIVING MARKET
 
+> **RFC Detalhado:** [RFC Fase 8: Living Market & Advanced Dynamic Economy](rfc/RFC_PHASE8_ADVANCED_ECONOMY.md)
+
 ### P8.1 — Regional Market Multipliers
 - A demanda do mercado dinâmico varia por região geográfica (ex.: Norte / Sul / Docas / Sandy Shores) sem quebrar o piso e teto do `BrokerMarket`.
 
@@ -188,6 +203,8 @@ Evolução da cadeia mecânica: descaracterização, restauração, compatibilid
 ---
 
 ## FASE 9 — v1.23: OPERATIONS, TELEMETRY & SCALE
+
+> **RFC Detalhado:** [RFC Fase 9: Operations, Telemetry, Chaos QA & Scale](rfc/RFC_PHASE9_OPERATIONS_SCALE.md)
 
 ### P9.1 — Broker & Workshop Telemetry
 - Dashboard de métricas em tempo real para staff (volume financeiro movimentado, taxa de conversão B2B, índice de quarentenas).

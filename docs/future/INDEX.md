@@ -28,7 +28,15 @@ docs/future/
 ├── POST_V118_ROADMAP.md                 ── Roadmap canônico macro e detalhado (Fases 5 a 9 + v2.x)
 ├── ARCHITECTURE_DEPENDENCY_MAP.md      ── Grafo de dependências duras/opcionais e boundaries de domínio
 ├── LEGACY_IDEA_RECONCILIATION.md       ── Matriz de conciliação de RFCs legados (Absorbed/Superseded/etc.)
-└── PHASE5_KICKOFF.md                   ── Especificação acionável de engenharia para a Fase 5 (P5.0 → P5.5)
+├── PHASE5_KICKOFF.md                   ── Especificação acionável de engenharia para a Fase 5 (P5.0 → P5.5)
+└── rfc/
+    ├── RFC_P51_WORKSHOP_SAGA_ADAPTERS.md  ── Protocolo SAGA de Oficinas e Adapter QBox (Fase 5)
+    ├── RFC_P54_PERSISTENT_PHYSICAL_PART.md ── Peça Física Durável & Proveniência V2 (Fase 5)
+    ├── RFC_P55_SELECTIVE_RESTART_RECOVERY.md ── Reconciliação no Boot & Recuperação Pós-Restart (Fase 5)
+    ├── RFC_PHASE6_GANGS_TERRITORIES.md     ── Redes Criminosas, Zonas de Desmanche & Trap Phone (Fase 6)
+    ├── RFC_PHASE7_REBUILDING_VIN_REBIRTH.md── Compatibilidade Mecânica & Renascimento de VIN (Fase 7)
+    ├── RFC_PHASE8_ADVANCED_ECONOMY.md      ── Mercado Vivo, Demanda Unificada & Sinks (Fase 8)
+    └── RFC_PHASE9_OPERATIONS_SCALE.md      ── Telemetria, Testes de Caos & Resmon Gates (Fase 9)
 ```
 
 ---
