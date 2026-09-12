@@ -737,6 +737,20 @@ _G.Config = {
             car_parts  = { amount = 1, chance = 1.0 },
         },
     },
+    Gangs = {
+        Enable = true,
+        TerritoryTax = 0.15,
+        OwnerBonus = 0.10,
+        HeatReductionMultiplier = 0.50,
+        RequireInformantForAlert = true,
+        AlertCooldownSeconds = 120,
+    },
+    Phone = {
+        Enable = true,
+        Provider = 'auto',
+        Sender = 'Informante Anônimo',
+        DefaultSubject = 'Alerta de Atividade Clandestina',
+    },
 }
 -- [UX-A] Stubs de client/NUI/Câmera/Vector3 p/ testes do Interaction Core
 if not _G.vector3 then
@@ -841,6 +855,8 @@ dofile(base .. '/bridge/workshop_community.lua')         -- [v1.19 P5.2] provê 
 dofile(base .. '/server/broker/b2b_orders.lua')          -- [v1.19 P5.3] provê B2BOrders
 dofile(base .. '/server/logistics/physical_part.lua')     -- [v1.19 P5.4] provê PhysicalPart
 dofile(base .. '/server/session/restart_recovery.lua')    -- [v1.19 P5.5] provê RestartRecovery
+dofile(base .. '/bridge/phone.lua')                  -- [v1.20 P6.3] provê PhoneBridge
+dofile(base .. '/server/broker/gang_contracts.lua')    -- [v1.20 P6.4] provê GangContracts
 dofile(base .. '/server/tracker.lua')                  -- [v1.18 P4.2] provê TrackerManager
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 dofile(base .. '/server/heat.lua')                    -- [v1.18 P4.4.1] provê VPChopIsVinScratched / HeatCheck
@@ -862,6 +878,9 @@ dofile(base .. '/server/session/carcass_ledger_spec.lua')      -- [P0.4]
 dofile(base .. '/server/session/action_session_spec.lua')      -- [PR-F/G]
 dofile(base .. '/shared/registry/registry_spec.lua')          -- [SPIKE PR-I]
 dofile(base .. '/bridge/vp_gangs_spec.lua')                   -- [INT-01A]
+dofile(base .. '/bridge/phone_spec.lua')                      -- [v1.20 P6.3 PhoneBridge]
+dofile(base .. '/server/broker/gang_contracts_spec.lua')      -- [v1.20 P6.4 GangContracts]
+dofile(base .. '/bridge/gang_territory_release_gate_spec.lua')-- [v1.20 P6-RC Gangs & Territories]
 dofile(base .. '/server/partserial_spec.lua')                 -- [UX-0 QA findings]
 dofile(base .. '/client/minigame/minigame_spec.lua')         -- [UX-A Interaction Core]
 dofile(base .. '/server/session/fence_payment_spec.lua')     -- [v1.16-FENCE-PAY-1]

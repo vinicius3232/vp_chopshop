@@ -72,10 +72,12 @@
 
 ---
 
-### 🎯 FASE 6 (v1.20) — Territórios de Gangue & Chop Zones (`VP_GANGS`)
-- **P6.1 — Taxa Territorial de Desmanche:** Desmanchar em território controlado por facção deposita automaticamente uma porcentagem configurável no cofre da gangue.
-- **P6.2 — Bônus de Facção:** Gangues donas de setores industriais ganham bônus de cotação em contratos do Broker.
-- **P6.3 — Alerta de Invasão de Área:** Desmanche em território rival sem aliança emite alerta de rádio aos membros da facção local.
+### 🎯 FASE 6 (v1.20) — Territórios de Gangue & Chop Zones (`VP_GANGS`) ✅ CONCLUÍDO (PR Aberto)
+- **P6.1 — Taxa Territorial de Desmanche:** Desmanchar ou vender em território controlado por facção retém automaticamente porcentagem configurável (15%) e credita no cofre da gangue dominante via `VPChopGangs.CreditTerritoryTax`.
+- **P6.2 — Bônus de Facção & Alívio de Heat:** Membros da facção dominante ganham bônus (+10%) no payout e 50% de redução na geração de heat policial/emboscadas ao operar em território próprio.
+- **P6.3 — Alerta de Invasão & Informantes [REQUISITO CANÔNICO]:** Desmanche em território rival SÓ emite sinalização SE a gangue dona possuir informante/NPC ativo no turf (`VPChopGangs.HasTurfInformant`). Notificação despachada diretamente para smartphones via `PhoneBridge` (`lb-phone`, `qs-smartphone`, `yphone`, `gksphone`, `npwd`, `custom`).
+- **P6.4 — Contratos Cooperativos de Gangue:** `server/broker/gang_contracts.lua` com squad de membros, consumo de peças físicas duráveis e rateio de lucros 100% server-authoritative.
+- **P6-RC — Release Gate de Territórios:** 19 asserts cobrindo invariantes INV-P6-01 a INV-P6-08 (Harness em 2311 PASS / 0 FAIL).
 
 ---
 

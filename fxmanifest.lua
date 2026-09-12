@@ -166,6 +166,11 @@ server_scripts {
     -- ÚNICO arquivo que conhece exports.vp_gangs. Fail-safe se vp_gangs stopped.
     'bridge/vp_gangs.lua',
     'bridge/vp_gangs_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
+    'bridge/phone.lua',          -- [v1.20 P6.3] PhoneBridge (suporte multi-smartphone)
+    'bridge/phone_spec.lua',     -- [v1.20 P6.3] self-gated (vp_chopshop_selftest 1)
+    'server/broker/gang_contracts.lua', -- [v1.20 P6.4] Contratos cooperativos de gangue
+    'server/broker/gang_contracts_spec.lua', -- [v1.20 P6.4] self-gated (vp_chopshop_selftest 1)
+    'bridge/gang_territory_release_gate_spec.lua', -- [v1.20 P6-RC] Release Gate (self-gated)
     -- [SERIAL] número de série da car_parts. Depois de db.lua (helpers de série),
     -- progression.lua (VPChopGetProgression) e bridges (Inv*, Bridge*, IsValidSource);
     -- ANTES de advanced_chop.lua (que usa VPChopAddStolenCarParts) e main.lua.

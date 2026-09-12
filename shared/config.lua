@@ -1504,3 +1504,38 @@ Config.Broker = {
         },
     },
 }
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.20 FASE 6] Config.Gangs — Criminal Network & Turf Economy          ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.Gangs = {
+    Enable = true,
+    --- Taxa de pedágio territorial cobrada de desmanchadores neutros/rivais (0.15 = 15%)
+    TerritoryTax = 0.15,
+    --- Bônus econômico para membros dominantes desmanchando em seu próprio território (0.10 = +10%)
+    OwnerBonus = 0.10,
+    --- Multiplicador de calor policial em território próprio (0.50 = 50% de redução no heat)
+    HeatReductionMultiplier = 0.50,
+    --- [REQUISITO CANÔNICO] O alerta territorial de intrusão SÓ dispara se a gangue possuir
+    --- um informante/sistema de olheiros ativo no turf.
+    RequireInformantForAlert = true,
+    --- Cooldown anti-spam de alertas de intrusão por território em segundos
+    AlertCooldownSeconds = 120,
+}
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.20 P6.3] Config.Phone — Multi-Smartphone Notifications             ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.Phone = {
+    Enable = true,
+    --- Provedores suportados: 'auto' | 'lb-phone' | 'qs-smartphone' | 'yphone' | 'gksphone' | 'npwd' | 'custom' | 'none'
+    Provider = 'auto',
+    Sender = 'Informante Anônimo',
+    DefaultSubject = 'Atividade de Desmanche Ilegal',
+    --- Export customizado opcional caso Provider = 'custom'
+    CustomExport = {
+        resource = 'custom_phone',
+        method = 'SendNotification',
+    },
+}
+

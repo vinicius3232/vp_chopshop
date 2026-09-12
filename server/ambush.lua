@@ -215,6 +215,19 @@ function VPChopAmbushMaybe(src, netId, plate)
     -- Multiplicador de heat: veículos quentes = mais emboscadas
     local heatMult = (plate and plate ~= '') and VPChopHeatGetMultiplier(plate) or 1.0
 
+    -- [v1.20 P6.2] Alívio de heat policial para membros dominantes operando em território próprio
+    if Config.Gangs and Config.Gangs.Enable ~= false and rawget(_G, 'VPChopGangs') and VPChopGangs.GetTerritory then
+        local vehCoords = GetEntityCoords(veh)
+        local turf = VPChopGangs.GetTerritory(vehCoords)
+        if turf and turf.inside and turf.gangId then
+            local myGang = VPChopGangs.GetPlayerGang(src)
+            if myGang and myGang == turf.gangId then
+                local red = tonumber(Config.Gangs.HeatReductionMultiplier) or 0.50
+                heatMult = heatMult * red
+            end
+        end
+    end
+
     netId = tonumber(netId)
     if not netId then return end
 
