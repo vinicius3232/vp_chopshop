@@ -836,6 +836,9 @@ dofile(base .. '/bridge/dispatch.lua')                -- [v1.18 P4.3] provê Dis
 dofile(base .. '/server/broker/market.lua')              -- [v1.17 BROKER-1] provê BrokerMarket
 dofile(base .. '/server/broker/contracts.lua')           -- [v1.17 BROKER-3] provê BrokerContracts
 dofile(base .. '/bridge/workshop.lua')                   -- [v1.17 BROKER-4] provê WorkshopBridge
+dofile(base .. '/bridge/workshop_qbx.lua')               -- [v1.19 P5.1] provê QBXWorkshopAdapter
+dofile(base .. '/bridge/workshop_community.lua')         -- [v1.19 P5.2] provê QS/Renzu/Custom Adapters
+dofile(base .. '/server/broker/b2b_orders.lua')          -- [v1.19 P5.3] provê B2BOrders
 dofile(base .. '/server/tracker.lua')                  -- [v1.18 P4.2] provê TrackerManager
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 dofile(base .. '/server/heat.lua')                    -- [v1.18 P4.4.1] provê VPChopIsVinScratched / HeatCheck
@@ -863,6 +866,8 @@ dofile(base .. '/server/broker/market_sim_spec.lua')         -- [v1.17 BROKER-1]
 dofile(base .. '/server/broker/fence_integration_spec.lua')     -- [v1.17 BROKER-2]
 dofile(base .. '/server/broker/contracts_spec.lua')         -- [v1.17 BROKER-3]
 dofile(base .. '/server/broker/workshop_spec.lua')          -- [v1.17 BROKER-4]
+dofile(base .. '/server/broker/workshop_adapters_spec.lua')  -- [v1.19 P5.1/P5.2]
+dofile(base .. '/server/broker/b2b_orders_spec.lua')         -- [v1.19 P5.3]
 dofile(base .. '/server/broker/npc_context_spec.lua')       -- [v1.17 BROKER-5]
 dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS V2]
 dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]

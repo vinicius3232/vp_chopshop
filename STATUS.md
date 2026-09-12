@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-12
-**Branch de trabalho:** `docs/post-v118-future-roadmap-prep` (base: `pr-h/v1.15-delivercar-terminal-hardening`)
+**Branch de trabalho:** `feat/v1.19-p5-workshop-live` (base: `docs/post-v118-future-roadmap-prep`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **2159 PASS / 0 FAIL / 2159 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **2214 PASS / 0 FAIL / 2214 asserts**
 
 ---
 
@@ -43,6 +43,11 @@ MINIGAME-3 — Desmonte Estrutural Martelo Pneumático  ✅ HOMOLOGADO & MERGED 
 POST-v1.18 — Future Roadmap Reconciliation (RFC 5-9)✅ CONCLUÍDO (Docs / RFC Suite)
 AUDIT-v1.18— Limpeza de Leaks/Props, NUI & Docs      ✅ APLICADO & HARNESS 2159 PASS
 ─────────────────────────────────────────────────────────────────────────
+FASE 5 (v1.19) Adaptadores de Oficina Mecânica (Workshop Live):
+P5.1       — Adapter QBox Mechanics (qbx_mechanics/customs) ✅ IMPLEMENTADO & 33 ASSERTS PASS
+P5.2       — Adapter Multi-API (qs-mechanics / renzu_customs)✅ IMPLEMENTADO & MULTI-API PASS
+P5.3       — Catálogo de Encomendas B2B & Escrow Terminal  ✅ IMPLEMENTADO & 22 ASSERTS PASS
+─────────────────────────────────────────────────────────────────────────
 ```
 
 ## Resumo dos Testes In-Game Realizados (100% Aprovados)
@@ -61,3 +66,5 @@ AUDIT-v1.18— Limpeza de Leaks/Props, NUI & Docs      ✅ APLICADO & HARNESS 21
 12. **Minigame SVG de Catalisador:** Painel interativo dedicado na rua com corte das duas pontas do escapamento e desmonte de presilhas.
 13. **Minigame de Raspagem de Serial:** Lixamento de número de chassi/bloco do motor na bancada via painel abrasivo interativo.
 14. **Desmonte com Martelo Pneumático:** Desmanche sonoro e vibratório de carcaça e peças na bancada com ferramenta pesada.
+15. **Adapter QBox Mechanics & SAGA (P5.1/P5.2):** SAGA transacional 2-phase com retenção de escrow em sociedades (`qbx_management` / `ox_inventory`) e entrega em cofres de oficina.
+16. **Catálogo B2B & Terminal de Ordens (P5.3):** Ordens de compra de oficinas integradas ao Broker com pagamento premium e liquidação atômica anti-race condition.

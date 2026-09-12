@@ -1,6 +1,6 @@
 # MASTER_IMPLEMENTATION_PLAN — vp_chopshop
 
-**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 2159 PASS / 0 FAIL / 2159 asserts  
+**Base:** `pr-h/v1.15-delivercar-terminal-hardening` · **Harness:** 2214 PASS / 0 FAIL / 2214 asserts  
 **Progresso:** ver [`STATUS.md`](../../STATUS.md) na raiz. Este documento é o roadmap e plano mestre de implementação.
 
 ---
@@ -49,29 +49,26 @@
 - **Desmonte com Martelo Pneumático:** Desmonte sonoro/vibratório de peças pesadas na bancada.
 - **Auditoria v1.18:** Resolução de leaks de jackstands e props de bancada, otimização de IPC NUI por frame e harness com 2159 asserts.
 
+### ✅ FASE 5 — Adaptadores de Oficina Mecânica (Workshop Live) (v1.19)
+- **P5.1 — Adapter QBox Mechanics (`qbx_mechanics` / `qbx_customs`):** Conexão do provider SAGA real com contas de sociedade (`qbx_management`) e entrega em cofres/stashes do `ox_inventory`.
+- **P5.2 — Adapter QS-Mechanic / Renzu / Custom:** Integração multi-API para ecossistemas mecânicos da comunidade e conector universal via exports.
+- **P5.3 — Catálogo de Encomenda B2B & Escrow:** Ordens de compra de peças emitidas por oficinas retidas em garantia no `vp_chopshop`, mescladas aos contratos do Broker com liquidação e cancelamento atômicos.
+
 ---
 
-## 3. Roadmap de Implementação Futura (v1.19+ / Fases 5 a 9)
+## 3. Roadmap de Implementação Futura (v1.20+ / Fases 6 a 9)
 > Especificações completas disponíveis na suíte de RFCs canônicas em [`docs/future/`](../future/).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       ROADMAP PÓS-v1.18 (FASES FUTURAS)                     │
+│                       ROADMAP PÓS-v1.19 (FASES FUTURAS)                     │
 ├───────────────────┬─────────────────────────────────────────────────────────┤
-│ FASE 5 (v1.19)    │ Adaptadores Reais de Oficina Mecânica (Workshop Live)   │
 │ FASE 6 (v1.20)    │ Territórios de Gangue & Chop Zones (Gangs Integration)  │
 │ FASE 7 (v1.21)    │ Reconstrução Veicular & VIN Rebirth (Veículo Limpo)     │
 │ FASE 8 (v1.22)    │ Emboscadas V2, Sindicato Rival & Polish de Áudio/VFX    │
 │ FASE 9 (v1.23)    │ Logística Clandestina, Desmanche Náutico & Exportação   │
 └───────────────────┴─────────────────────────────────────────────────────────┘
 ```
-
----
-
-### 🎯 FASE 5 (v1.19) — Adaptadores de Oficina Mecânica (Workshop Live)
-- **P5.1 — Adapter QBox Mechanics (`qbx_mechanics` / `qbx_customs`):** Conexão do provider SAGA real para abastecimento de peças clandestinas para oficinas de jogadores.
-- **P5.2 — Adapter QS-Mechanic / Renzu:** Integração por exports com sistemas populares da comunidade.
-- **P5.3 — Catálogo de Encomenda B2B:** Terminal de pedidos de oficinas para compra de peças raras com entrega via Broker.
 
 ---
 
