@@ -214,10 +214,20 @@ end)
 
 AddEventHandler('vp_chopshop:server:despawnFenceNpc', function()
     if not FenceNpcNetId then return end
-    local ent = NetworkGetEntityFromNetworkId(FenceNpcNetId)
-    if ent and ent ~= 0 and DoesEntityExist(ent) then DeleteEntity(ent) end
+    if not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(FenceNpcNetId) then
+        local ent = NetworkGetEntityFromNetworkId(FenceNpcNetId)
+        if ent and ent ~= 0 and DoesEntityExist(ent) then DeleteEntity(ent) end
+    end
     TriggerClientEvent('vp_chopshop:client:removeFenceNpc', -1, FenceNpcNetId)
     FenceNpcNetId = nil
+end)
+
+lib.callback.register('vp_chopshop:fence:getFenceState', function(src)
+    if not IsValidSource(src) then return nil end
+    return {
+        nwid = FenceNpcNetId,
+        locationIdx = CurrentLocationIdx,
+    }
 end)
 
 -- Spawn inicial ao carregar

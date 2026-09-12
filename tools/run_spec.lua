@@ -225,6 +225,13 @@ function NetworkGetEntityFromNetworkId(netId)
     if _G.FAKE_TRUCK and _G.FAKE_TRUCK[netId] then return netId + 90000 end
     return FAKE_VEH[netId] and (netId + 70000) or 0
 end
+function NetworkDoesEntityExistWithNetworkId(netId)
+    if not netId or netId == 0 then return false end
+    if _G.FAKE_TRUCK and _G.FAKE_TRUCK[netId] then return true end
+    if _G.FAKE_VEH and _G.FAKE_VEH[netId] then return true end
+    local ent = NetworkGetEntityFromNetworkId(netId)
+    return ent ~= 0 and ent ~= nil
+end
 function NetworkGetNetworkIdFromEntity(h)
     if not h or h == 0 then return 0 end
     if h >= 90000 then return h - 90000 end

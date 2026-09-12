@@ -5,6 +5,7 @@
 local FenceNpcEnt    = nil ---@type integer|nil
 local FenceBlip      = nil ---@type integer|nil
 local CurrentLocIdx  = 1
+local FenceNpcNetId  = nil ---@type integer|nil
 
 -- Cache de hashes de modelo de truck (calculado uma vez, não por-frame)
 local TruckModelHashes = nil
@@ -129,88 +130,143 @@ end
 
 -- ─── Setup NPC ───────────────────────────────────────────────────────────────
 
+local function attachFenceNpcTarget(ent)
+    local ok, trust = pcall(lib.callback.await, 'vp_chopshop:fence:getTrust', false)
+    trust = (ok and type(trust) == 'number') and trust or 0
+
+    local pOk, prog = pcall(lib.callback.await, 'vp_chopshop:getProgression', false)
+    local tier = (pOk and type(prog) == 'table' and prog.tier) or 1
+
+    local options = {}
+
+    options[#options + 1] = {
+        name     = 'vp_broker_talk',
+        label    = L('broker_target_talk'),
+        icon     = 'fa-solid fa-comments',
+        distance = 2.5,
+        onSelect = function()
+            openBrokerMainMenu()
+        end,
+    }
+
+    if trust >= 4 and tier >= 4 then
+        options[#options + 1] = {
+            name        = 'vp_fence_deliver_car',
+            label       = L('fence_target_deliver_car'),
+            icon        = 'fa-solid fa-car-burst',
+            distance    = 4.5,
+            canInteract = function()
+                return IsPedInAnyVehicle(PlayerPedId(), false)
+            end,
+            onSelect    = function()
+                deliverCar()
+            end,
+        }
+    end
+
+    exports.ox_target:addLocalEntity(ent, options)
+end
+
+local function applyFenceNpcSettings(ent)
+    FreezeEntityPosition(ent, true)
+    SetEntityInvincible(ent, true)
+    SetBlockingOfNonTemporaryEvents(ent, true)
+
+    local locCfg = Config.Fence and Config.Fence.Locations and Config.Fence.Locations[CurrentLocIdx]
+    if locCfg and locCfg.scenario and locCfg.scenario ~= '' then
+        TaskStartScenarioInPlace(ent, locCfg.scenario, 0, true)
+    end
+end
+
+local function updateFenceBlip()
+    local ok, trust = pcall(lib.callback.await, 'vp_chopshop:fence:getTrust', false)
+    trust = (ok and type(trust) == 'number') and trust or 0
+
+    local locs = Config.Fence and Config.Fence.Locations
+    if locs and locs[CurrentLocIdx] then
+        local c = locs[CurrentLocIdx].coords
+        if trust <= 0 then
+            removeFenceBlip()
+        elseif trust <= 2 then
+            setFenceBlip(c, false)
+        else
+            setFenceBlip(c, true)
+        end
+    end
+end
+
 RegisterNetEvent('vp_chopshop:client:setupFenceNpc', function(data)
     if not data or not data.nwid then return end
     CurrentLocIdx = data.locationIdx or 1
+    FenceNpcNetId = data.nwid
 
-    CreateThread(function()
-        local ent, tries = 0, 0
-        while (not ent or ent == 0 or not DoesEntityExist(ent)) and tries < 40 do
-            Wait(100)
-            ent = NetworkGetEntityFromNetworkId(data.nwid)
-            tries = tries + 1
-        end
-        if not ent or ent == 0 or not DoesEntityExist(ent) then return end
-
-        FenceNpcEnt = ent
-        FreezeEntityPosition(ent, true)
-        SetEntityInvincible(ent, true)
-        SetBlockingOfNonTemporaryEvents(ent, true)
-
-        -- Scenario do ped: aplicado client-side (era feito no server, mas TaskStartScenarioInPlace é client-only)
-        local locCfg = Config.Fence and Config.Fence.Locations and Config.Fence.Locations[CurrentLocIdx]
-        if locCfg and locCfg.scenario and locCfg.scenario ~= '' then
-            TaskStartScenarioInPlace(ent, locCfg.scenario, 0, true)
-        end
-
-        -- Buscar nível de trust e progressão (callbacks de setup inicial)
-        local ok, trust = pcall(lib.callback.await, 'vp_chopshop:fence:getTrust', false)
-        trust = (ok and type(trust) == 'number') and trust or 0
-
-        local pOk, prog = pcall(lib.callback.await, 'vp_chopshop:getProgression', false)
-        local tier = (pOk and type(prog) == 'table' and prog.tier) or 1
-
-        -- Blip baseado em trust
-        local locs = Config.Fence and Config.Fence.Locations
-        if locs and locs[CurrentLocIdx] then
-            local c = locs[CurrentLocIdx].coords
-            if trust <= 0 then
-                removeFenceBlip()
-            elseif trust <= 2 then
-                setFenceBlip(c, false)
-            else
-                setFenceBlip(c, true)
-            end
-        end
-
-        -- Montar targets: UMA interação principal com o Intermediário + deliverCar em veículo
-        local options = {}
-
-        options[#options + 1] = {
-            name     = 'vp_broker_talk',
-            label    = L('broker_target_talk'),
-            icon     = 'fa-solid fa-comments',
-            distance = 2.5,
-            onSelect = function()
-                openBrokerMainMenu()
-            end,
-        }
-
-        if trust >= 4 and tier >= 4 then
-            options[#options + 1] = {
-                name        = 'vp_fence_deliver_car',
-                label       = L('fence_target_deliver_car'),
-                icon        = 'fa-solid fa-car-burst',
-                distance    = 4.5,
-                canInteract = function()
-                    return IsPedInAnyVehicle(PlayerPedId(), false)
-                end,
-                onSelect    = function()
-                    deliverCar()
-                end,
-            }
-        end
-
-        exports.ox_target:addLocalEntity(FenceNpcEnt, options)
-    end)
+    -- Atualiza blip imediatamente no background sem depender do streaming de entidade
+    CreateThread(updateFenceBlip)
 end)
 
 RegisterNetEvent('vp_chopshop:client:removeFenceNpc', function(nwid)
-    if FenceNpcEnt then
-        exports.ox_target:removeLocalEntity(FenceNpcEnt)
-        FenceNpcEnt = nil
+    if FenceNpcEnt and DoesEntityExist(FenceNpcEnt) then
+        pcall(function() exports.ox_target:removeLocalEntity(FenceNpcEnt) end)
     end
+    FenceNpcEnt = nil
+    FenceNpcNetId = nil
     removeFenceBlip()
+end)
+
+-- Thread de streaming por proximidade do Fence NPC:
+-- Previne chamadas cegas a NetworkGetEntityFromNetworkId à distância (>80m) que causavam o warning
+-- "GetNetworkObject: no object by ID 65525", além de reanexar ox_target se a entidade re-streamar.
+CreateThread(function()
+    if (GetConvarInt and GetConvarInt('vp_chopshop_selftest', 0) or 0) == 1 then return end
+    while true do
+        if not FenceNpcNetId or not (Config.Fence and Config.Fence.Locations and Config.Fence.Locations[CurrentLocIdx]) then
+            Wait(2000)
+        else
+            local locCfg = Config.Fence.Locations[CurrentLocIdx]
+            local fCoords = locCfg.coords
+            local pCoords = GetEntityCoords(PlayerPedId())
+            local dist = #(pCoords - vector3(fCoords.x, fCoords.y, fCoords.z))
+
+            if dist > 80.0 then
+                -- Jogador fora de alcance: se a entidade local sumiu do OneSync, limpa a referência antiga
+                if FenceNpcEnt and not DoesEntityExist(FenceNpcEnt) then
+                    FenceNpcEnt = nil
+                end
+                Wait(2000)
+            else
+                -- Jogador dentro de alcance: só resolve o handle se a entidade já existir no OneSync local
+                local existsLocally = not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(FenceNpcNetId)
+                if existsLocally then
+                    local ent = NetworkGetEntityFromNetworkId(FenceNpcNetId)
+                    if ent and ent ~= 0 and DoesEntityExist(ent) then
+                        if FenceNpcEnt ~= ent then
+                            if FenceNpcEnt and DoesEntityExist(FenceNpcEnt) then
+                                pcall(function() exports.ox_target:removeLocalEntity(FenceNpcEnt) end)
+                            end
+                            FenceNpcEnt = ent
+                            applyFenceNpcSettings(ent)
+                            attachFenceNpcTarget(ent)
+                        end
+                        Wait(1000)
+                    else
+                        Wait(300)
+                    end
+                else
+                    Wait(500)
+                end
+            end
+        end
+    end
+end)
+
+-- Inicialização ao carregar o resource no client (para novos jogadores pós-boot)
+CreateThread(function()
+    if (GetConvarInt and GetConvarInt('vp_chopshop_selftest', 0) or 0) == 1 then return end
+    while GetResourceState('ox_lib') ~= 'started' do Wait(200) end
+    local ok, state = pcall(lib.callback.await, 'vp_chopshop:fence:getFenceState', false)
+    if ok and type(state) == 'table' and state.nwid then
+        TriggerEvent('vp_chopshop:client:setupFenceNpc', state)
+    end
 end)
 
 RegisterNetEvent('vp_chopshop:client:fenceRotated', function(label, coords)

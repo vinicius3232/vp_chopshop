@@ -331,7 +331,8 @@ function VPChopChopPartCommit(source, netId, partKey)
     end
 
     -- Resolver placa server-side (trust-no-client)
-    local vehForPlate = NetworkGetEntityFromNetworkId(netId)
+    local vehForPlate = (netId and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(netId)))
+        and NetworkGetEntityFromNetworkId(netId) or 0
     local plate = (vehForPlate and vehForPlate ~= 0 and DoesEntityExist(vehForPlate))
         and GetVehicleNumberPlateText(vehForPlate):gsub('%s+', '')
         or ''
@@ -349,7 +350,8 @@ function VPChopChopPartCommit(source, netId, partKey)
 
     -- [L3 FIX] Filtrar por proximidade (~150u) em vez de broadcast global (-1).
     -- Veículos só fazem stream nesse raio; clientes fora descartariam o evento de qualquer forma.
-    local vehEnt = NetworkGetEntityFromNetworkId(netId)
+    local vehEnt = (netId and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(netId)))
+        and NetworkGetEntityFromNetworkId(netId) or 0
     local vehPos = (vehEnt and vehEnt ~= 0 and DoesEntityExist(vehEnt)) and GetEntityCoords(vehEnt) or nil
     for _, pid in ipairs(GetPlayers()) do
         local pidN = tonumber(pid)

@@ -20,6 +20,7 @@ end
 --- Disparado pelo servidor quando o alarme de um veículo é ativado.
 RegisterNetEvent('vp_chopshop:client:alarmTriggered', function(netId)
     clearAlarm()
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return end
 
@@ -88,6 +89,7 @@ RegisterNetEvent('vp_chopshop:client:alarmExpired', function(netId)
         duration    = 6000,
     })
 
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh and veh ~= 0 and DoesEntityExist(veh) then
         -- Reutiliza a função de dispatch existente em client/main.lua

@@ -46,6 +46,7 @@ end
 -- ─── Helpers ─────────────────────────────────────────────────────────────────
 
 local function getVehCoords(netId)
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return nil end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return nil end
     return GetEntityCoords(veh)
@@ -70,7 +71,8 @@ end
 
 --- [AUDIT-FIX C2] Vestígio forense + arma marca de pneu (Fases 2/3/4). Inalterado.
 local function leaveAdvancedTrace(src, netId, vehCoords)
-    local veh = NetworkGetEntityFromNetworkId(netId)
+    local veh = (netId and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(netId)))
+        and NetworkGetEntityFromNetworkId(netId) or 0
     local realPlate = nil
     if veh and veh ~= 0 and DoesEntityExist(veh) then
         local visible = (GetVehicleNumberPlateText(veh) or ''):gsub('%s+', '')

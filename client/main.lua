@@ -95,8 +95,9 @@ RegisterNetEvent('vp_chopshop:client:ambushWarn', function(kind)
 end)
 
 RegisterNetEvent('vp_chopshop:client:breakPart', function(netId, partKey)
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
-    if veh == 0 or not DoesEntityExist(veh) then return end
+    if not veh or veh == 0 or not DoesEntityExist(veh) then return end
     local def = VPChopPartRegistry.get(partKey)
     if not def or def.gtaIndex == nil then return end
     if def.gtaClass == 'door' then
@@ -1169,9 +1170,11 @@ end
 
 -- Broadcast do servidor: porta/capô/porta-malas removida visualmente + atualiza estado local
 RegisterNetEvent('vp_chopshop:adv:breakDoor', function(netId, partKey, doorIndex)
-    local veh = NetworkGetEntityFromNetworkId(netId)
-    if veh and veh ~= 0 and DoesEntityExist(veh) then
-        SetVehicleDoorBroken(veh, doorIndex, true)
+    if netId and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(netId)) then
+        local veh = NetworkGetEntityFromNetworkId(netId)
+        if veh and veh ~= 0 and DoesEntityExist(veh) then
+            SetVehicleDoorBroken(veh, doorIndex, true)
+        end
     end
     advMarkChopped(netId, partKey)
 end)

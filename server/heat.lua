@@ -14,7 +14,8 @@ local VinScratchCooldown = {} ---@type table<number, number>  src → expiry Get
 -- Escuta PART_CHOPPED e incrementa contador por placa.
 AddEventHandler(VPChopEvt.PART_CHOPPED, function(src, netId, partKey, phase)
     -- Resolver placa a partir do netId para manter rastreio server-side
-    local veh = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
+    local n = tonumber(netId) or 0
+    local veh = (n > 0 and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(n))) and NetworkGetEntityFromNetworkId(n) or 0
     if veh and veh ~= 0 and DoesEntityExist(veh) then
         -- [FASE2 placas] O crime segue a placa REAL: se houver disfarce ativo,
         -- VPChopMDT.GetRealPlate converte a visível (falsa) na real antes de contar.
@@ -108,6 +109,7 @@ end
 ---@param netId integer
 ---@return string label  'frio'|'morno'|'quente'|'queimando'
 function VPChopHeatCheck(src, netId)
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return 'frio' end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return 'frio' end
     -- [FASE2 placas] heat segue a placa REAL mesmo com placa falsa exibida.
@@ -135,7 +137,11 @@ lib.callback.register('vp_chopshop:vinScratch', function(src, netId)
     VinScratchCooldown[src] = now + 3000
 
     -- Validar veículo e proximidade (trust-no-client)
-    local veh = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
+    local n = tonumber(netId) or 0
+    if n <= 0 or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(n)) then
+        return { ok=false, err='vehicle' }
+    end
+    local veh = NetworkGetEntityFromNetworkId(n)
     if not veh or veh == 0 or not DoesEntityExist(veh) then
         return { ok=false, err='vehicle' }
     end
