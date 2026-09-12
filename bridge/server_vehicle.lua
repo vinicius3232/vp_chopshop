@@ -243,3 +243,59 @@ function BridgeDeleteWorldVehicle(vehicle, opts)
     local existsAfter = DoesEntityExist(vehicle) == true
     return { ok = not existsAfter, method = method, existsAfter = existsAfter, retryable = existsAfter }
 end
+
+--- [v1.21 P7.7 VIN Rebirth] Registra um novo veículo civil limpo no framework
+---@param citizenid string
+---@param model string
+---@param plate string
+---@param vin string
+---@param props? table
+---@return boolean ok, string? err, any? vehicleId
+function BridgeRegisterCivilVehicle(citizenid, model, plate, vin, props)
+    if not citizenid or citizenid == '' or not model or model == '' or not plate or plate == '' then
+        return false, 'invalid_civil_registration_params'
+    end
+
+    local fw = detectFramework()
+    local cleanPlate = plate:gsub('%s+', ''):upper()
+    local propsJson = json and json.encode(props or {}) or '{}'
+
+    -- 1. QBox / qbx_vehicles export preferido
+    if fw == 'qbox' and exports and exports['qbx_vehicles'] and type(exports['qbx_vehicles'].AddPlayerVehicle) == 'function' then
+        local ok, res = pcall(function()
+            return exports['qbx_vehicles']:AddPlayerVehicle({
+                citizenid = citizenid,
+                model     = model,
+                plate     = cleanPlate,
+                vin       = vin,
+                props     = props or {},
+            })
+        end)
+        if ok and res then return true, nil, res end
+    end
+
+    -- 2. Fallback SQL parametrizado compatível com QBox e QB-Core
+    if MySQL and MySQL.insert and MySQL.insert.await then
+        local okIns, insertId = pcall(function()
+            return MySQL.insert.await([[
+                INSERT INTO `player_vehicles` (
+                    `license`, `citizenid`, `vehicle`, `hash`, `mods`, `plate`, `vin`, `state`
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            ]], {
+                'license:chopshop_rebirth',
+                citizenid,
+                model,
+                GetHashKey and GetHashKey(model) or 0,
+                propsJson,
+                cleanPlate,
+                vin or cleanPlate,
+            })
+        end)
+        if okIns and insertId and insertId > 0 then
+            return true, nil, insertId
+        end
+    end
+
+    return false, 'civil_registration_failed'
+end
+

@@ -3,9 +3,9 @@
 > Documento vivo. Atualizar a cada PR mergeada. Contexto completo: [`AGENTS.md`](AGENTS.md).
 
 **Atualizado:** 2026-09-12
-**Branch de trabalho:** `feat/v1.20-p6-gangs-network` (base: `docs/post-v118-future-roadmap-prep`)
+**Branch de trabalho:** `feat/v1.21-p7-vehicle-rebuilding` (base: `docs/post-v118-future-roadmap-prep`)
 **`main`:** `v1.14.3`
-**Harness:** `lua tools/run_spec.lua .` → **2311 PASS / 0 FAIL / 2311 asserts**
+**Harness:** `lua tools/run_spec.lua .` → **2375 PASS / 0 FAIL / 2375 asserts**
 
 ---
 
@@ -52,11 +52,18 @@ P5.5       — Recuperação Seletiva de Boot (RestartRecovery)✅ HOMOLOGADO & 
 P5-RC      — Workshop Live Release Gate (10 Invariantes)   ✅ HOMOLOGADO & MERGED (PR #58)
 ─────────────────────────────────────────────────────────────────────────
 FASE 6 (v1.20) Criminal Network & Gangs (vp_gangs):
-P6.1       — Territory Tax / Chop Zones (15% retida cofre) ✅ IMPLEMENTADO
-P6.2       — Economic Bonus (+10%) & Heat Reduction (50%)  ✅ IMPLEMENTADO
-P6.3       — Informant & Multi-Smartphone Alert (lb/qs/etc)✅ IMPLEMENTADO (REQUISITO CANÔNICO)
-P6.4       — Cooperative Gang Contracts & Server Payout    ✅ IMPLEMENTADO & 14 ASSERTS
-P6-RC      — Gangs & Territory Gate (8 Invariantes)        ✅ 19/19 PASS & PR ABERTO
+P6.1       — Territory Tax / Chop Zones (15% retida cofre) ✅ HOMOLOGADO & MERGED (PR #59)
+P6.2       — Economic Bonus (+10%) & Heat Reduction (50%)  ✅ HOMOLOGADO & MERGED (PR #59)
+P6.3       — Informant & Multi-Smartphone Alert (lb/qs/etc)✅ HOMOLOGADO & MERGED (PR #59)
+P6.4       — Cooperative Gang Contracts & Server Payout    ✅ HOMOLOGADO & MERGED (PR #59)
+P6-RC      — Gangs & Territory Gate (8 Invariantes)        ✅ HOMOLOGADO & MERGED (PR #59)
+─────────────────────────────────────────────────────────────────────────
+FASE 7 (v1.21) Parts Lifecycle, Vehicle Compatibility & VIN Rebirth:
+P7.1/P7.2  — Part Compatibility Engine (shared/compatibility.lua) ✅ 11/11 PASS
+P7.3/P7.4  — Processamento & Retífica na Bancada (server/logistics/refurbishment.lua) ✅ 8/8 PASS
+P7.5/P7.6  — Chassi Salvage & Montagem Sequencial (server/assembly/rebuild.lua) ✅ 19/19 PASS
+P7.7       — Renascimento de VIN & Registro Civil (server/assembly/vin_rebirth.lua) ✅ HOMOLOGADO
+P7-RC      — Rebuilding Release Gate (10 Invariantes)     ✅ 26/26 PASS
 ─────────────────────────────────────────────────────────────────────────
 ```
 
@@ -78,3 +85,5 @@ P6-RC      — Gangs & Territory Gate (8 Invariantes)        ✅ 19/19 PASS & PR
 14. **Desmonte com Martelo Pneumático:** Desmanche sonoro e vibratório de carcaça e peças na bancada com ferramenta pesada.
 15. **Adapter QBox Mechanics & SAGA (P5.1/P5.2):** SAGA transacional 2-phase com retenção de escrow em sociedades (`qbx_management` / `ox_inventory`) e entrega em cofres de oficina.
 16. **Catálogo B2B & Terminal de Ordens (P5.3):** Ordens de compra de oficinas integradas ao Broker com pagamento premium e liquidação atômica anti-race condition.
+17. **Matriz de Compatibilidade & Retífica (P7.1–P7.4):** Motores categorizados por famílias mecânicas (`v8_heavy`, `i4_compact`, `v6_suv`) com restrição cruzada de chassi. Retífica física na bancada elevando peças a 98% e estado `refurbished` com consumo de materiais.
+18. **Montagem Sequencial & Renascimento de VIN (P7.5–P7.7):** Projetos de reconstrução sobre chassi salvage com bloqueio anti-dupe de peças acopladas (`installed_vehicle_id`), consumo terminal atômico na homologação e emissão de placa civil e VIN ISO 17 dígitos no framework (`BridgeRegisterCivilVehicle`).

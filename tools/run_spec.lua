@@ -860,6 +860,10 @@ dofile(base .. '/server/broker/gang_contracts.lua')    -- [v1.20 P6.4] provê Ga
 dofile(base .. '/server/tracker.lua')                  -- [v1.18 P4.2] provê TrackerManager
 dofile(base .. '/server/fence.lua')                   -- provê callbacks do Fence (sellItems, fulfillOrder, etc.)
 dofile(base .. '/server/heat.lua')                    -- [v1.18 P4.4.1] provê VPChopIsVinScratched / HeatCheck
+dofile(base .. '/shared/compatibility.lua')           -- [v1.21 P7.2] provê PartCompatibility
+dofile(base .. '/server/logistics/refurbishment.lua') -- [v1.21 P7.3] provê Refurbishment
+dofile(base .. '/server/assembly/vin_rebirth.lua')    -- [v1.21 P7.7] provê VINRebirth
+dofile(base .. '/server/assembly/rebuild.lua')        -- [v1.21 P7.5/P7.6] provê Rebuild
 
 -- Threads criados até aqui são os SWEEPERS dos módulos (loops infinitos com Wait
 -- no-op) — nunca rodar. Só os corpos dos specs, registrados a partir daqui.
@@ -896,6 +900,10 @@ dofile(base .. '/server/evidence_bridge_spec.lua')          -- [v1.18 FORENSICS 
 dofile(base .. '/server/tracker_spec.lua')                  -- [v1.18 P4.2 GPS Tracker]
 dofile(base .. '/server/dispatch_bridge_spec.lua')          -- [v1.18 P4.3 DispatchBridge]
 dofile(base .. '/server/forensic_scanner_spec.lua')          -- [v1.18 P4.4 Forensic Scanner]
+dofile(base .. '/server/assembly/compatibility_spec.lua')      -- [v1.21 P7.2] Part Compatibility Spec
+dofile(base .. '/server/logistics/refurbishment_spec.lua')    -- [v1.21 P7.3] Refurbishment Spec
+dofile(base .. '/server/assembly/rebuild_spec.lua')          -- [v1.21 P7.5/P7.6] Rebuild Engine Spec
+dofile(base .. '/server/assembly/rebuilding_release_gate_spec.lua') -- [v1.21 P7-RC] Rebuilding Release Gate
 
 local anyFail = false
 for i = specStart, #threads do

@@ -18,6 +18,7 @@ shared_scripts {
     '@ox_lib/init.lua',
     'shared/events.lua',
     'shared/config.lua',
+    'shared/compatibility.lua', -- [v1.21 P7.2] Part Compatibility Engine
     'shared/locale.lua',
     -- [P1.1] Part/Tool Registry — fonte da definição de peça. Tool antes de Part.
     'shared/registry/tools.lua',
@@ -191,6 +192,14 @@ server_scripts {
     -- [v1.15 PR-G] executores + contratos da ActionSession p/ o desmanche AVANÇADO.
     -- DEPOIS de server/advanced_chop.lua (usa VPChopAdv{Door,Engine,Carcass}Commit).
     'server/action/advanced_chop.lua',
+    -- [v1.21 P7] Módulos de Ciclo de Vida, Retífica e Reconstrução Veicular
+    'server/logistics/refurbishment.lua',
+    'server/logistics/refurbishment_spec.lua',
+    'server/assembly/vin_rebirth.lua',
+    'server/assembly/rebuild.lua',
+    'server/assembly/compatibility_spec.lua',
+    'server/assembly/rebuild_spec.lua',
+    'server/assembly/rebuilding_release_gate_spec.lua',
 }
 
 -- [P0.2b] stream/ removido por completo. Continha só:
