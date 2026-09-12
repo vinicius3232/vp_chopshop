@@ -211,6 +211,30 @@ function VPChopDbInit()
                     INDEX `idx_b2b_workshop` (`workshop_id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [v1.19 P5.4] Peças Físicas Duráveis & Proveniência V2 (Physical Parts)
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_physical_parts` (
+                    `part_id`              VARCHAR(64)       NOT NULL,
+                    `part_type`            VARCHAR(32)       NOT NULL,
+                    `serial`               VARCHAR(16)       NULL DEFAULT NULL,
+                    `source_vsid`          VARCHAR(64)       NULL DEFAULT NULL,
+                    `source_model`         VARCHAR(32)       NOT NULL,
+                    `vehicle_class`        TINYINT UNSIGNED  NOT NULL DEFAULT 0,
+                    `condition_pct`        DECIMAL(5, 2)     NOT NULL DEFAULT 100.00,
+                    `quality_tier`         TINYINT UNSIGNED  NOT NULL DEFAULT 1,
+                    `legal_state`          VARCHAR(20)       NOT NULL DEFAULT 'stolen',
+                    `owner_key`            VARCHAR(60)       NULL DEFAULT NULL,
+                    `bench_id`             INT UNSIGNED      NULL DEFAULT NULL,
+                    `installed_vehicle_id` INT UNSIGNED      NULL DEFAULT NULL,
+                    `created_at`           TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`           TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`part_id`),
+                    INDEX `idx_part_owner` (`owner_key`),
+                    INDEX `idx_part_serial` (`serial`),
+                    INDEX `idx_part_bench` (`bench_id`),
+                    INDEX `idx_part_legal` (`legal_state`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
             -- Migração idempotente e não-destrutiva para tabelas criadas em rascunhos anteriores
             pcall(function()
                 local cols = MySQL.query.await([[

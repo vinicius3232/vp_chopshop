@@ -123,6 +123,9 @@ server_scripts {
     -- [v1.16 SEC-1] logística física de peças de carro e catalisador: entitlement autoritativo
     'server/logistics/part_entitlement.lua',
     'server/logistics/part_entitlement_spec.lua',  -- self-gated (vp_chopshop_selftest 1)
+    -- [v1.19 P5.4] Peças Físicas Duráveis & Proveniência V2
+    'server/logistics/physical_part.lua',
+    'server/logistics/physical_part_spec.lua',     -- self-gated (vp_chopshop_selftest 1)
     -- [FIX-1.1] transação da bancada (ordem inviolável hammer/entitlement). Antes de
     -- server/main.lua; usa PartEntitlement carregado acima.
     'server/logistics/bench_txn.lua',
@@ -145,6 +148,7 @@ server_scripts {
     'server/broker/workshop_spec.lua',    -- self-gated (vp_chopshop_selftest 1)
     'server/broker/workshop_adapters_spec.lua', -- [v1.19 P5.1/P5.2] self-gated
     'server/broker/b2b_orders_spec.lua',  -- [v1.19 P5.3] self-gated
+    'server/broker/workshop_release_gate_spec.lua', -- [v1.19 P5-RC] Workshop Live Release Gate (self-gated)
     -- [SPIKE PR-I] self-test dos registries (shared/registry/*.lua). Self-gated.
     'shared/registry/registry_spec.lua',
     'server/cooldown.lua',

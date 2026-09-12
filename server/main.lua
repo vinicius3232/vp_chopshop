@@ -522,11 +522,9 @@ AddEventHandler('playerDropped', function()
 end)
 
 -- ─── [FIX-1.3] Ocupação de bancada — 1 peça física por bancada ────────────────
--- In-memory (some no restart do resource — igual ao próprio PartEntitlement; a
--- persistência durável é a Fase 5 / P5.4 do roadmap). Só o dono do entitlement
--- pode retirar/processar (checado via PartEntitlement.Validate, que é keyed por
--- license → sobrevive a relog).
-local _benchParts = {} ---@type table<number, { entitlementId:string, partKey:string, ownerSrc:number }>
+-- [v1.19 P5.4] Persistência durável conectada ao PhysicalPart (sobrevive a restart de servidor)
+-- Mantém cache in-memory _benchParts sincronizado com vp_chop_physical_parts no banco.
+local _benchParts = {} ---@type table<number, { entitlementId:string, partKey:string, ownerSrc:number, stablePartId?:string }>
 
 lib.callback.register('vp_chopshop:bench:placePart', function(source, benchId, entitlementId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
@@ -539,7 +537,25 @@ lib.callback.register('vp_chopshop:bench:placePart', function(source, benchId, e
     if not (PartEntitlement and PartEntitlement.Validate) then return { ok = false, err = 'internal' } end
     local okVal, ent = PartEntitlement.Validate(entitlementId, source)
     if not okVal then return { ok = false, err = ent } end
-    _benchParts[benchId] = { entitlementId = entitlementId, partKey = ent.partKey, ownerSrc = source }
+    local stableId = ent.stablePartIdentity or ('part_' .. entitlementId)
+    _benchParts[benchId] = { entitlementId = entitlementId, partKey = ent.partKey, ownerSrc = source, stablePartId = stableId }
+
+    if PhysicalPart and PhysicalPart.PlaceOnBench then
+        local playerKey = ServerChopPlayerKey(source)
+        if PhysicalPart.Get and not PhysicalPart.Get(stableId) then
+            PhysicalPart.Create({
+                partType     = ent.partKey,
+                sourceModel  = ent.provenance and ent.provenance.model or 'unknown',
+                vehicleClass = ent.provenance and ent.provenance.vehicleClass or 0,
+                ownerKey     = playerKey,
+                benchId      = benchId,
+                legalState   = 'stolen',
+            })
+        else
+            PhysicalPart.PlaceOnBench(stableId, benchId, playerKey)
+        end
+    end
+
     return { ok = true, partKey = ent.partKey }
 end)
 
@@ -554,7 +570,13 @@ lib.callback.register('vp_chopshop:bench:takePart', function(source, benchId)
     if not (PartEntitlement and PartEntitlement.Validate) then return { ok = false, err = 'internal' } end
     local okVal = PartEntitlement.Validate(slot.entitlementId, source)
     if not okVal then return { ok = false, err = 'not_owner' } end
+
     _benchParts[benchId] = nil
+    if PhysicalPart and PhysicalPart.TakeFromBench then
+        local playerKey = ServerChopPlayerKey(source)
+        PhysicalPart.TakeFromBench(benchId, playerKey)
+    end
+
     return { ok = true, partKey = slot.partKey, entitlementId = slot.entitlementId }
 end)
 
@@ -563,7 +585,19 @@ local function benchHoldsPart(benchId, entitlementId)
     local slot = _benchParts[tonumber(benchId) or -1]
     return slot ~= nil and slot.entitlementId == entitlementId
 end
-local function benchPartClear(benchId) _benchParts[tonumber(benchId) or -1] = nil end
+local function benchPartClear(benchId)
+    local bId = tonumber(benchId) or -1
+    local slot = _benchParts[bId]
+    _benchParts[bId] = nil
+    if PhysicalPart and slot then
+        local partId = slot.stablePartId or ('part_' .. slot.entitlementId)
+        if PhysicalPart.Consume then
+            PhysicalPart.Consume(partId, 'teardown_scrapped')
+        elseif PhysicalPart.TakeFromBench then
+            PhysicalPart.TakeFromBench(bId)
+        end
+    end
+end
 
 local function teardownCfg() return (Config.PhysicalCarry or {}).Teardown or {} end
 local function teardownRequired(partKey)
