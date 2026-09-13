@@ -114,7 +114,8 @@ function VPChopGangsOnPartChopped(src, netId, partKey, phase)
     VPChopGangsDispatch(src, VPChopGangsBuildPayload(operationId, partKey, phase))
 
     -- [v1.20 P6.3] Verificação territorial de intrusão rival
-    local veh = NetworkGetEntityFromNetworkId(tonumber(netId) or 0)
+    local n = tonumber(netId) or 0
+    local veh = (n > 0 and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(n))) and NetworkGetEntityFromNetworkId(n) or 0
     local coords = (veh and veh ~= 0 and DoesEntityExist(veh)) and GetEntityCoords(veh)
         or (IsValidSource(src) and GetPlayerPed and GetEntityCoords(GetPlayerPed(src)))
     if coords then

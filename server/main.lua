@@ -331,7 +331,8 @@ function VPChopChopPartCommit(source, netId, partKey)
     end
 
     -- Resolver placa server-side (trust-no-client)
-    local vehForPlate = NetworkGetEntityFromNetworkId(netId)
+    local vehForPlate = (netId and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(netId)))
+        and NetworkGetEntityFromNetworkId(netId) or 0
     local plate = (vehForPlate and vehForPlate ~= 0 and DoesEntityExist(vehForPlate))
         and GetVehicleNumberPlateText(vehForPlate):gsub('%s+', '')
         or ''
@@ -349,7 +350,8 @@ function VPChopChopPartCommit(source, netId, partKey)
 
     -- [L3 FIX] Filtrar por proximidade (~150u) em vez de broadcast global (-1).
     -- Veículos só fazem stream nesse raio; clientes fora descartariam o evento de qualquer forma.
-    local vehEnt = NetworkGetEntityFromNetworkId(netId)
+    local vehEnt = (netId and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(netId)))
+        and NetworkGetEntityFromNetworkId(netId) or 0
     local vehPos = (vehEnt and vehEnt ~= 0 and DoesEntityExist(vehEnt)) and GetEntityCoords(vehEnt) or nil
     for _, pid in ipairs(GetPlayers()) do
         local pidN = tonumber(pid)
@@ -385,7 +387,7 @@ function VPChopChopPartCommit(source, netId, partKey)
     -- Sistema de alarme: rolar chance na primeira peça removida deste veículo.
     local alarmCfg = Config.Alarm
     if alarmCfg and alarmCfg.Enable and not AlarmActive[netId] then
-        local vehForAlarm = NetworkGetEntityFromNetworkId(netId)
+        local vehForAlarm = (NetworkDoesEntityExistWithNetworkId and NetworkDoesEntityExistWithNetworkId(netId)) and NetworkGetEntityFromNetworkId(netId) or nil
         if vehForAlarm and vehForAlarm ~= 0 and DoesEntityExist(vehForAlarm) then
             local class = 0
             if rawget(_G, 'GetVehicleClass') then
@@ -413,7 +415,7 @@ function VPChopChopPartCommit(source, netId, partKey)
                         -- Police dispatch must still fire — find any nearby online player.
                         local dispatchTarget = GetPlayerName(capturedSrc) and capturedSrc
                         if not dispatchTarget then
-                            local vehEnt = NetworkGetEntityFromNetworkId(capturedNetId)
+                            local vehEnt = (NetworkDoesEntityExistWithNetworkId and NetworkDoesEntityExistWithNetworkId(capturedNetId)) and NetworkGetEntityFromNetworkId(capturedNetId) or nil
                             local vehPos = (vehEnt and vehEnt ~= 0 and DoesEntityExist(vehEnt))
                                            and GetEntityCoords(vehEnt) or nil
                             for _, pid in ipairs(GetPlayers()) do
@@ -837,6 +839,7 @@ lib.callback.register('vp_chopshop:catalytic:start', function(source, netId)
     if not ServerPlayerIsReady(source) then return { ok = false, err = 'player' } end
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'vehicle' } end
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return { ok = false, err = 'vehicle' } end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
 
@@ -932,6 +935,7 @@ lib.callback.register('vp_chopshop:catalytic:complete', function(source, netId, 
     _catalyticThefts[source] = nil
 
     netId = tonumber(netId)
+    if not netId or not NetworkDoesEntityExistWithNetworkId(netId) then return { ok = false, err = 'vehicle' } end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
     if not ValidatePlayerNearVehicle(source, veh, 4.0) then return { ok = false, err = 'distance' } end
@@ -1006,7 +1010,7 @@ lib.callback.register('vp_chopshop:discardVehicle', function(source, netId)
     if not netId then return { ok = false, err = 'args' } end
 
     local minParts = math.floor(tonumber((Config.Discard or {}).MinPartsToDiscard) or 4)
-
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return { ok = false, err = 'vehicle' } end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
 

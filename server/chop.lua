@@ -46,6 +46,7 @@ local function tryPartInner(src, netId, partKey)
         return false, 'adv_only', nil
     end
 
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return false, 'vehicle', nil end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh == 0 or not DoesEntityExist(veh) then return false, 'vehicle', nil end
 

@@ -83,6 +83,7 @@ lib.callback.register('vp_chopshop:session:requestRaise', function(src, netId)
     netId = tonumber(netId)
     if not netId then return denyRaise(src, netId, 'net') end
 
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return denyRaise(src, netId, 'vehicle') end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return denyRaise(src, netId, 'vehicle') end
     if not isJackableClass(veh) then return denyRaise(src, netId, 'class') end

@@ -139,7 +139,7 @@ local function rotateFence()
     -- [FIX H-5] Despawn síncrono antes de spawnar: evita race entre as duas threads onde
     -- o spawn pode completar antes do despawn, deixando o NPC antigo como entidade orphan.
     if FenceNpcNetId then
-        local oldEnt = NetworkGetEntityFromNetworkId(FenceNpcNetId)
+        local oldEnt = (NetworkDoesEntityExistWithNetworkId and NetworkDoesEntityExistWithNetworkId(FenceNpcNetId)) and NetworkGetEntityFromNetworkId(FenceNpcNetId) or nil
         if oldEnt and oldEnt ~= 0 and DoesEntityExist(oldEnt) then DeleteEntity(oldEnt) end
         TriggerClientEvent('vp_chopshop:client:removeFenceNpc', -1, FenceNpcNetId)
         FenceNpcNetId = nil
@@ -214,10 +214,20 @@ end)
 
 AddEventHandler('vp_chopshop:server:despawnFenceNpc', function()
     if not FenceNpcNetId then return end
-    local ent = NetworkGetEntityFromNetworkId(FenceNpcNetId)
-    if ent and ent ~= 0 and DoesEntityExist(ent) then DeleteEntity(ent) end
+    if not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(FenceNpcNetId) then
+        local ent = NetworkGetEntityFromNetworkId(FenceNpcNetId)
+        if ent and ent ~= 0 and DoesEntityExist(ent) then DeleteEntity(ent) end
+    end
     TriggerClientEvent('vp_chopshop:client:removeFenceNpc', -1, FenceNpcNetId)
     FenceNpcNetId = nil
+end)
+
+lib.callback.register('vp_chopshop:fence:getFenceState', function(src)
+    if not IsValidSource(src) then return nil end
+    return {
+        nwid = FenceNpcNetId,
+        locationIdx = CurrentLocationIdx,
+    }
 end)
 
 -- Spawn inicial ao carregar
@@ -309,6 +319,9 @@ lib.callback.register('vp_chopshop:tyre:loadToTruck', function(src, netId, entit
     if ent.state ~= 'REMOVED' then return release({ ok = false, err = 'bad_state' }) end
 
     -- Truck: entidade + modelo + proximidade (trust-no-client)
+    if not NetworkDoesEntityExistWithNetworkId(netId) then
+        return release({ ok = false, err = 'no_truck' })
+    end
     local truck = NetworkGetEntityFromNetworkId(netId)
     if not truck or truck == 0 or not DoesEntityExist(truck) then
         return release({ ok = false, err = 'no_truck' })
@@ -802,6 +815,9 @@ lib.callback.register('vp_chopshop:fence:sellTyres', function(src, source_type, 
             return release(res)
         end
 
+        if not NetworkDoesEntityExistWithNetworkId(nid) then
+            return releaseTruck({ ok=false, err='no_truck' })
+        end
         local truck = NetworkGetEntityFromNetworkId(nid)
         if not truck or truck == 0 or not DoesEntityExist(truck) then
             return releaseTruck({ ok=false, err='no_truck' })
@@ -1009,6 +1025,9 @@ lib.callback.register('vp_chopshop:fence:deliverCar', function(src, netId)
     local function release(res) DeliveryBusy[key] = nil; return res end
 
     netId = tonumber(netId) or 0
+    if not NetworkDoesEntityExistWithNetworkId(netId) then
+        return release({ ok=false, err='vehicle' })
+    end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then
         return release({ ok=false, err='vehicle' })

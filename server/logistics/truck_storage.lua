@@ -34,7 +34,11 @@ end
 
 -- Acesso a entidade com seam de teste (mesma ideia da ChopSession).
 local EntityAPI = {
-    get    = function(netId) return NetworkGetEntityFromNetworkId(netId) end,
+    get    = function(netId)
+        if not netId or netId <= 0 then return 0 end
+        if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId) then return 0 end
+        return NetworkGetEntityFromNetworkId(netId)
+    end,
     exists = function(e) return e and e ~= 0 and DoesEntityExist(e) end,
     model  = function(e) return GetEntityModel(e) end,
     tag    = function(e, sid)

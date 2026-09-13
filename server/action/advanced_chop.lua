@@ -43,7 +43,8 @@ local function registryValidate(v)
         if req.state == 'REMOVED' and not VPChopAdvancedState.wasRemoved(v.sessionId, req.part) then
             local missing = false
             if req.part == 'bonnet' and v.netId and v.netId > 0 then
-                local veh = NetworkGetEntityFromNetworkId(v.netId)
+                local exists = not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(v.netId)
+                local veh = exists and NetworkGetEntityFromNetworkId(v.netId) or 0
                 if veh and veh ~= 0 and DoesEntityExist(veh) then
                     if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
                         missing = true
@@ -67,7 +68,8 @@ local function registryValidate(v)
 
     if v.action == 'adv_engine' and v.netId and v.netId > 0 then
         if Config.DamageScaling and Config.DamageScaling.Enable then
-            local veh = NetworkGetEntityFromNetworkId(v.netId)
+            local exists = not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(v.netId)
+            local veh = exists and NetworkGetEntityFromNetworkId(v.netId) or 0
             if veh and veh ~= 0 and DoesEntityExist(veh) and type(GetVehicleEngineHealth) == 'function' then
                 local eHealth = GetVehicleEngineHealth(veh)
                 local minH = tonumber(Config.DamageScaling.MinEngineHealthToChop) or 150.0

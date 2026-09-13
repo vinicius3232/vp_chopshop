@@ -235,6 +235,21 @@ function VPChopDbInit()
                     INDEX `idx_part_legal` (`legal_state`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ]])
+            -- [v1.21 P7.5] Projetos de Reconstrução Veicular & Chassi Salvage
+            MySQL.query.await([[
+                CREATE TABLE IF NOT EXISTS `vp_chop_rebuild_projects` (
+                    `project_id`      INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+                    `owner_key`       VARCHAR(60)       NOT NULL,
+                    `chassis_model`   VARCHAR(32)       NOT NULL,
+                    `chassis_serial`  VARCHAR(32)       NOT NULL,
+                    `status`          VARCHAR(20)       NOT NULL DEFAULT 'in_progress',
+                    `installed_parts` LONGTEXT          NOT NULL,
+                    `created_at`      TIMESTAMP         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `completed_at`    TIMESTAMP         NULL DEFAULT NULL,
+                    PRIMARY KEY (`project_id`),
+                    INDEX `idx_rebuild_owner` (`owner_key`, `status`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ]])
             -- Migração idempotente e não-destrutiva para tabelas criadas em rascunhos anteriores
             pcall(function()
                 local cols = MySQL.query.await([[

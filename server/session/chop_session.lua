@@ -52,7 +52,11 @@ end
 -- (server/session/chop_session_spec.lua) possa injetar veículos falsos sem
 -- OneSync. Em produção são exatamente os natives; nenhuma diferença de custo.
 local EntityAPI = {
-    get    = function(netId) return NetworkGetEntityFromNetworkId(netId) end,
+    get    = function(netId)
+        if not netId or netId <= 0 then return 0 end
+        if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId) then return 0 end
+        return NetworkGetEntityFromNetworkId(netId)
+    end,
     exists = function(ent) return ent and ent ~= 0 and DoesEntityExist(ent) end,
     model  = function(ent) return GetEntityModel(ent) end,
     plate  = function(ent) return (GetVehicleNumberPlateText(ent) or ''):gsub('%s+', '') end,

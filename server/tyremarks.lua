@@ -92,6 +92,7 @@ RegisterNetEvent('vp_chopshop:createTyreMark', function(netId, coords)
 
     -- Validar netId → veículo real.
     if not netId or type(netId) ~= 'number' then return end
+    if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId) then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return end
 

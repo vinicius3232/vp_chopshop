@@ -94,6 +94,9 @@ local function resolveTrackerVehicle(netId)
     if not NetworkGetEntityFromNetworkId or not GetEntityType then
         return nil, 'api_unavailable', canonNetId
     end
+    if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(canonNetId) then
+        return nil, 'entity_not_found', canonNetId
+    end
     local ent = NetworkGetEntityFromNetworkId(canonNetId)
     if not ent or ent == 0 or not DoesEntityExist or not DoesEntityExist(ent) then
         return nil, 'entity_not_found', canonNetId

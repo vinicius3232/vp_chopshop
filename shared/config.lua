@@ -1539,3 +1539,85 @@ Config.Phone = {
     },
 }
 
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.21 FASE 7] Config.PartCompatibility — Matriz de Compatibilidade     ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.PartCompatibility = {
+    Enable = true,
+    EngineFamilies = {
+        ['v8_heavy'] = {
+            label = 'Motor V8 de Alta Cilindrada',
+            models = { 'sultanrs', 'banshee', 'buffalo4', 'dominator', 'coquette', 'gauntlet' },
+            classes = { 4, 7 }, -- 4: Muscle, 7: Super/Sports
+            minChassisStrength = 80.0,
+        },
+        ['i4_compact'] = {
+            label = 'Motor 4 Cilindros em Linha',
+            models = { 'blista', 'panto', 'asbo', 'prairie', 'brioso', 'dilettante', 'rhapsody' },
+            classes = { 0, 1 }, -- 0: Compacts, 1: Sedans
+            minChassisStrength = 40.0,
+        },
+        ['v6_suv'] = {
+            label = 'Motor V6 Utilitário / Tração Integral',
+            models = { 'baller', 'bison', 'granger', 'cavalcade', 'seminole', 'landstalker', 'dubsta' },
+            classes = { 2, 9 }, -- 2: SUVs, 9: Off-road
+            minChassisStrength = 65.0,
+        },
+    },
+}
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.21 P7.3] Config.Refurbishment — Retífica Física na Bancada          ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.Refurbishment = {
+    Enable = true,
+    MinConditionToRepair = 10.0,
+    TargetCondition = 98.0,
+    ToolRequired = 'mechanic_drill',
+    Materials = {
+        adv_engine = {
+            steel = 4,
+            metalscrap = 8,
+            copper = 2,
+        },
+        catalytic_converter = {
+            steel = 2,
+            copper = 4,
+        },
+        door = {
+            steel = 3,
+            metalscrap = 4,
+        },
+        bonnet = {
+            steel = 3,
+            metalscrap = 4,
+        },
+        boot = {
+            steel = 3,
+            metalscrap = 4,
+        },
+    },
+}
+
+-- ╔══════════════════════════════════════════════════════════════════════════╗
+-- ║  [v1.21 P7.5/P7.6] Config.Rebuild — Montagem Sequencial & VIN Rebirth   ║
+-- ╚══════════════════════════════════════════════════════════════════════════╝
+Config.Rebuild = {
+    Enable = true,
+    MinEngineCondition = 70.0,
+    MinComponentCondition = 50.0,
+    RequiredSlots = {
+        'adv_engine',
+        'catalytic_converter',
+        'door_dside_f',
+        'door_pside_f',
+        'bonnet',
+        'boot',
+        'tyre_lf',
+        'tyre_rf',
+        'tyre_lr',
+        'tyre_rr',
+    },
+    VinPrefix = '1G4VP',
+}
+

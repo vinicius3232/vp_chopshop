@@ -59,3 +59,47 @@ function ValidatePlayerNearVehicle(src, vehicleEntity, maxDist)
     local vcoords = GetEntityCoords(vehicleEntity)
     return #(pcoords - vcoords) <= maxDist
 end
+
+-- ─── Resolução e Validação Centralizada de Entidades de Rede (Server Authority) ──
+
+--- Normaliza e valida estritamente um netId
+---@param netId any
+---@return integer|nil
+function VPChopNormalizeNetId(netId)
+    local n = tonumber(netId)
+    if not n or n ~= math.floor(n) or n <= 0 or n ~= n or n == math.huge or n == -math.huge then
+        return nil
+    end
+    return n
+end
+
+--- Retorna a entidade se e somente se o netId for válido, existir na rede e for uma entidade FiveM existente.
+--- Previne 100% de warnings de console [entity] GetNetworkObject: no object by ID.
+---@param netId any
+---@return integer|nil entity
+function VPChopGetEntityFromNetId(netId)
+    local n = VPChopNormalizeNetId(netId)
+    if not n then return nil end
+    if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(n) then
+        return nil
+    end
+    if not NetworkGetEntityFromNetworkId then return nil end
+    local ent = NetworkGetEntityFromNetworkId(n)
+    if not ent or ent == 0 or not DoesEntityExist or not DoesEntityExist(ent) then
+        return nil
+    end
+    return ent
+end
+
+--- Retorna a entidade se e somente se for um veículo válido no servidor.
+---@param netId any
+---@return integer|nil vehEntity
+function VPChopGetVehicleFromNetId(netId)
+    local ent = VPChopGetEntityFromNetId(netId)
+    if not ent then return nil end
+    if GetEntityType and GetEntityType(ent) ~= 2 then
+        return nil
+    end
+    return ent
+end
+

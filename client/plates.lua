@@ -153,6 +153,7 @@ end)
 
 -- ─── Broadcast: apagar a placa visível nos clientes próximos ──────────────────
 RegisterNetEvent('vp_chopshop:client:plateCleared', function(netId)
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return end
     -- Placa em branco — o item físico saiu do carro.
@@ -162,6 +163,7 @@ end)
 -- ─── Dispatch: servidor manda o autor do roubo chamar a polícia ───────────────
 -- Reutiliza o MESMO mecanismo do alarme (VPChopTriggerDispatch, definida em client/main.lua).
 RegisterNetEvent('vp_chopshop:client:plateDispatch', function(netId)
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh and veh ~= 0 and DoesEntityExist(veh) then
         VPChopTriggerDispatch(veh)
@@ -177,6 +179,7 @@ end)
 -- falsa é aplicada (texto = falsa) ou removida/restaurada (texto = real). Apenas troca
 -- o texto exibido — a verdade do crime vive no servidor (mapa falsa→real).
 RegisterNetEvent('vp_chopshop:client:setVisiblePlate', function(netId, text)
+    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return end
     SetVehicleNumberPlateText(veh, tostring(text or ''))
