@@ -42,7 +42,8 @@ function RestartRecovery.SweepCarcasses()
     for _, row in ipairs(rows) do
         local netId = math.floor(tonumber(row.net_id) or 0)
         local model = nm(row.model)
-        local v = netId ~= 0 and NetworkGetEntityFromNetworkId(netId) or 0
+        local exists = netId ~= 0 and (not NetworkDoesEntityExistWithNetworkId or NetworkDoesEntityExistWithNetworkId(netId))
+        local v = exists and NetworkGetEntityFromNetworkId(netId) or 0
         local alive = v ~= 0 and DoesEntityExist(v) and nm(GetEntityModel(v)) == model
 
         if not alive then

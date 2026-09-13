@@ -45,10 +45,18 @@ end
 
 -- ─── Helpers ─────────────────────────────────────────────────────────────────
 
-local function getVehCoords(netId)
-    if not netId or (NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId)) then return nil end
+local function getVehEntity(netId)
+    netId = tonumber(netId)
+    if not netId or netId <= 0 then return nil end
+    if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId) then return nil end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return nil end
+    return veh
+end
+
+local function getVehCoords(netId)
+    local veh = getVehEntity(netId)
+    if not veh then return nil end
     return GetEntityCoords(veh)
 end
 
@@ -124,7 +132,7 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
 
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        local veh = NetworkGetEntityFromNetworkId(netId)
+        local veh = getVehEntity(netId)
         local prov = (PartEntitlement.CaptureVehicleProvenance and PartEntitlement.CaptureVehicleProvenance(veh)) or nil
         peId = PartEntitlement.Issue(sessionId, src, partKey, netId, { origin = 'advanced', provenance = prov })
     end
@@ -142,7 +150,7 @@ function VPChopAdvDoorCommit(src, netId, sessionId, partKey)
     -- [H4 FIX] breakDoor filtrado por proximidade.
     local partDef = VPChopPartRegistry.get(partKey)
     local doorIndex = (partDef and partDef.gtaIndex) or 0
-    local ent = NetworkGetEntityFromNetworkId(netId)
+    local ent = getVehEntity(netId)
     local bpos = (ent and ent ~= 0 and DoesEntityExist(ent)) and GetEntityCoords(ent) or nil
     for _, pid in ipairs(GetPlayers()) do
         local pidN = tonumber(pid)
@@ -162,7 +170,7 @@ end
 function VPChopAdvEngineCommit(src, netId, sessionId)
     local bonnetDone = VPChopAdvancedState.wasRemoved(sessionId, 'bonnet')
     if not bonnetDone and netId and netId > 0 then
-        local veh = NetworkGetEntityFromNetworkId(netId)
+        local veh = getVehEntity(netId)
         if veh and veh ~= 0 and DoesEntityExist(veh) then
             if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
                 bonnetDone = true
@@ -186,7 +194,7 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
     local scrapBonus = 0
 
     if Config.DamageScaling and Config.DamageScaling.Enable and netId and netId > 0 then
-        local veh = NetworkGetEntityFromNetworkId(netId)
+        local veh = getVehEntity(netId)
         if veh and veh ~= 0 and DoesEntityExist(veh) and type(GetVehicleEngineHealth) == 'function' then
             local eHealth = GetVehicleEngineHealth(veh)
             local minH = tonumber(Config.DamageScaling.MinEngineHealthToChop) or 150.0
@@ -214,7 +222,7 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
 
     local peId = nil
     if PartEntitlement and PartEntitlement.Issue then
-        local veh = NetworkGetEntityFromNetworkId(netId)
+        local veh = getVehEntity(netId)
         local prov = (PartEntitlement.CaptureVehicleProvenance and PartEntitlement.CaptureVehicleProvenance(veh)) or nil
         peId = PartEntitlement.Issue(sessionId, src, 'adv_engine', netId, { origin = 'advanced', provenance = prov })
     end
@@ -235,7 +243,7 @@ function VPChopAdvEngineCommit(src, netId, sessionId)
 
     -- [v1.18 P4.4] Inutilização física do veículo pós-remoção do motor (anti-farm & realismo)
     if netId and netId > 0 then
-        local vehEnt = NetworkGetEntityFromNetworkId(netId)
+        local vehEnt = getVehEntity(netId)
         if vehEnt and vehEnt ~= 0 and DoesEntityExist(vehEnt) then
             if Entity then
                 Entity(vehEnt).state:set('vpChopEngineMissing', true, true)
@@ -259,7 +267,7 @@ function VPChopAdvCarcassCommit(src, netId, sessionId)
     if VPChopAdvancedState.wasRemoved(sessionId, 'adv_carcass') then return { ok = false, err = 'done' } end
     if not VPChopWelderNearVehicle(netId) then return { ok = false, err = 'no_welder_adv' } end
 
-    local veh = NetworkGetEntityFromNetworkId(netId)
+    local veh = getVehEntity(netId)
     local model = (veh and veh ~= 0 and DoesEntityExist(veh)) and GetEntityModel(veh) or 0
 
     -- [v1.16 SEC-1.1] Barreira persistente anti-rechop / double-carcass
@@ -385,7 +393,7 @@ lib.callback.register('vp_chopshop:adv:chopEngine', function(source, netId)
     sessionId = resolveSession(sessionId, netId, src)
     local bonnetDone = VPChopAdvancedState.wasRemoved(sessionId, 'bonnet')
     if not bonnetDone and netId and netId > 0 then
-        local veh = NetworkGetEntityFromNetworkId(netId)
+        local veh = getVehEntity(netId)
         if veh and veh ~= 0 and DoesEntityExist(veh) then
             if type(GetVehicleDoorStatus) == 'function' and (GetVehicleDoorStatus(veh, 4) == 2 or GetVehicleDoorStatus(veh, 4) == 1) then
                 bonnetDone = true

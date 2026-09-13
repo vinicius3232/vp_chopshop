@@ -232,6 +232,37 @@ function NetworkDoesEntityExistWithNetworkId(netId)
     local ent = NetworkGetEntityFromNetworkId(netId)
     return ent ~= 0 and ent ~= nil
 end
+
+function VPChopNormalizeNetId(netId)
+    local n = tonumber(netId)
+    if not n or n ~= math.floor(n) or n <= 0 or n ~= n or n == math.huge or n == -math.huge then
+        return nil
+    end
+    return n
+end
+
+function VPChopGetEntityFromNetId(netId)
+    local n = VPChopNormalizeNetId(netId)
+    if not n then return nil end
+    if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(n) then
+        return nil
+    end
+    if not NetworkGetEntityFromNetworkId then return nil end
+    local ent = NetworkGetEntityFromNetworkId(n)
+    if not ent or ent == 0 or not DoesEntityExist or not DoesEntityExist(ent) then
+        return nil
+    end
+    return ent
+end
+
+function VPChopGetVehicleFromNetId(netId)
+    local ent = VPChopGetEntityFromNetId(netId)
+    if not ent then return nil end
+    if GetEntityType and GetEntityType(ent) ~= 2 then
+        return nil
+    end
+    return ent
+end
 function NetworkGetNetworkIdFromEntity(h)
     if not h or h == 0 then return 0 end
     if h >= 90000 then return h - 90000 end

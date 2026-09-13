@@ -79,7 +79,7 @@ local function getVehicleSerial(netId)
     if cached then return cached end
 
     local sourceModel = 'CARMODEL'
-    local veh = NetworkGetEntityFromNetworkId(netId)
+    local veh = (NetworkDoesEntityExistWithNetworkId and NetworkDoesEntityExistWithNetworkId(netId)) and NetworkGetEntityFromNetworkId(netId) or nil
     if veh and veh ~= 0 and DoesEntityExist(veh) then
         local modelHash = GetEntityModel(veh)
         if modelHash and modelHash ~= 0 then
@@ -102,7 +102,7 @@ local function peekVehicleSerial(netId)
     if cached then return cached end
 
     local sourceModel = nil
-    local veh = NetworkGetEntityFromNetworkId(netId)
+    local veh = (NetworkDoesEntityExistWithNetworkId and NetworkDoesEntityExistWithNetworkId(netId)) and NetworkGetEntityFromNetworkId(netId) or nil
     if veh and veh ~= 0 and DoesEntityExist(veh) then
         local modelHash = GetEntityModel(veh)
         if modelHash and modelHash ~= 0 then
@@ -632,6 +632,7 @@ lib.callback.register('vp_chopshop:inspectVehicle', function(src, netId)
         return { ok = false, err = 'invalid_net' }
     end
 
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return { ok = false, err = 'vehicle' } end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
     if GetEntityType and GetEntityType(veh) ~= 2 then return { ok = false, err = 'not_a_vehicle' } end

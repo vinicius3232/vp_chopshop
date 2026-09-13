@@ -56,6 +56,9 @@ end
 ---@return { done:boolean|nil, aborted:boolean|nil, retryable:boolean|nil, method:string|nil, reason:string|nil }
 function VPChopDeliverCar.tryDeleteCleanupOnce(tomb, netId, mark, expectedFw)
     if not tomb then return { aborted = true, reason = 'no_tombstone' } end
+    if NetworkDoesEntityExistWithNetworkId and not NetworkDoesEntityExistWithNetworkId(netId) then
+        return { done = true, reason = 'gone' }
+    end
     local v = NetworkGetEntityFromNetworkId(netId)
     if not v or v == 0 or not DoesEntityExist(v) then return { done = true, reason = 'gone' } end
     local rok, cur = VPChopDeliverCar.readMark(v)

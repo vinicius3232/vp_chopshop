@@ -90,7 +90,7 @@ end
 ---@return integer|nil ped
 local function ambushSpawnOne(src, netId, cfg)
     netId = tonumber(netId)
-    if not netId then return nil, nil end
+    if not netId or not NetworkDoesEntityExistWithNetworkId(netId) then return nil, nil end
 
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh == 0 or not DoesEntityExist(veh) then return nil, nil end
@@ -229,7 +229,7 @@ function VPChopAmbushMaybe(src, netId, plate)
     end
 
     netId = tonumber(netId)
-    if not netId then return end
+    if not netId or not NetworkDoesEntityExistWithNetworkId(netId) then return end
 
     local veh = NetworkGetEntityFromNetworkId(netId)
     if veh == 0 or not DoesEntityExist(veh) then return end

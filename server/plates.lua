@@ -166,6 +166,9 @@ lib.callback.register('vp_chopshop:stealPlate', function(src, netId, witnessScor
     if PlateStolen[netId] then return { ok = false, err = 'done' } end
 
     -- Resolver veículo a partir do netId
+    if not NetworkDoesEntityExistWithNetworkId(netId) then
+        return { ok = false, err = 'vehicle' }
+    end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then
         return { ok = false, err = 'vehicle' }
@@ -426,6 +429,7 @@ lib.callback.register('vp_chopshop:applyFakePlate', function(src, netId, sourceP
     -- Resolver veículo (netId vem do client; revalidamos tudo)
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'net' } end
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return { ok = false, err = 'vehicle' } end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
 
@@ -540,6 +544,7 @@ lib.callback.register('vp_chopshop:removeFakePlate', function(src, netId)
 
     netId = tonumber(netId)
     if not netId or netId <= 0 then return { ok = false, err = 'net' } end
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return { ok = false, err = 'vehicle' } end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return { ok = false, err = 'vehicle' } end
 
@@ -573,6 +578,7 @@ lib.callback.register('vp_chopshop:isFakePlated', function(src, netId)
     if not IsValidSource(src) then return false end
     netId = tonumber(netId)
     if not netId or netId <= 0 then return false end
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return false end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return false end
     local visible = (GetVehicleNumberPlateText(veh) or ''):gsub('%s+', '')  -- [AUDIT-FIX M2] guard de nil
@@ -587,6 +593,7 @@ lib.callback.register('vp_chopshop:getVisibleFakePlate', function(src, netId)
     if not IsValidSource(src) then return nil end
     netId = tonumber(netId)
     if not netId or netId <= 0 then return nil end
+    if not NetworkDoesEntityExistWithNetworkId(netId) then return nil end
     local veh = NetworkGetEntityFromNetworkId(netId)
     if not veh or veh == 0 or not DoesEntityExist(veh) then return nil end
     local realPlate = nil
